@@ -92,13 +92,23 @@
 
 
 /* Badge */
-.tag-all { background: rgba(59,130,246,0.15); color: var(--admin-btn-secondary-text); padding: 2px 6px; border-radius: 0px; font-size: 0.65rem; font-weight: 700; border: 1px solid rgba(59,130,246,0.3); text-transform: uppercase; }
-.tag-audit { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
-.tag-login { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
-.tag-notify { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+.tag-all {
+  background: rgba(59,130,246,0.15); color: var(--admin-btn-secondary-text);
+  padding: 2px 7px; border-radius: 0px; font-size: 0.63rem; font-weight: 700;
+  border: 1px solid rgba(59,130,246,0.3); text-transform: uppercase;
+  white-space: nowrap; display: inline-block; letter-spacing: 0.04em;
+}
+.tag-audit   { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+.tag-login   { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+.tag-notify  { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
 .tag-trigger { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
 
 .audit-detail-row { background: var(--admin-bg, #0b0f19) !important; }
+.audit-log-container .data-table tbody tr:hover { background: transparent !important; }
+.audit-log-container .data-table tbody tr:hover td { background: transparent !important; }
+.audit-detail-row:hover td { background: transparent !important; }
+.detail-changes-table tbody tr:hover { background: transparent !important; }
+.detail-changes-table tr:hover td { background: transparent !important; }
 .log-diff-box {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px;
   background: var(--admin-card-bg, var(--admin-panel)); border-radius: 0px; border: 1px solid var(--admin-border, var(--admin-border-light));
@@ -114,13 +124,14 @@
 .hidden { display: none; }
 
 /* Column fixed widths */
-.col-time { width: 140px; }
-.col-type { width: 90px; }
-.col-station { width: 120px; }
-.col-action { width: 120px; }
-.col-who { width: 160px; }
-.col-ip { width: 110px; }
-.col-view { width: 60px; }
+.col-time    { width: 110px; white-space: nowrap; }
+.col-type    { width: 100px; white-space: nowrap; }
+.col-station { width: 130px; }
+.col-action  { width: 130px; white-space: nowrap; }
+.col-event   { min-width: 200px; max-width: 340px; }
+.col-who     { width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.col-ip      { width: 120px; white-space: nowrap; }
+.col-view    { width: 54px; }
 
 @media (max-width: 900px) {
   .audit-page-controls {

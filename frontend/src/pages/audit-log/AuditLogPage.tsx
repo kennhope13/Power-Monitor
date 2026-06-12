@@ -64,9 +64,25 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
       alert: 'Cảnh báo',
       user: 'Người dùng',
       settings: 'Cấu hình',
-      maintenance: 'Bảo trì'
+      maintenance: 'Bảo trì',
+      measurement: 'Điểm đo',
+      station: 'Trạm',
+      boundary: 'Vùng giám sát',
+      sensor: 'Cảm biến',
     };
     return type ? (map[type] ?? type) : '—';
+  };
+
+  const actionLabel = (action: string): string => {
+    const map: Record<string, string> = {
+      create: 'Tạo mới',
+      update: 'Cập nhật',
+      delete: 'Xóa',
+      login:  'Đăng nhập',
+      logout: 'Đăng xuất',
+      failed: 'Thất bại',
+    };
+    return map[action?.toLowerCase()] ?? action;
   };
 
   const getStationLabel = (stationName?: string | null) => stationName || 'Trung tâm đa trạm';
@@ -265,7 +281,35 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
         }
       }
       if (Array.isArray(v)) {
-        return v.join(', ');
+        if (v.length === 0) return '(trống)';
+        const hasObjects = v.some(item => typeof item === 'object' && item !== null);
+        if (!hasObjects) return v.join(', ');
+        return (
+          <pre style={{
+            margin: 0, fontSize: '0.68rem',
+            color: 'var(--admin-text-muted)',
+            maxHeight: 100, overflow: 'auto',
+            background: 'var(--admin-layer-1)',
+            padding: '4px 8px', borderRadius: 3,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+          }}>
+            {JSON.stringify(v, null, 2)}
+          </pre>
+        );
+      }
+      if (typeof v === 'object' && v !== null) {
+        return (
+          <pre style={{
+            margin: 0, fontSize: '0.68rem',
+            color: 'var(--admin-text-muted)',
+            maxHeight: 100, overflow: 'auto',
+            background: 'var(--admin-layer-1)',
+            padding: '4px 8px', borderRadius: 3,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+          }}>
+            {JSON.stringify(v, null, 2)}
+          </pre>
+        );
       }
       return String(v);
     };
@@ -283,7 +327,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           </thead>
           <tbody>
             {Object.entries(newVal).map(([k, v]) => {
-              if (v === null || v === undefined || (typeof v === 'object' && !Array.isArray(v))) return null;
+              if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
                   <td className="detail-key">{translateKey(k)}</td>
@@ -309,7 +353,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           </thead>
           <tbody>
             {Object.entries(oldVal).map(([k, v]) => {
-              if (v === null || v === undefined || (typeof v === 'object' && !Array.isArray(v))) return null;
+              if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
                   <td className="detail-key">{translateKey(k)}</td>
@@ -436,7 +480,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           <th className="col-time">Thời gian</th>
           <th className="col-type">Loại</th>
           {isCentralMode && <th className="col-station">Trạm</th>}
-          <th>Hành động / Sự kiện</th>
+          <th className="col-event">Hành động / Sự kiện</th>
           <th className="col-who">Đối tượng</th>
           <th className="col-view">Xem</th>
         </tr>
@@ -448,7 +492,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           <th className="col-time">Thời gian</th>
           <th className="col-action">Hành động</th>
           {isCentralMode && <th className="col-station">Trạm</th>}
-          <th>Đối tượng tác động</th>
+          <th className="col-event">Đối tượng tác động</th>
           <th className="col-who">Người thực hiện</th>
           <th className="col-view">Xem</th>
         </tr>
@@ -494,15 +538,17 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             {fmtDateTime(m.ts)}
           </td>
           <td className="col-type">
-            <span className={`tag-all tag-${m.type}`}>{m.type.toUpperCase()}</span>
+            <span className={`tag-all tag-${m.type}`} title={m.type === 'audit' ? 'Hành động hệ thống' : 'Đăng nhập'}>
+              {m.type === 'audit' ? 'THAO TÁC' : m.type === 'login' ? 'ĐĂNG NHẬP' : m.type.toUpperCase()}
+            </span>
           </td>
           {isCentralMode && (
             <td className="col-station" style={{ color: 'var(--admin-text-muted)', fontWeight: 500 }}>
               {getStationLabel(m.stationName)}
             </td>
           )}
-          <td style={{ fontWeight: 600 }}>
-            {m.info} <small style={{ color: 'var(--admin-text-muted)', fontWeight: 'normal' }}>({m.action})</small>
+          <td className="col-event" style={{ fontWeight: 600 }}>
+            {m.info} <small style={{ color: 'var(--admin-text-muted)', fontWeight: 'normal' }}>({actionLabel(m.action)})</small>
           </td>
           <td className="col-who">{m.who || 'system'}</td>
           <td className="col-view" style={{ textAlign: 'center' }}>
@@ -534,14 +580,14 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             {fmtDateTime(l.ts)}
           </td>
           <td className="col-action">
-            <b>{l.action.toUpperCase()}</b>
+            <b>{actionLabel(l.action)}</b>
           </td>
           {isCentralMode && (
             <td className="col-station" style={{ color: 'var(--admin-text-muted)', fontWeight: 500 }}>
               {getStationLabel(l.stationName)}
             </td>
           )}
-          <td>
+          <td className="col-event">
             {entityLabel(l.entityType)}{' '}
             <small style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem' }}>{l.entityId?.slice(0, 8) || ''}</small>
           </td>

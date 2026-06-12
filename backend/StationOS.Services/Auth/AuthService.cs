@@ -153,7 +153,7 @@ public class AuthService
             _db.Users.Add(admin);
         }
         admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123", workFactor: 12);
-        admin.FullName = "Quản trị viên Trạm con";
+        admin.FullName = "Quản trị viên";
         admin.Email = "admin@StationOS.vn";
         admin.IsActive = true;
         admin.MustChangePassword = false;

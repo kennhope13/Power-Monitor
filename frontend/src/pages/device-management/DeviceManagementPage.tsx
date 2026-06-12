@@ -540,7 +540,7 @@ export default function DeviceManagementPage({
         <div className="page-toolbar-row">
           <div className="page-title-cell">
             <button
-              className="btn-industrial btn-sm"
+              className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedRoiDevice(null); }}
             >
               ← QUAY LẠI
@@ -554,7 +554,7 @@ export default function DeviceManagementPage({
         <div className="page-toolbar-row">
           <div className="page-title-cell">
             <button
-              className="btn-industrial btn-sm"
+              className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedFireDevice(null); }}
             >
               ← QUAY LẠI
@@ -568,7 +568,7 @@ export default function DeviceManagementPage({
         <div className="page-toolbar-row">
           <div className="page-title-cell">
             <button
-              className="btn-industrial btn-sm"
+              className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedPdDevice(null); }}
             >
               ← QUAY LẠI

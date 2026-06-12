@@ -200,7 +200,7 @@ export default function CameraGrid({ sensors, alertsCount, rules = [], camOption
                       position: 'fixed',
                       top: menuPos.top,
                       left: menuPos.left,
-                      background: 'var(--admin-panel)',
+                      background: 'var(--admin-panel, #24272a)',
                       border: '1px solid var(--admin-border)',
                       borderRadius: 0,
                       boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',

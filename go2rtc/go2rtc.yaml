@@ -14,13 +14,15 @@ webrtc:
 rtsp:
   listen: ":8554"
 
+# FFmpeg transcoding H265→H264 cho WebRTC (go2rtc image tự tìm ffmpeg trong PATH)
+
 log:
   level: info
 streams:
   cam_192_168_10_152_optical:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101
   cam_192_168_10_152_thermal:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/2
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/2#video=h264
   cam_192_168_10_152_optical_sub:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102
   camera_192_168_10_153_pd:
@@ -30,13 +32,13 @@ streams:
   cam_192_168_10_120_optical:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/101
   cam_192_168_10_120_thermal:
-    - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201#video=h264
   cam_192_168_10_120_optical_sub:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/102
   cam_hanoi_optical:
     - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/101
   cam_hanoi_thermal:
-    - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/201
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/201#video=h264
   cam_hanoi_optical_sub:
     - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/102
   cam_danang_pd:
@@ -48,9 +50,9 @@ streams:
   camera_152_normal_sub:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102
   camera_152_thermal:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/2
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#video=h264
   camera_152_thermal_sub:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/202
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/202#video=h264
   camera_153_pd:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
   camera_153_pd_sub:

@@ -150,7 +150,7 @@ public static class DbInitializer
                 Name = "HIKVISION – Dual Thermal & Optical",
                 Type = "camera_dual",
                 Protocol = "isapi",
-                Config = """{"ip":"192.168.10.152","username":"admin","password":"Demo@2024","rtsp_optical":"/Streaming/Channels/101","go2rtc_optical":"cam_192_168_10_152_optical","rtsp_thermal":"/Streaming/Channels/201","go2rtc_thermal":"cam_192_168_10_152_thermal"}""",
+                Config = """{"ip":"192.168.10.152","username":"admin","password":"Demo@2024","rtsp_optical":"/Streaming/Channels/101","go2rtc_optical":"cam_192_168_10_152_optical","rtsp_thermal":"/Streaming/Channels/201","go2rtc_thermal":"cam_192_168_10_152_thermal","ffmpeg_transcode":true}""",
                 Status = "online"
             };
             var camPd = new StationOS.Data.Entities.Device
