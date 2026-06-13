@@ -30,7 +30,7 @@ export const alertStatusLabel = (s: string): string => {
   switch (s) {
     case ALERT_STATUS.OPEN:   return 'Chưa xử lý';
     case ALERT_STATUS.ACKED:  return 'Đang xử lý';
-    case ALERT_STATUS.CLOSED: return 'Đã đóng';
+    case ALERT_STATUS.CLOSED: return 'Đã xử lý';
     default: return s;
   }
 };

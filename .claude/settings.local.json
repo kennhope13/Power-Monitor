@@ -15,7 +15,10 @@
       "Bash(curl -s http://localhost:5000/api/v1/devices/c0c5eadf-81d5-4936-b211-dcb62bdbd45f/roi-points)",
       "Bash(curl -s -X POST http://localhost:5000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"Admin@123\"}')",
       "Bash(dotnet ef *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(DISPLAY=:1 /home/admin-/Desktop/Power-Monitor/frontend/dist-electron/linux-unpacked/electron --no-sandbox /home/admin-/Desktop/Power-Monitor/frontend/dist-electron/linux-unpacked/resources/app.asar)",
+      "Bash(kill %1)",
+      "Bash(wait)"
     ]
   }
 }

@@ -4,9 +4,31 @@ const path  = require('path');
 const fs    = require('fs');
 const os    = require('os');
 const http  = require('http');
+const https = require('https');
 
-const TARGET_URL = 'http://localhost:5173';
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-setuid-sandbox');
+
+// ── File logger ──────────────────────────────
+const LOG_FILE = path.join(os.homedir(), 'Desktop', 'station-monitor.log');
+const _logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  process.stdout.write(line);
+  _logStream.write(line);
+}
+process.on('uncaughtException', (err) => log('[CRASH]', err.stack || err));
+process.on('unhandledRejection', (err) => log('[REJECT]', err?.stack || err));
+
 let mainWindow   = null;
+let localUiServer = null;
+let localUiPort = null;
+
+function getTargetUrl() {
+  return app.isPackaged
+    ? `http://127.0.0.1:${localUiPort ?? 4173}`
+    : 'http://localhost:5173';
+}
 
 // ─────────────────────────────────────────────
 // Tìm thư mục gốc của project (có start-all.sh)
@@ -29,7 +51,7 @@ function findProjectRoot() {
 
   // 3. Fallback cứng
   candidates.push(
-    path.join(os.homedir(), 'Desktop', 'App-Station-Monitor')
+    path.join(os.homedir(), 'Desktop', 'Power-Monitor')
   );
 
   for (const c of candidates) {
@@ -45,11 +67,20 @@ function findProjectRoot() {
 // ─────────────────────────────────────────────
 function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
-  const proc = spawn('bash', ['start-all.sh'], {
-    cwd:    root,
-    detached: true,
-    stdio:  'ignore',
-  });
+  const env = { ...process.env, STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0' };
+  const proc = process.platform === 'win32'
+    ? spawn('cmd.exe', ['/c', 'start-all.bat'], {
+        cwd: root,
+        env,
+        detached: true,
+        stdio: 'ignore',
+      })
+    : spawn('bash', ['start-all.sh'], {
+        cwd: root,
+        env,
+        detached: true,
+        stdio: 'ignore',
+      });
   proc.unref();
 }
 
@@ -57,8 +88,10 @@ function startAllServices(root) {
 // Poll cho đến khi localhost:5173 sẵn sàng
 // ─────────────────────────────────────────────
 function waitForServer(onReady) {
+  const targetUrl = getTargetUrl();
   const check = () => {
-    const req = http.get(TARGET_URL, (res) => {
+    const client = targetUrl.startsWith('https://') ? https : http;
+    const req = client.get(targetUrl, (res) => {
       res.destroy();
       onReady();
     });
@@ -66,6 +99,95 @@ function waitForServer(onReady) {
     req.setTimeout(1500, () => { req.destroy(); setTimeout(check, 1500); });
   };
   check();
+}
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.html': return 'text/html; charset=utf-8';
+    case '.js': return 'application/javascript; charset=utf-8';
+    case '.css': return 'text/css; charset=utf-8';
+    case '.json': return 'application/json; charset=utf-8';
+    case '.svg': return 'image/svg+xml';
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.ico': return 'image/x-icon';
+    case '.woff2': return 'font/woff2';
+    default: return 'application/octet-stream';
+  }
+}
+
+function pipeProxy(req, res, targetBase) {
+  const url = new URL(req.url, targetBase);
+  const client = url.protocol === 'https:' ? https : http;
+  const proxyReq = client.request(url, {
+    method: req.method,
+    headers: req.headers,
+  }, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on('error', (err) => {
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(`Proxy error: ${err.message}`);
+  });
+  req.pipe(proxyReq);
+}
+
+function startLocalUiServer() {
+  if (localUiServer) return Promise.resolve(localUiPort);
+
+  const distDir = path.join(app.getAppPath(), 'dist');
+  if (!fs.existsSync(distDir)) {
+    throw new Error(`Không tìm thấy frontend dist tại ${distDir}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const reqUrl = req.url || '/';
+
+      if (reqUrl.startsWith('/api/') || reqUrl.startsWith('/media/') || reqUrl.startsWith('/ws/')) {
+        pipeProxy(req, res, 'http://127.0.0.1:5000');
+        return;
+      }
+      if (reqUrl === '/ai-api' || reqUrl.startsWith('/ai-api/')) {
+        pipeProxy(req, res, 'http://127.0.0.1:8100');
+        return;
+      }
+
+      const safePath = decodeURIComponent(reqUrl.split('?')[0] || '/');
+      const requested = safePath === '/' ? 'index.html' : safePath.replace(/^\/+/, '');
+      let filePath = path.join(distDir, requested);
+
+      if (!filePath.startsWith(distDir)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Forbidden');
+        return;
+      }
+
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(distDir, 'index.html');
+      }
+
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('Not found');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': getMimeType(filePath), 'Cache-Control': 'no-cache' });
+        res.end(data);
+      });
+    });
+
+    server.on('error', reject);
+    server.listen(4173, '127.0.0.1', () => {
+      localUiServer = server;
+      localUiPort = 4173;
+      resolve(localUiPort);
+    });
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -152,38 +274,82 @@ async function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
+
+  log('createWindow() bắt đầu, isPackaged:', app.isPackaged);
+  log('appPath:', app.getAppPath());
 
   mainWindow.maximize();
   mainWindow.focus();
 
-  // Hiện loading ngay
-  await mainWindow.loadURL(loadingHTML('Đang khởi động các dịch vụ...'));
+  // loading.html được unpack ra ngoài asar → dùng real filesystem path
+  const asarDir = app.getAppPath();
+  const unpackedDir = asarDir.replace('app.asar', 'app.asar.unpacked');
+  const loadingPath = path.join(unpackedDir, 'electron', 'loading.html');
+  log('loadingPath:', loadingPath, 'exists:', fs.existsSync(loadingPath));
+  try {
+    if (fs.existsSync(loadingPath)) {
+      await mainWindow.loadFile(loadingPath);
+      log('loadFile loading.html OK');
+    } else {
+      await mainWindow.loadURL(loadingHTML('Đang khởi động...'));
+      log('loadURL data: OK (fallback)');
+    }
+  } catch (err) {
+    log('LOAD LOADING ERROR:', err.message);
+  }
 
   const root = findProjectRoot();
+  log('findProjectRoot:', root);
   if (!root) {
-    await mainWindow.loadURL(
-      errorHTML('Không tìm thấy thư mục cài đặt App-Station-Monitor. Vui lòng liên hệ quản trị viên.')
-    );
+    await mainWindow.loadURL(errorHTML('Không tìm thấy thư mục dự án Power-Monitor.'));
     return;
   }
 
   // Khởi động services
   startAllServices(root);
 
-  // Cập nhật message sau 2s
-  setTimeout(() => {
-    if (mainWindow) {
-      mainWindow.loadURL(loadingHTML('Đang chờ dịch vụ sẵn sàng...')).catch(() => {});
+  if (app.isPackaged) {
+    log('isPackaged → startLocalUiServer...');
+    const distDir = path.join(app.getAppPath(), 'dist');
+    log('distDir:', distDir, 'exists:', fs.existsSync(distDir));
+    try {
+      await startLocalUiServer();
+      log('localUiServer OK port:', localUiPort);
+    } catch (err) {
+      log('startLocalUiServer ERROR:', err.message);
+      await mainWindow.loadURL(errorHTML(`Không thể khởi động giao diện: ${err.message}`));
+      return;
     }
-  }, 2000);
+  }
+
+  const targetUrl = getTargetUrl();
+  log('targetUrl:', targetUrl, '→ polling...');
 
   // Đợi server lên rồi mở dashboard
   waitForServer(() => {
-    if (mainWindow) {
-      mainWindow.loadURL(TARGET_URL).catch(console.error);
-    }
+    log('server ready → loadURL', targetUrl);
+    if (!mainWindow) return;
+    mainWindow.loadURL(targetUrl)
+      .then(() => log('loadURL success'))
+      .catch(err => log('loadURL ERROR:', err.message));
+  });
+
+  // Bắt did-fail-load
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    log('did-fail-load:', code, desc, url);
+  });
+
+  // Bắt renderer crash
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    log('Renderer gone:', details.reason, details.exitCode);
+  });
+
+  // F12 mở/đóng DevTools
+  mainWindow.webContents.on('before-input-event', (_e, input) => {
+    if (input.key === 'F12') mainWindow.webContents.toggleDevTools();
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -200,5 +366,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (localUiServer) {
+    try { localUiServer.close(); } catch {}
+    localUiServer = null;
+  }
   if (process.platform !== 'darwin') app.quit();
 });

@@ -84,7 +84,7 @@ export default function AlertDetailPage() {
 
     try {
       await stationApi.closeAlert(alert.id);
-      showToast('Đã đóng cảnh báo', 'success');
+      showToast('Đã xử lý cảnh báo', 'success');
       loadAlertDetail();
     } catch (e: any) {
       showToast(`Lỗi đóng cảnh báo: ${e.message || e}`, 'error');
@@ -117,7 +117,7 @@ export default function AlertDetailPage() {
   const statusLabel: Record<string, string> = {
     open: 'Chưa xử lý',
     acked: '🟡 Đang xử lý',
-    closed: '🟢 Đã đóng',
+    closed: '🟢 Đã xử lý',
   };
   const sourceLabel: Record<string, string> = {
     rule_engine: 'Quy tắc tự động',

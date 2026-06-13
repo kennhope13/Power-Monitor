@@ -47,6 +47,67 @@ const getAlertSummary = (msg: string) => {
   return clean;
 };
 
+type ParsedAlertDisplay = {
+  eyebrow?: string;
+  headline: string;
+  detail?: string;
+  tone?: 'alarm' | 'warning' | 'info';
+};
+
+const isMaintenanceAlert = (msg: string) => /^\[MT:.*?\]/i.test(msg || '');
+
+const parseAlertDisplay = (msg: string): ParsedAlertDisplay => {
+  if (!msg) {
+    return { headline: '' };
+  }
+
+  const match = msg.match(/^\[(.*?)\]\s*(.*)$/);
+  const tag = match?.[1];
+  const body = match?.[2] || msg;
+  const cleanBody = getAlertSummary(body);
+
+  if (tag?.startsWith('MT:')) {
+    const overdue = body.match(/^Bảo trì quá hạn\s+(\d+)\s+ngày:\s*(.*)$/i);
+    if (overdue) {
+      return {
+        eyebrow: `QUÁ HẠN ${overdue[1]} NGÀY`,
+        headline: overdue[2] || 'Hạng mục bảo trì',
+        detail: 'Cần kiểm tra và xử lý ngay',
+        tone: 'alarm',
+      };
+    }
+
+    const dueToday = body.match(/^Hôm nay phải bảo trì:\s*(.*)$/i);
+    if (dueToday) {
+      return {
+        eyebrow: 'ĐẾN HẠN HÔM NAY',
+        headline: dueToday[1] || 'Hạng mục bảo trì',
+        detail: 'Nhắc lịch bảo trì định kỳ',
+        tone: 'warning',
+      };
+    }
+
+    return {
+      eyebrow: 'BẢO TRÌ',
+      headline: cleanBody,
+      tone: 'warning',
+    };
+  }
+
+  if (match) {
+    return {
+      eyebrow: tag,
+      headline: cleanBody,
+      tone: 'info',
+    };
+  }
+
+  return {
+    headline: cleanBody,
+    tone: 'info',
+  };
+};
+
 /**
  * Trang lịch sử cảnh báo: hiển thị danh sách cảnh báo bên trái,
  * chi tiết cảnh báo bên phải. Hỗ trợ lọc, sắp xếp, lọc theo ngày,
@@ -383,7 +444,7 @@ export default function AlertsHistoryPage() {
             <ToolbarSelect
               value={filterStatus}
               onChange={setFilterStatus}
-              options={[{ value: '', label: 'Tất cả' }, { value: 'open', label: 'Mở' }, { value: 'acked', label: 'Đang XL' }, { value: 'closed', label: 'Đóng' }]}
+              options={[{ value: '', label: 'Tất cả' }, { value: 'open', label: 'Chưa xử lý' }, { value: 'acked', label: 'Đang xử lý' }, { value: 'closed', label: 'Đã xử lý' }]}
               width={90}
             />
           </div>
@@ -429,6 +490,10 @@ export default function AlertsHistoryPage() {
                 <div style={{ textAlign: 'center', color: 'var(--admin-text-muted)', padding: 40 }}>Không có cảnh báo trong khoảng thời gian này.</div>
               ) : (
                 sortedAlerts.map(a => (
+                  (() => {
+                    const parsed = parseAlertDisplay(a.message);
+                    const maintenanceAlert = isMaintenanceAlert(a.message);
+                    return (
                   <div 
                     key={a.id} 
                     className={`ah-grid-row ${a.id === selectedId ? 'ah-selected' : ''}`}
@@ -452,6 +517,10 @@ export default function AlertsHistoryPage() {
                         <div style={{ position: 'relative', width: 50, height: 36, background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-accent)' }}>
                           <Play size={14} fill="currentColor" />
                         </div>
+                      ) : maintenanceAlert ? (
+                        <div className="ah-media-empty" aria-label="Cảnh báo bảo trì không có hình ảnh">
+                          -
+                        </div>
                       ) : (
                         <div style={{ width: 50, height: 36, background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '0.45rem', fontWeight: 900 }}>N/A</div>
                       )}
@@ -473,20 +542,21 @@ export default function AlertsHistoryPage() {
                     {/* COL 4: NỘI DUNG */}
                     <div className="ah-msg-cell">
                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                         {a.message.startsWith('[') ? (() => {
-                           const match = a.message.match(/^\[(.*?)\]\s*(.*)$/);
-                           if (match) return (
-                             <div style={{ flex: 1, minWidth: 0 }}>
-                               <div className="ah-msg-label">{match[1]}</div>
-                               <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                 {getAlertSummary(match[2] || '')}
-                               </div>
+                         <div style={{ flex: 1, minWidth: 0 }}>
+                           {parsed.eyebrow && (
+                             <div className="ah-msg-topline">
+                               <span className={`ah-msg-chip ah-msg-chip-${parsed.tone || 'info'}`}>{parsed.eyebrow}</span>
                              </div>
-                           );
-                           return <div className="ah-msg-body" style={{ flex: 1 }}>{getAlertSummary(a.message)}</div>;
-                         })() : (
-                           <div className="ah-msg-body" style={{ flex: 1 }}>{getAlertSummary(a.message)}</div>
-                         )}
+                           )}
+                           <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                             {parsed.headline}
+                           </div>
+                           {parsed.detail && (
+                             <div className="ah-msg-detail" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                               {parsed.detail}
+                             </div>
+                           )}
+                         </div>
                          
                          {a.videoUrl && (
                            <span style={{ 
@@ -520,10 +590,12 @@ export default function AlertsHistoryPage() {
                       ) : a.status === ALERT_STATUS.ACKED ? (
                         <button className="btn-industrial btn-sm" style={{ height: 26, fontSize: '.65rem', padding: '0 10px' }} onClick={(e) => handleCloseAlert(e, a.id)}>Đóng</button>
                       ) : (
-                        <div style={{ width: 14, height: 14, background: 'var(--admin-success)', opacity: .3 }}></div>
+                        <div style={{ color: '#10B981', fontSize: '1rem', fontWeight: 900, lineHeight: 1 }} aria-label="Đã xử lý">✓</div>
                       )}
                     </div>
                   </div>
+                    );
+                  })()
                 ))
               )}
             </div>
@@ -635,7 +707,7 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
   const accentColor = isAlarm ? '#EF4444' : '#F59E0B';
   const levelText = isAlarm ? 'BÁO ĐỘNG' : 'CẢNH BÁO';
 
-  const statusLabel: Record<string, string> = { open: 'Chưa xử lý', acked: 'Đang xử lý', closed: 'Đã đóng' };
+  const statusLabel: Record<string, string> = { open: 'Chưa xử lý', acked: 'Đang xử lý', closed: 'Đã xử lý' };
   const sourceLabel: Record<string, string> = { rule_engine: 'Hệ thống quy tắc', ai_detection: 'Phân tích AI', manual: 'Nhập thủ công', camera: 'Giám sát Camera' };
 
   // Phân tích tọa độ vùng từ metadata (hỗ trợ cả Point và ROI)

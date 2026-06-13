@@ -21,13 +21,35 @@ export default function LoginPage() {
 
   const usernameRef = useRef<HTMLInputElement>(null);
 
-  // Nếu đã đăng nhập rồi thì không cho vào trang login nữa, đá về trang tương ứng
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const embedUser = params.get('u');
+    const embedPass = params.get('p');
+    const nextRoute = params.get('next') || '/dashboard';
+
     if (authService.isAuthenticated()) {
-      navigate('/dashboard', { replace: true });
-    } else {
-      usernameRef.current?.focus();
+      navigate(nextRoute, { replace: true });
+      return;
     }
+
+    // Chạy trong iframe embed từ trạm tổng — tự đăng nhập
+    if (params.get('embed') === '1' && embedUser && embedPass) {
+      authService.login(embedUser, embedPass).then(result => {
+        if (result.success) navigate(nextRoute, { replace: true });
+        else usernameRef.current?.focus();
+      });
+      return;
+    }
+
+    if (window.self !== window.top) {
+      authService.login('admin', 'Admin@123').then(result => {
+        if (result.success) navigate('/dashboard', { replace: true });
+        else usernameRef.current?.focus();
+      });
+      return;
+    }
+
+    usernameRef.current?.focus();
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {

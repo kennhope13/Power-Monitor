@@ -15,29 +15,17 @@ echo "   STATIONOS - KHỞI ĐỘNG HỆ THỐNG MỚI (LINUX)"
 echo "=================================================="
 echo ""
 
-# 1. Dọn dẹp các cổng và tiến trình cũ
-echo "[1/4] Đang dọn dẹp các tiến trình chạy trùng cổng..."
-pkill -9 -f "dotnet run --project StationOS.Api" || true
-pkill -9 -f "StationOS.Api" || true
-pkill -9 -f "npm run dev" || true
-pkill -9 -f "vite" || true
-pkill -9 -f "main.py" || true
-
-# Quét dọn các tiến trình cứng đầu đang giữ cổng
-for port in 5173 5000 8100 8105; do
+# 1. Dọn dẹp chỉ các cổng của project này (5173, 5000)
+echo "[1/4] Đang dọn dẹp các tiến trình đang giữ cổng 5173 và 5000..."
+for port in 5173 5000; do
     PIDS=$(lsof -t -i:$port 2>/dev/null)
     if [ -n "$PIDS" ]; then
+        echo "  → Kill port $port (PID: $PIDS)"
         echo "$PIDS" | xargs kill -9 >/dev/null 2>&1 || true
     fi
 done
 
 if command -v docker &> /dev/null; then
-    sudo docker rm -f stationmonitor-db >/dev/null 2>&1 || true
-    sudo docker rm -f stationos-dev-db >/dev/null 2>&1 || true
-    sudo docker rm -f stationos-monitor-db >/dev/null 2>&1 || true
-    sudo docker rm -f stationmonitor-streaming >/dev/null 2>&1 || true
-    sudo docker rm -f stationmonitor-mqtt >/dev/null 2>&1 || true
-    sudo docker rm -f stationmonitor-backend >/dev/null 2>&1 || true
     sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
 fi
 sleep 1
@@ -95,10 +83,9 @@ echo " Logs AI Engine: tail -f ai_engine.log"
 echo "=================================================="
 echo ""
 
-# 5. Khởi động AI Engine
+# 5. Khởi động AI Engine (Python FastAPI — cung cấp nhiệt độ điểm đo ROI)
 echo "[5/5] Khởi động AI Engine (Python FastAPI)..."
 cd "$ROOT/ai_engine"
-# Cài đặt thư viện tự động nếu thiếu
 if [ -d ".venv" ]; then
     .venv/bin/pip install -r requirements.txt > /dev/null 2>&1 || true
     nohup .venv/bin/python main.py > "$ROOT/ai_engine.log" 2>&1 &
@@ -109,22 +96,12 @@ fi
 AI_PID=$!
 echo "✅ AI Engine đang khởi chạy ngầm (PID: $AI_PID, Port: 8100)"
 
-# Chờ AI Engine sẵn sàng trước khi Vite start (tránh proxy ECONNREFUSED)
-echo -n "   Đang chờ AI Engine ready..."
-for i in {1..20}; do
-    if curl -s http://localhost:8100/health > /dev/null 2>&1; then
-        echo " ✅ AI Engine sẵn sàng!"
-        break
-    fi
-    echo -n "."
-    sleep 1
-done
-# Nếu quá 20s vẫn chưa up thì cảnh báo nhưng vẫn tiếp tục
-if ! curl -s http://localhost:8100/health > /dev/null 2>&1; then
-    echo " ⚠️  AI Engine chưa phản hồi sau 20s, tiếp tục khởi động..."
+cd "$ROOT"
+if [ "${STATION_ELECTRON_NO_FRONTEND:-0}" = "1" ]; then
+    echo "ℹ️  Bỏ qua Vite dev server vì đang chạy bản Electron packaged."
+    exit 0
 fi
 
-cd "$ROOT"
 # Chạy Frontend ở foreground
 cd "$ROOT/frontend"
 if [ ! -d "node_modules" ]; then

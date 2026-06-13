@@ -68,7 +68,7 @@ export function statusLabel(status: string): string {
   const labelMap: Record<string, string> = {
     open: 'Chưa xác nhận',
     acked: 'Đã xác nhận',
-    closed: 'Đã đóng',
+    closed: 'Đã xử lý',
   };
   return labelMap[status] || status;
 }

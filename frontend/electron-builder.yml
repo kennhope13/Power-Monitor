@@ -4,11 +4,15 @@ copyright: Copyright © 2025 StationOS Team
 directories:
   output: dist-electron
 files:
+  - dist/**/*
   - electron/**/*
+  - electron/loading.html
   - package.json
+asarUnpack:
+  - electron/loading.html
+afterPack: ./scripts/afterPack.cjs
 linux:
   target:
-    - deb
     - AppImage
   category: Utility
   maintainer: StationOS Team <support@stationos.com>

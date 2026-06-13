@@ -91,4 +91,5 @@ ai_engine/data/live_thermal_history_*
 ai_engine/data/*.csv
 ai_engine/yolov8n.pt
 
-
+# JetBrains Run config or script PIDs
+.run/
