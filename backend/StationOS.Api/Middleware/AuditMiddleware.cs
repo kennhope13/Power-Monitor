@@ -6,6 +6,7 @@
 
 using System.Security.Claims;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using StationOS.Data;
 using StationOS.Data.Entities;
 
@@ -26,10 +27,46 @@ public class AuditMiddleware
         var path   = ctx.Request.Path.Value ?? "";
         var requestBody = await ReadJsonRequestBodyAsync(ctx);
 
+        var isWrite = IsWriteMethod(method);
+        var entityType = ExtractEntityType(path);
+        var entityId = ExtractEntityId(path);
+
+        string? oldValue = null;
+
+        // If it's update or delete, capture the old entity state before the pipeline runs
+        if (isWrite && (method == "PUT" || method == "PATCH" || method == "DELETE") && entityId.HasValue && !string.IsNullOrEmpty(entityType))
+        {
+            try
+            {
+                object? oldEntity = entityType.ToLower() switch
+                {
+                    "device" => await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "rule" => await db.Rules.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "user" => await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "station" => await db.Stations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "boundary" => await db.Boundaries.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "roi-point" or "roi-points" => await db.RoiPoints.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    _ => null
+                };
+
+                if (oldEntity != null)
+                {
+                    oldValue = System.Text.Json.JsonSerializer.Serialize(oldEntity, new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                    });
+                }
+            }
+            catch
+            {
+                // Suppress database lookup errors
+            }
+        }
+
         await _next(ctx);
 
         // Chỉ ghi khi: là API call thay đổi dữ liệu, đã authen, thành công
-        if (!IsWriteMethod(method)) return;
+        if (!isWrite) return;
         if (!path.StartsWith("/api/v1/")) return;
         if (path.Contains("/auth/")) return;
         
@@ -58,8 +95,37 @@ public class AuditMiddleware
         if (path.Contains("/ack"))   action = "ack_alert";
         if (path.Contains("/close")) action = "close_alert";
 
-        var entityType = ExtractEntityType(path);
-        var entityId   = ExtractEntityId(path);
+        string? newValue = requestBody;
+
+        // For updates, fetch the new entity state from DB to compare full objects
+        if (action == "update" && entityId.HasValue && !string.IsNullOrEmpty(entityType))
+        {
+            try
+            {
+                object? newEntity = entityType.ToLower() switch
+                {
+                    "device" => await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "rule" => await db.Rules.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "user" => await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "station" => await db.Stations.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "boundary" => await db.Boundaries.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    "roi-point" or "roi-points" => await db.RoiPoints.AsNoTracking().FirstOrDefaultAsync(x => x.Id == entityId.Value),
+                    _ => null
+                };
+
+                if (newEntity != null)
+                {
+                    newValue = System.Text.Json.JsonSerializer.Serialize(newEntity, new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                    });
+                }
+            }
+            catch
+            {
+                // Fallback to request body if DB fetch fails
+            }
+        }
 
         try
         {
@@ -69,7 +135,8 @@ public class AuditMiddleware
                 Action     = action,
                 EntityType = entityType,
                 EntityId   = entityId,
-                NewValue   = requestBody,
+                OldValue   = oldValue,
+                NewValue   = newValue,
                 IpAddress  = ctx.Connection.RemoteIpAddress?.ToString(),
             });
             await db.SaveChangesAsync();
@@ -85,11 +152,39 @@ public class AuditMiddleware
 
     private static string? ExtractEntityType(string path)
     {
-        // /api/v1/devices/xxx → "device"
-        // /api/v1/rules/xxx   → "rule"
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        // segments: ["api", "v1", "devices", ...]
-        return segments.Length >= 3 ? segments[2].TrimEnd('s') : null;
+        string? rawType = null;
+
+        // Tìm GUID cuối cùng để lấy loại đối tượng ngay trước nó
+        for (var i = segments.Length - 1; i >= 0; i--)
+        {
+            if (Guid.TryParse(segments[i], out _))
+            {
+                if (i - 1 >= 0)
+                {
+                    rawType = segments[i - 1].ToLower();
+                    break;
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(rawType) && segments.Length >= 3)
+        {
+            rawType = segments[2].ToLower();
+        }
+
+        if (string.IsNullOrEmpty(rawType)) return null;
+
+        return rawType switch
+        {
+            "devices" or "device" => "device",
+            "rules" or "rule" => "rule",
+            "users" or "user" => "user",
+            "stations" or "station" => "station",
+            "boundaries" or "boundary" => "boundary",
+            "roi-points" or "roi-point" => "roi-point",
+            _ => rawType.TrimEnd('s')
+        };
     }
 
     private static Guid? ExtractEntityId(string path)

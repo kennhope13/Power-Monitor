@@ -63,6 +63,25 @@ function findProjectRoot() {
 }
 
 // ─────────────────────────────────────────────
+// Kiểm tra xem backend service đã chạy sẵn chưa
+// ─────────────────────────────────────────────
+function checkIfServicesRunning() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:5000/health', (res) => {
+      res.destroy();
+      resolve(true);
+    });
+    req.on('error', () => {
+      resolve(false);
+    });
+    req.setTimeout(400, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────
 // Spawn start-all.sh (detached — thoát Electron không kill services)
 // ─────────────────────────────────────────────
 function startAllServices(root) {
@@ -85,7 +104,7 @@ function startAllServices(root) {
 }
 
 // ─────────────────────────────────────────────
-// Poll cho đến khi localhost:5173 sẵn sàng
+// Poll cho đến khi cả UI server và Backend API (port 5000) sẵn sàng
 // ─────────────────────────────────────────────
 function waitForServer(onReady) {
   const targetUrl = getTargetUrl();
@@ -93,10 +112,30 @@ function waitForServer(onReady) {
     const client = targetUrl.startsWith('https://') ? https : http;
     const req = client.get(targetUrl, (res) => {
       res.destroy();
-      onReady();
+      
+      // UI Server đã sẵn sàng, tiếp tục kiểm tra Backend API (port 5000)
+      const backendReq = http.get('http://127.0.0.1:5000/health', (backendRes) => {
+        backendRes.destroy();
+        log('[Station Monitor] Cả UI và Backend đều đã sẵn sàng.');
+        onReady();
+      });
+      backendReq.on('error', () => {
+        log('[Station Monitor] Giao diện sẵn sàng nhưng Backend chưa phản hồi. Đang đợi...');
+        setTimeout(check, 1000);
+      });
+      backendReq.setTimeout(1000, () => {
+        backendReq.destroy();
+        setTimeout(check, 1000);
+      });
     });
-    req.on('error', () => setTimeout(check, 1500));
-    req.setTimeout(1500, () => { req.destroy(); setTimeout(check, 1500); });
+    
+    req.on('error', () => {
+      setTimeout(check, 1000);
+    });
+    req.setTimeout(1000, () => {
+      req.destroy();
+      setTimeout(check, 1000);
+    });
   };
   check();
 }
@@ -152,6 +191,7 @@ function startLocalUiServer() {
         return;
       }
       if (reqUrl === '/ai-api' || reqUrl.startsWith('/ai-api/')) {
+        req.url = reqUrl.replace(/^\/ai-api/, '');
         pipeProxy(req, res, 'http://127.0.0.1:8100');
         return;
       }
@@ -308,8 +348,14 @@ async function createWindow() {
     return;
   }
 
-  // Khởi động services
-  startAllServices(root);
+  // Khởi động services nếu chưa chạy
+  const isRunning = await checkIfServicesRunning();
+  if (!isRunning) {
+    log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
+    startAllServices(root);
+  } else {
+    log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
+  }
 
   if (app.isPackaged) {
     log('isPackaged → startLocalUiServer...');

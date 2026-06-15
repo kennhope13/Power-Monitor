@@ -8,6 +8,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using System.Net.Http;
+using System.Net.Http.Json;
 using StationOS.Data;
 using StationOS.Data.Entities;
 using StationOS.Services;
@@ -23,12 +26,21 @@ public class AlertsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly PermissionService _permissions;
     private readonly IRealtimeNotifier _notifier;
+    private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public AlertsController(AppDbContext db, PermissionService permissions, IRealtimeNotifier notifier)
+    public AlertsController(
+        AppDbContext db,
+        PermissionService permissions,
+        IRealtimeNotifier notifier,
+        IConfiguration config,
+        IHttpClientFactory httpClientFactory)
     {
         _db = db;
         _permissions = permissions;
         _notifier = notifier;
+        _config = config;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>
@@ -268,6 +280,74 @@ public class AlertsController : ControllerBase
         var bytes = System.Text.Encoding.UTF8.GetPreamble()
             .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
         return File(bytes, "text/csv", $"alerts_{DateTime.Now:yyyyMMdd_HHmm}.csv");
+    }
+
+    /// <summary>
+    /// Gửi cảnh báo thủ công lên trạm tổng.
+    /// </summary>
+    // POST /api/v1/alerts/{id}/send-central
+    [HttpPost("{id:guid}/send-central")]
+    public async Task<IActionResult> SendToCentral(Guid id)
+    {
+        var alert = await _db.Alerts.FindAsync(id);
+        if (alert == null) return NotFound();
+
+        var centralUrl = _config["CentralServer"]?.TrimEnd('/');
+        var stationId = _config["StationId"];
+
+        if (string.IsNullOrEmpty(centralUrl))
+        {
+            return BadRequest(new { error = "Trạm chưa được cấu hình địa chỉ Trạm tổng (CentralServer trong appsettings.json)." });
+        }
+
+        if (string.IsNullOrEmpty(stationId))
+        {
+            return BadRequest(new { error = "Trạm chưa được cấu hình StationId." });
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Station-Id", stationId);
+            client.Timeout = TimeSpan.FromSeconds(15);
+
+            var payload = new[]
+            {
+                new
+                {
+                    id = alert.Id,
+                    station_id = alert.StationId,
+                    device_id = alert.DeviceId,
+                    rule_id = alert.RuleId,
+                    source = alert.Source,
+                    level = alert.Level,
+                    status = alert.Status,
+                    message = alert.Message,
+                    value = alert.Value,
+                    triggered_at = alert.TriggeredAt,
+                    image_url = alert.ImageUrl,
+                    thumbnail_url = alert.ThumbnailUrl,
+                    video_url = alert.VideoUrl
+                }
+            };
+
+            var url = $"{centralUrl}/api/v1/ingest/alerts";
+            var response = await client.PostAsJsonAsync(url, payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return Ok(new { success = true, message = "Gửi cảnh báo lên trạm tổng thành công." });
+            }
+            else
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                return StatusCode((int)response.StatusCode, new { error = "Lỗi phản hồi từ trạm tổng", details = body });
+            }
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Không thể kết nối đến trạm tổng", details = ex.Message });
+        }
     }
 
     private static string Esc(string? v) =>

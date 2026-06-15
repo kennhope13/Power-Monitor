@@ -132,9 +132,18 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     const oldVal = parseJson(oldValStr);
     const newVal = parseJson(newValStr);
 
+    const ignoredKeys = new Set([
+      'id', 'idguid', 'createdat', 'updatedat', 'passwordhash',
+      'password', 'concurrencystamp', 'securitystamp', 'normalizedemail',
+      'normalizedusername', 'emailconfirmed', 'phonenumberconfirmed',
+      'twofactorenabled', 'lockoutend', 'lockoutenabled', 'accessfailedcount',
+      'station', 'device', 'rules', 'sensorreadings', 'alerts', 'sldpoints',
+      'maintenancetasks', 'ruletriggerlogs', 'roipoints', 'boundaries'
+    ]);
+
     const translateKey = (k: string): string => {
       const keys: Record<string, string> = {
-        name: 'Tên quy tắc',
+        name: 'Tên quy tắc / Tên điểm',
         pointId: 'Mã điểm đo',
         alarmThreshold: 'Ngưỡng báo động (°C)',
         preAlarmThreshold: 'Ngưỡng cảnh báo (°C)',
@@ -167,13 +176,19 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
         point: 'Điểm đo giám sát',
         op: 'Phép toán so sánh',
         preAlarm: 'Ngưỡng Cảnh báo (Vàng)',
-        alarm: 'Ngưỡng Nguy hiểm (Đỏ)',
+        alarm: 'Nguy hiểm (Đỏ)',
         doAlert: 'Gửi cảnh báo thời gian thực',
         doHealth: 'Trừ điểm sức khỏe',
         doMaintenance: 'Lập phiếu bảo trì tự động',
         penalty: 'Điểm sức khỏe trừ',
         maintType: 'Loại bảo trì lập lịch',
-        maintDays: 'Thời hạn hoàn thành bảo trì (ngày)'
+        maintDays: 'Thời hạn hoàn thành bảo trì (ngày)',
+        ox: 'Tọa độ X (Quang học)',
+        oy: 'Tọa độ Y (Quang học)',
+        tx: 'Tọa độ X (Ảnh nhiệt)',
+        ty: 'Tọa độ Y (Ảnh nhiệt)',
+        sortOrder: 'Thứ tự hiển thị',
+        color: 'Màu sắc hiển thị'
       };
       return keys[k] ?? k;
     };
@@ -318,6 +333,8 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     if (action.toLowerCase() === 'create' || !oldVal) {
       if (!newVal) return <span style={{ color: 'var(--admin-text-muted)' }}>Không có thông tin chi tiết.</span>;
 
+      const filteredNewVal = Object.entries(newVal).filter(([k]) => !ignoredKeys.has(k.toLowerCase()));
+
       return (
         <table className="detail-changes-table">
           <thead>
@@ -326,7 +343,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </tr>
           </thead>
           <tbody>
-            {Object.entries(newVal).map(([k, v]) => {
+            {filteredNewVal.map(([k, v]) => {
               if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
@@ -344,6 +361,8 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     if (action.toLowerCase() === 'delete' || !newVal) {
       if (!oldVal) return <span style={{ color: 'var(--admin-text-muted)' }}>Không có thông tin chi tiết.</span>;
 
+      const filteredOldVal = Object.entries(oldVal).filter(([k]) => !ignoredKeys.has(k.toLowerCase()));
+
       return (
         <table className="detail-changes-table">
           <thead>
@@ -352,7 +371,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </tr>
           </thead>
           <tbody>
-            {Object.entries(oldVal).map(([k, v]) => {
+            {filteredOldVal.map(([k, v]) => {
               if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
@@ -371,6 +390,8 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     const allKeys = Array.from(new Set([...Object.keys(oldVal), ...Object.keys(newVal)]));
 
     for (const k of allKeys) {
+      if (ignoredKeys.has(k.toLowerCase())) continue;
+
       if ((oldVal[k] && typeof oldVal[k] === 'object') || (newVal[k] && typeof newVal[k] === 'object')) {
         if (JSON.stringify(oldVal[k]) !== JSON.stringify(newVal[k])) {
           changes.push({ key: k, oldV: JSON.stringify(oldVal[k]), newV: JSON.stringify(newVal[k]) });

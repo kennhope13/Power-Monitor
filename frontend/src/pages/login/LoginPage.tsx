@@ -1,3 +1,5 @@
+
+
 // ============================================================
 // LoginPage.tsx — Trang đăng nhập
 // Gọi authService.login() → lưu JWT vào localStorage
@@ -19,23 +21,54 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [isShaking, setIsShaking] = useState(false); // animation lắc form khi sai mật khẩu
 
+  const [showConfig, setShowConfig] = useState(false);
+  const [serverIp, setServerIp] = useState('');
+
+  useEffect(() => {
+    setServerIp(localStorage.getItem('server_ip') || '');
+  }, []);
+
+  const handleSaveConfig = () => {
+    const trimmed = serverIp.trim();
+    if (trimmed) {
+      localStorage.setItem('server_ip', trimmed);
+    } else {
+      localStorage.removeItem('server_ip');
+    }
+    window.location.reload();
+  };
+
+  const handleResetConfig = () => {
+    localStorage.removeItem('server_ip');
+    setServerIp('');
+    window.location.reload();
+  };
+
+  
   const usernameRef = useRef<HTMLInputElement>(null);
+
+  const resolveNextPath = () => {
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get('next');
+    if (next && next.startsWith('/')) return next;
+    return null;
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const embedUser = params.get('u');
     const embedPass = params.get('p');
-    const nextRoute = params.get('next') || '/dashboard';
+    const nextPath = resolveNextPath();
 
     if (authService.isAuthenticated()) {
-      navigate(nextRoute, { replace: true });
+      navigate(nextPath || '/dashboard', { replace: true });
       return;
     }
 
     // Chạy trong iframe embed từ trạm tổng — tự đăng nhập
     if (params.get('embed') === '1' && embedUser && embedPass) {
       authService.login(embedUser, embedPass).then(result => {
-        if (result.success) navigate(nextRoute, { replace: true });
+        if (result.success) navigate(nextPath || '/dashboard', { replace: true });
         else usernameRef.current?.focus();
       });
       return;
@@ -43,7 +76,7 @@ export default function LoginPage() {
 
     if (window.self !== window.top) {
       authService.login('admin', 'Admin@123').then(result => {
-        if (result.success) navigate('/dashboard', { replace: true });
+        if (result.success) navigate(nextPath || '/dashboard', { replace: true });
         else usernameRef.current?.focus();
       });
       return;
@@ -68,7 +101,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result.success) {
-      navigate('/dashboard');
+      navigate(resolveNextPath() || '/dashboard');
     } else {
       setErrorMsg(result.error || 'Đăng nhập thất bại');
       setIsShaking(true);
@@ -152,6 +185,65 @@ export default function LoginPage() {
             )}
           </button>
         </form>
+
+        <div style={{ marginTop: '20px', textAlign: 'center' }}>
+          <button
+            type="button"
+            className="gm-config-toggle-btn"
+            onClick={() => setShowConfig(!showConfig)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--admin-text-muted)',
+              fontSize: '11px',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              letterSpacing: '0.5px'
+            }}
+          >
+            {showConfig ? 'Ẩn cấu hình máy chủ' : 'Cấu hình IP máy chủ'}
+          </button>
+        </div>
+
+        {showConfig && (
+          <div className="gm-config-panel" style={{
+            marginTop: '15px',
+            paddingTop: '15px',
+            borderTop: '1px dashed var(--admin-border-light)',
+            textAlign: 'left'
+          }}>
+            <div className="gm-input-group" style={{ marginBottom: '10px' }}>
+              <label htmlFor="serverIpInput">Địa chỉ IP máy chủ</label>
+              <input
+                type="text"
+                id="serverIpInput"
+                placeholder="Ví dụ: 192.168.1.100"
+                value={serverIp}
+                onChange={e => setServerIp(e.target.value)}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                className="gm-btn-login"
+                onClick={handleSaveConfig}
+                style={{ flex: 1, padding: '8px', fontSize: '12px', background: '#0284c7' }}
+              >
+                LƯU & KẾT NỐI
+              </button>
+              {localStorage.getItem('server_ip') && (
+                <button
+                  type="button"
+                  className="gm-btn-login"
+                  onClick={handleResetConfig}
+                  style={{ padding: '8px 12px', fontSize: '12px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                >
+                  XÓA
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -87,6 +87,7 @@ public static class DependencyInjection
         services.AddHostedService<MqttSubscriberWorker>();
         services.AddHostedService<Iec104Worker>();
         services.AddHostedService<CloudSyncWorker>();
+        services.AddHostedService<CentralSyncWorker>();
         services.AddHostedService<DeviceHealthCheckWorker>();
         services.AddHostedService<StationOS.Workers.Recording.RtspRecorderWorker>();
 

@@ -283,7 +283,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
               ) : (
                 filteredUsers.map(u => {
                   const roleColor = u.role === 'admin' ? 'var(--admin-danger)' : u.role === 'manager' ? '#f59e0b' : 'var(--admin-success)';
-                  const roleLabel = u.role === 'admin' ? 'ADMIN' : u.role === 'manager' ? 'MANAGER' : 'OPERATOR';
+                  const roleLabel = u.role === 'admin' ? 'Quản trị' : u.role === 'manager' ? 'Quản lý' : 'Vận hành';
                   return (
                     <tr key={u.id}>
                       <td>
@@ -298,16 +298,14 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
                       <td style={{ fontSize: '.75rem' }}>{u.email || '—'}</td>
                       <td>
                         <span style={{ 
-                           background: roleColor === 'var(--admin-danger)' ? 'rgba(239,68,68,0.1)' : roleColor === '#f59e0b' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
-                           color: roleColor, padding: '2px 8px', borderRadius: 4, fontSize: '.65rem', fontWeight: 800 
+                           color: roleColor, fontSize: '.75rem', fontWeight: 700 
                         }}>{roleLabel}</span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                         {u.isActive ? (
-                            <span style={{ fontSize: '.65rem', background: 'rgba(16,185,129,0.1)', color: 'var(--admin-success)', padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>HOẠT ĐỘNG</span>
-                         ) : (
-                            <span style={{ fontSize: '.65rem', background: 'rgba(239,68,68,0.1)', color: 'var(--admin-danger)', padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>VÔ HIỆU</span>
-                         )}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span className="status-dot" style={{ background: u.isActive ? 'var(--admin-success)' : 'var(--admin-danger)', marginRight: 0 }}></span>
+                          <span style={{ fontSize: '.75rem' }}>{u.isActive ? 'Hoạt động' : 'Vô hiệu'}</span>
+                        </div>
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>

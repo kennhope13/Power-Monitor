@@ -59,27 +59,28 @@ export default function ReportTab({ stationId }: { stationId: string }) {
           // Identify points for this device
           const devPoints = latestPoints.filter(p => p.deviceId.toLowerCase() === dev.id.toLowerCase());
           
-          let t1Raw = devPoints.find(s => s.pointId === 'nhiet_do_pha_1' || s.pointId === 'temp_1')?.value;
-          let t2Raw = devPoints.find(s => s.pointId === 'nhiet_do_pha_2' || s.pointId === 'temp_2')?.value;
-          let t3Raw = devPoints.find(s => s.pointId === 'nhiet_do_pha_3' || s.pointId === 'temp_3')?.value;
-          let pdVal = devPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? 0;
+          let t1Raw = devPoints.find(s => {
+            const pid = s.pointId.toLowerCase();
+            return pid === 'nhiet_do_pha_1' || pid === 'temp_1' || /^(?:p|d|điểm|diem)\s*1$/i.test(pid);
+          })?.value;
 
-          // If it's a thermal camera, use ROI points (P1, P2...) as T1, T2...
-          if (dev.type === 'camera_thermal' || dev.type === 'camera_dual') {
-             const roiTemps = devPoints
-               .filter(p => p.pointId.toLowerCase().startsWith('p') && !isNaN(Number(p.pointId.substring(1))))
-               .sort((a, b) => a.pointId.localeCompare(b.pointId, undefined, { numeric: true }));
-             
-             if (roiTemps[0]) t1Raw = roiTemps[0].value;
-             if (roiTemps[1]) t2Raw = roiTemps[1].value;
-             if (roiTemps[2]) t3Raw = roiTemps[2].value;
-          }
+          let t2Raw = devPoints.find(s => {
+            const pid = s.pointId.toLowerCase();
+            return pid === 'nhiet_do_pha_2' || pid === 'temp_2' || /^(?:p|d|điểm|diem)\s*2$/i.test(pid);
+          })?.value;
+
+          let t3Raw = devPoints.find(s => {
+            const pid = s.pointId.toLowerCase();
+            return pid === 'nhiet_do_pha_3' || pid === 'temp_3' || /^(?:p|d|điểm|diem)\s*3$/i.test(pid);
+          })?.value;
+
+          let pdVal = devPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? 0;
 
           const t1 = t1Raw !== undefined && t1Raw !== null ? Math.round(t1Raw * 10) / 10 : null;
           const t2 = t2Raw !== undefined && t2Raw !== null ? Math.round(t2Raw * 10) / 10 : null;
           const t3 = t3Raw !== undefined && t3Raw !== null ? Math.round(t3Raw * 10) / 10 : null;
 
-          const tempMax = t1 !== null && t2 !== null && t3 !== null ? Math.max(t1, t2, t3) : (t1 || t2 || t3 || null);
+          const tempMax = t1 !== null && t2 !== null && t3 !== null ? Math.max(t1, t2, t3) : (t1 !== null ? t1 : t2 !== null ? t2 : t3 !== null ? t3 : null);
           const healthStatus = hInfo.risk || (hInfo.score >= 80 ? 'good' : hInfo.score >= 50 ? 'warning' : 'danger');
           const pdLevel = pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low';
 
@@ -99,8 +100,8 @@ export default function ReportTab({ stationId }: { stationId: string }) {
             trendDirection: 'stable',
             trendRate: 0.0,
             forecastDays: null,
-            t1AvgThisWeek: t1 !== null ? Math.round(t1) : 0,
-            t1AvgLastWeek: t1 !== null ? Math.round(t1) : 0,
+            t1AvgThisWeek: t1 !== null ? Math.round(t1) : null,
+            t1AvgLastWeek: t1 !== null ? Math.round(t1) : null,
             recommendationLevel: tempMax !== null && tempMax > 80 ? 'urgent' : tempMax !== null && tempMax > 60 ? 'monitor' : 'ok',
             recommendation: tempMax !== null && tempMax > 80 ? 'Kiểm tra siết lại bu lông các tiếp điểm ngay lập tức!' : 'Tiếp tục theo dõi vận hành.'
           };
@@ -188,9 +189,28 @@ export default function ReportTab({ stationId }: { stationId: string }) {
 
   const drawInlineChart = (canvas: HTMLCanvasElement, hist: Array<{ pointId: string; time: string; value: number }>) => {
     if (chartInst.current) { chartInst.current.destroy(); }
+    
+    const getMappedPhase = (pid: string): string | null => {
+      const lower = pid.toLowerCase();
+      if (lower === 'nhiet_do_pha_1' || lower === 'temp_1') return 'nhiet_do_pha_1';
+      if (lower === 'nhiet_do_pha_2' || lower === 'temp_2') return 'nhiet_do_pha_2';
+      if (lower === 'nhiet_do_pha_3' || lower === 'temp_3') return 'nhiet_do_pha_3';
+      if (lower === 'phong_dien' || lower === 'pd') return 'phong_dien';
+      const match = lower.match(/^(?:p|d|điểm|diem)\s*(\d+)$/i);
+      if (match && match[1]) {
+        const num = parseInt(match[1], 10);
+        if (num === 1) return 'nhiet_do_pha_1';
+        if (num === 2) return 'nhiet_do_pha_2';
+        if (num === 3) return 'nhiet_do_pha_3';
+      }
+      return null;
+    };
+
     const datasets = POINTS.map(p => ({
       label: `${p.label} (${p.unit})`,
-      data: hist.filter(r => r.pointId === p.id).map(r => ({ x: new Date(r.time).getTime(), y: r.value })),
+      data: hist
+        .filter(r => getMappedPhase(r.pointId) === p.id)
+        .map(r => ({ x: new Date(r.time).getTime(), y: r.value })),
       borderColor: p.color,
       backgroundColor: 'transparent',
       borderWidth: 1.5, pointRadius: 0, tension: 0.3,
@@ -323,6 +343,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
               </div>
 
               <!-- Trend & forecast row -->
+              ${cab.tempMax !== null ? `
               <div style="display:flex;gap:16px;font-size:11px;color:#374151;margin-bottom:8px;">
                 <span>
                   <b>Xu hướng:</b>
@@ -338,11 +359,12 @@ export default function ReportTab({ stationId }: { stationId: string }) {
                 </span>
                 <span>
                   <b>So tuần trước — T1:</b>
-                  <span style="font-weight:700;color:${cab.t1AvgThisWeek > cab.t1AvgLastWeek ? '#e02424' : '#059669'};">
-                    ${cab.t1AvgThisWeek}°C (tuần này) / ${cab.t1AvgLastWeek}°C (tuần trước)
+                  <span style="font-weight:700;color:${(cab.t1AvgThisWeek && cab.t1AvgLastWeek && cab.t1AvgThisWeek > cab.t1AvgLastWeek) ? '#e02424' : '#059669'};">
+                    ${cab.t1AvgThisWeek !== null && cab.t1AvgThisWeek !== undefined ? `${cab.t1AvgThisWeek}°C` : '--'} (tuần này) / ${cab.t1AvgLastWeek !== null && cab.t1AvgLastWeek !== undefined ? `${cab.t1AvgLastWeek}°C` : '--'} (tuần trước)
                   </span>
                 </span>
               </div>
+              ` : ''}
 
               <!-- Problem & recommendation -->
               <div style="font-size:11px;color:#374151;margin-bottom:4px;">

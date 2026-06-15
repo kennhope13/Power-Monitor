@@ -15,6 +15,7 @@ import { ALERT_STATUS, ALERT_LEVEL, alertStatusLabel, alertLevelLabel } from '@/
 import { createRealtimeHub } from '@/services/realtime.service';
 import { fmtDateTime } from '@/utils/format';
 import { confirmDialog } from '@/utils/confirm';
+import { showToast } from '@/utils/toast';
 import { GO2RTC_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
 import './AlertsHistoryPage.css';
@@ -29,8 +30,17 @@ type AlertDetail = AlertItem & { history: AlertHistoryEntry[] };
  */
 const getAlertSummary = (msg: string) => {
   if (!msg) return "";
+  
+  // Loại bỏ các emoji (như 🚨) khỏi phần tóm tắt để giao diện sạch hơn
+  let clean = msg.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').replace(/\p{Emoji_Presentation}/gu, '');
+  
   // Xóa phần nguồn [DEVICE] nếu có vì đã có nhãn riêng
-  let clean = msg.replace(/^\[.*?\]\s*/, '');
+  clean = clean.replace(/^\[.*?\]\s*/, '');
+
+  // Rút gọn phần địa điểm/vị trí chi tiết để chỉ hiển thị hành vi chính ở danh sách
+  if (clean.includes(' tại khu vực ')) {
+    clean = clean.split(' tại khu vực ')[0] || '';
+  }
   
   // Nếu là cảnh báo nhiệt độ: "Vùng/Điểm Tên: 32.0°C — chi tiết..." -> Lấy trước dấu "—"
   if (clean.includes(' — ')) {
@@ -44,7 +54,7 @@ const getAlertSummary = (msg: string) => {
     clean = (clean.split('.')[0] || '') + '.';
   }
 
-  return clean;
+  return clean.trim();
 };
 
 type ParsedAlertDisplay = {
@@ -324,6 +334,18 @@ export default function AlertsHistoryPage() {
     if (selectedId === id) loadDetail(selectedId);
   };
 
+  /** Gửi cảnh báo thủ công lên trạm tổng. */
+  const handleSendCentral = async (id: string) => {
+    try {
+      await stationApi.sendAlertCentral(id);
+      showToast('Đã gửi cảnh báo lên trạm tổng thành công.', 'success');
+    } catch (err: any) {
+      console.warn('[AlertsHistory] Gửi trạm tổng thất bại:', err);
+      const msg = err?.message || 'Không thể kết nối hoặc gửi lên trạm tổng.';
+      showToast(msg, 'error');
+    }
+  };
+
   /** Xuất danh sách cảnh báo hiện tại ra file CSV và kích hoạt tải về. */
   const exportCsv = () => {
     const opts = {
@@ -548,11 +570,11 @@ export default function AlertsHistoryPage() {
                                <span className={`ah-msg-chip ah-msg-chip-${parsed.tone || 'info'}`}>{parsed.eyebrow}</span>
                              </div>
                            )}
-                           <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                           <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={parsed.headline}>
                              {parsed.headline}
                            </div>
                            {parsed.detail && (
-                             <div className="ah-msg-detail" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                             <div className="ah-msg-detail" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={parsed.detail}>
                                {parsed.detail}
                              </div>
                            )}
@@ -623,6 +645,7 @@ export default function AlertsHistoryPage() {
                 onAck={() => handleAckClick({ stopPropagation: () => {} } as any, detailData.id)}
                 onCloseAlert={() => handleCloseAlert({ stopPropagation: () => {} } as any, detailData.id)}
                 onRefresh={() => loadDetail(detailData.id, true)}
+                onSendCentral={() => handleSendCentral(detailData.id)}
                 devices={devices}
               />
             )}
@@ -702,7 +725,7 @@ export default function AlertsHistoryPage() {
  * Panel chi tiết một cảnh báo: hiển thị ảnh/video bằng chứng,
  * thông tin cảnh báo và timeline lịch sử xử lý.
  */
-function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onRefresh?: () => void, devices?: any[] }) {
+function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, onSendCentral, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onRefresh?: () => void, onSendCentral: () => void, devices?: any[] }) {
   const isAlarm = data.level === 'alarm';
   const accentColor = isAlarm ? '#EF4444' : '#F59E0B';
   const levelText = isAlarm ? 'BÁO ĐỘNG' : 'CẢNH BÁO';
@@ -940,7 +963,7 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
               <div className="ah-info-item highlight" style={{ borderLeft: '4px solid var(--admin-accent)' }}>
                 <span className="ah-info-key" style={{ color: 'var(--admin-accent)' }}>Giá trị đo lường</span>
                 <span className="ah-info-val" style={{ fontSize: '1.2rem', color: accentColor }}>
-                  {data.value.toFixed(2)}
+                  {unit === 'NGƯỜI' ? Math.round(data.value) : data.value.toFixed(2)}
                   <small style={{ fontSize: '0.7rem', marginLeft: 6, opacity: 0.5 }}>{unit}</small>
                 </span>
               </div>
@@ -980,12 +1003,19 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
         </div>
       </div>
 
-      <div className="ah-actions-footer">
+      <div className="ah-actions-footer" style={{ gap: 8 }}>
+        <button 
+          className="ah-btn-footer" 
+          style={{ background: 'var(--admin-layer-2)', color: 'var(--admin-accent)', border: '1px solid var(--admin-border)', flex: 1 }} 
+          onClick={onSendCentral}
+        >
+          🛜 Gửi trạm tổng
+        </button>
         {data.status !== 'closed' && (
-          <button className="ah-btn-footer ah-btn-footer-danger" onClick={onCloseAlert}>Đóng cảnh báo</button>
+          <button className="ah-btn-footer ah-btn-footer-danger" style={{ flex: 1 }} onClick={onCloseAlert}>Đóng cảnh báo</button>
         )}
         {data.status === 'open' && (
-          <button className="ah-btn-footer ah-btn-footer-primary" onClick={onAck}>Tiếp nhận xử lý</button>
+          <button className="ah-btn-footer ah-btn-footer-primary" style={{ flex: 1 }} onClick={onAck}>Tiếp nhận xử lý</button>
         )}
       </div>
     </div>

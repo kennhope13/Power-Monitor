@@ -29,7 +29,7 @@
 /* ── Grid Layout for Rows ── */
 .ah-grid-header, .ah-grid-row {
   display: grid;
-  grid-template-columns: 70px 110px 110px 1fr 120px 110px;
+  grid-template-columns: 70px 110px 110px minmax(0, 1fr) 120px 110px;
   align-items: center;
   width: 100%;
   box-sizing: border-box;
@@ -93,6 +93,7 @@
   align-items: flex-start !important;
   justify-content: center;
   gap: 4px;
+  min-width: 0;
 }
 
 .ah-msg-topline {

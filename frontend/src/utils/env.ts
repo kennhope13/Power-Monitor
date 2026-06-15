@@ -6,15 +6,39 @@
 //   VITE_APP_MODE   = onprem | cloud
 // ============================================================
 
+// Helper to extract clean hostname/IP from input
+const cleanHostname = (input: string): string => {
+  let cleaned = input.trim();
+  cleaned = cleaned.replace(/^(https?:\/\/)/i, '');
+  cleaned = cleaned.split('/')[0] || '';
+  cleaned = cleaned.split(':')[0] || '';
+  return cleaned;
+};
+
+// Helper to get target hostname based on saved localStorage IP or window location
+const getTargetHostname = (): string | null => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const saved = window.localStorage.getItem('server_ip');
+    if (saved && saved.trim() !== '') {
+      return cleanHostname(saved);
+    }
+  }
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return hostname;
+    }
+  }
+  return null;
+};
+
 // URL server go2rtc để phát stream camera qua WebRTC
 const rawGo2rtc = (import.meta.env.VITE_GO2RTC_URL as string | undefined) ?? 'http://localhost:1984';
 /** URL của server go2rtc — tự thay localhost bằng hostname thực nếu chạy trên mạng. */
 export const GO2RTC_URL: string = (() => {
-  if (typeof window !== 'undefined' && window.location) {
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return rawGo2rtc.replace(/(localhost|127\.0\.0\.1)/g, hostname);
-    }
+  const host = getTargetHostname();
+  if (host) {
+    return rawGo2rtc.replace(/(localhost|127\.0\.0\.1)/g, host);
   }
   return rawGo2rtc;
 })();
@@ -23,11 +47,9 @@ export const GO2RTC_URL: string = (() => {
 const rawApi = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:5000';
 /** URL gốc của backend REST API và SignalR — tự thay localhost bằng hostname thực. */
 export const API_BASE_URL: string = (() => {
-  if (typeof window !== 'undefined' && window.location) {
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return rawApi.replace(/(localhost|127\.0\.0\.1)/g, hostname);
-    }
+  const host = getTargetHostname();
+  if (host) {
+    return rawApi.replace(/(localhost|127\.0\.0\.1)/g, host);
   }
   return rawApi;
 })();
@@ -37,6 +59,10 @@ const rawAi = (import.meta.env.VITE_AI_ENGINE_URL as string | undefined) ??
               (import.meta.env.VITE_AI_URL as string | undefined) ?? 
               '/ai-api';
 export const AI_ENGINE_URL: string = (() => {
+  const host = getTargetHostname();
+  if (host) {
+    return `http://${host}:8100`;
+  }
   // Nếu dùng proxy relative path (như /ai-api), giữ nguyên
   if (rawAi.startsWith('/')) {
     return rawAi;
@@ -44,13 +70,6 @@ export const AI_ENGINE_URL: string = (() => {
   // Nếu là địa chỉ IP cụ thể (không phải localhost), giữ nguyên
   if (!rawAi.includes('localhost') && !rawAi.includes('127.0.0.1')) {
     return rawAi;
-  }
-  // Nếu là localhost, tự động trỏ về IP của Dashboard (nếu truy cập từ xa)
-  if (typeof window !== 'undefined' && window.location) {
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return rawAi.replace(/(localhost|127\.0\.0\.1)/g, hostname);
-    }
   }
   return rawAi;
 })();

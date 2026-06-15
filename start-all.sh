@@ -15,9 +15,9 @@ echo "   STATIONOS - KHỞI ĐỘNG HỆ THỐNG MỚI (LINUX)"
 echo "=================================================="
 echo ""
 
-# 1. Dọn dẹp chỉ các cổng của project này (5173, 5000)
-echo "[1/4] Đang dọn dẹp các tiến trình đang giữ cổng 5173 và 5000..."
-for port in 5173 5000; do
+# 1. Dọn dẹp chỉ các cổng của project này (5173, 5000, 8100)
+echo "[1/4] Đang dọn dẹp các tiến trình đang giữ cổng 5173, 5000 và 8100..."
+for port in 5173 5000 8100; do
     PIDS=$(lsof -t -i:$port 2>/dev/null)
     if [ -n "$PIDS" ]; then
         echo "  → Kill port $port (PID: $PIDS)"

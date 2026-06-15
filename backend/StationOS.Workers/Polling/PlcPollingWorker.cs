@@ -356,13 +356,13 @@ public class PlcPollingWorker : BackgroundService
                         EntityId = Guid.NewGuid(), // SensorReading dùng composite key (Time, Id) nên sinh Guid tạm cho SyncQueue
                         Payload = JsonSerializer.Serialize(new
                         {
-                            station_id = r.StationId,
-                            device_id = r.DeviceId,
-                            point_id = r.PointId,
+                            id = r.Id,
+                            deviceId = r.DeviceId,
+                            pointId = r.PointId,
                             value = r.Value,
                             unit = r.Unit,
                             time = r.Time,
-                            quality = r.Quality
+                            quality = (int)r.Quality
                         }),
                         Status = "pending"
                     });

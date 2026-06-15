@@ -35,6 +35,7 @@
     color: var(--admin-text-muted);
     border-bottom: 1px solid var(--admin-border);
     background: var(--admin-layer-1);
+    white-space: nowrap;
 }
 
 .data-table tbody td {

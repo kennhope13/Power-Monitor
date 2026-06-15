@@ -29,6 +29,11 @@ export class AlertService {
     return apiMutate('POST', `/alerts/${id}/close`);
   }
 
+  /** Gửi cảnh báo thủ công lên trạm tổng. */
+  async sendCentral(id: string): Promise<void> {
+    return apiMutate('POST', `/alerts/${id}/send-central`);
+  }
+
   /** Chi tiết cảnh báo kèm lịch sử thay đổi trạng thái. */
   async getAlertDetail(id: string): Promise<AlertItem & { history: AlertHistoryEntry[] }> {
     return apiFetch(`/alerts/${id}`);

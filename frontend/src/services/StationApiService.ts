@@ -106,6 +106,7 @@ class StationApiService {
   closeAlert = alertService.closeAlert.bind(alertService);
   getAlertDetail = alertService.getAlertDetail.bind(alertService);
   exportAlertsCsv = alertService.exportCsv.bind(alertService);
+  sendAlertCentral = alertService.sendCentral.bind(alertService);
 
   // ── Logs ──────────────────────────────────────────────────
   getAuditLogs = logService.getAuditLogs.bind(logService);
