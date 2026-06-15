@@ -25,6 +25,7 @@ namespace StationOS.Api.Controllers;
 [Authorize]
 public class DevicesController : ControllerBase
 {
+    private static readonly System.Threading.SemaphoreSlim _deviceLock = new System.Threading.SemaphoreSlim(1, 1);
     private readonly AppDbContext _db;
     private readonly DeviceService _deviceService;
     private readonly PermissionService _permissions;
@@ -34,10 +35,12 @@ public class DevicesController : ControllerBase
     private readonly AutoDiscoveryService _autoDiscovery;
     private readonly IHttpClientFactory _http;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly LicenseService _license;
 
     public DevicesController(AppDbContext db, DeviceService deviceService, PermissionService permissions,
                              IConfiguration config, HikvisionIsapiService isapi, CredentialEncryptionService crypto,
-                             AutoDiscoveryService autoDiscovery, IHttpClientFactory http, IServiceScopeFactory scopeFactory)
+                             AutoDiscoveryService autoDiscovery, IHttpClientFactory http, IServiceScopeFactory scopeFactory,
+                             LicenseService license)
     {
         _db = db;
         _deviceService = deviceService;
@@ -48,6 +51,7 @@ public class DevicesController : ControllerBase
         _autoDiscovery = autoDiscovery;
         _http = http;
         _scopeFactory = scopeFactory;
+        _license = license;
     }
 
     /// <summary>
@@ -157,70 +161,44 @@ public class DevicesController : ControllerBase
     [HttpPost("devices/auto-configure")]
     public async Task<IActionResult> AutoConfigure([FromBody] AutoConfigureRequest req)
     {
-        var caps = await _isapi.DiscoverCapabilitiesAsync(req.Ip, req.Username, req.Password);
-        if (caps == null)
-            return NotFound(new { error = "Không kết nối được hoặc không phải thiết bị Hikvision ISAPI" });
-
-        var prefix    = req.NamePrefix?.Trim() ?? caps.Model.Replace(" ", "_").ToUpperInvariant();
-        var ipTag     = req.Ip.Replace(".", "_");
-        var created   = new List<object>();
-        var capsJson  = System.Text.Json.JsonSerializer.Serialize(caps,
-            new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
-
-        async Task<Device> AddCameraAsync(string type, string name, string rtspPath, string go2rtcId)
+        await _deviceLock.WaitAsync();
+        try
         {
-            var cfgObj = new
-            {
-                ip       = req.Ip,
-                username = req.Username,
-                password = req.Password,
-                rtsp_path = rtspPath,
-                go2rtc_id = go2rtcId,
-            };
-            var device = new Device
-            {
-                StationId    = req.StationId,
-                Name         = name,
-                Type         = type,
-                Protocol     = "isapi",
-                Config       = System.Text.Json.JsonSerializer.Serialize(cfgObj),
-                Capabilities = capsJson,
-                Status       = "online",
-            };
-            _db.Devices.Add(device);
-            await _db.SaveChangesAsync();
-            await _deviceService.RegisterCameraStreamAsync(device);
-            return device;
-        }
+            // Kiểm tra giới hạn camera theo license trước khi cấu hình tự động
+            var licenseStatus = await _license.GetStatusAsync();
+            var maxCams = licenseStatus != null ? licenseStatus.MaxCameras : 5;
 
-        if (caps.SubType == "pd")
-        {
-            // Camera chuyên phóng điện — chỉ 1 luồng optical
-            var d = await AddCameraAsync("camera_pd", $"{prefix} – Phóng điện", "/Streaming/Channels/101", $"camera_{ipTag}_pd");
-            // Áp config chuẩn StationOS cho cam PD ngay sau khi tạo
-            var pdOk = await _isapi.ApplyDefaultPdConfigAsync(req.Ip, req.Username, req.Password);
-            created.Add(new { d.Id, d.Name, d.Type, streamId = $"camera_{ipTag}_pd", configApplied = pdOk });
-        }
-        else
-        {
-            if (caps.HasThermal)
+            var currentCams = await _db.Devices.CountAsync(d => d.Type.StartsWith("camera"));
+            if (currentCams >= maxCams)
             {
-                // Camera có cả ảnh nhiệt và quang học → tạo duy nhất 1 thiết bị camera_dual
+                return BadRequest(new { message = $"Số lượng camera đã đạt giới hạn tối đa ({maxCams} camera). Vui lòng nâng cấp license key để tiếp tục." });
+            }
+
+            var caps = await _isapi.DiscoverCapabilitiesAsync(req.Ip, req.Username, req.Password);
+            if (caps == null)
+                return NotFound(new { error = "Không kết nối được hoặc không phải thiết bị Hikvision ISAPI" });
+
+            var prefix    = req.NamePrefix?.Trim() ?? caps.Model.Replace(" ", "_").ToUpperInvariant();
+            var ipTag     = req.Ip.Replace(".", "_");
+            var created   = new List<object>();
+            var capsJson  = System.Text.Json.JsonSerializer.Serialize(caps,
+                new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+
+            async Task<Device> AddCameraAsync(string type, string name, string rtspPath, string go2rtcId)
+            {
                 var cfgObj = new
                 {
-                    ip = req.Ip,
+                    ip       = req.Ip,
                     username = req.Username,
                     password = req.Password,
-                    rtsp_optical = "/Streaming/Channels/101",
-                    go2rtc_optical = $"cam_{ipTag}_optical",
-                    rtsp_thermal = "/Streaming/Channels/201",
-                    go2rtc_thermal = $"cam_{ipTag}_thermal"
+                    rtsp_path = rtspPath,
+                    go2rtc_id = go2rtcId,
                 };
                 var device = new Device
                 {
                     StationId    = req.StationId,
-                    Name         = $"{prefix} – Dual Thermal & Optical",
-                    Type         = "camera_dual",
+                    Name         = name,
+                    Type         = type,
                     Protocol     = "isapi",
                     Config       = System.Text.Json.JsonSerializer.Serialize(cfgObj),
                     Capabilities = capsJson,
@@ -229,17 +207,61 @@ public class DevicesController : ControllerBase
                 _db.Devices.Add(device);
                 await _db.SaveChangesAsync();
                 await _deviceService.RegisterCameraStreamAsync(device);
-                created.Add(new { device.Id, device.Name, device.Type, streamId = $"cam_{ipTag}_optical, cam_{ipTag}_thermal" });
+                return device;
+            }
+
+            if (caps.SubType == "pd")
+            {
+                // Camera chuyên phóng điện — chỉ 1 luồng optical
+                var d = await AddCameraAsync("camera_pd", $"{prefix} – Phóng điện", "/Streaming/Channels/101", $"camera_{ipTag}_pd");
+                // Áp config chuẩn StationOS cho cam PD ngay sau khi tạo
+                var pdOk = await _isapi.ApplyDefaultPdConfigAsync(req.Ip, req.Username, req.Password);
+                created.Add(new { d.Id, d.Name, d.Type, streamId = $"camera_{ipTag}_pd", configApplied = pdOk });
             }
             else
             {
-                // Camera thường — chỉ 1 luồng quang học
-                var optical = await AddCameraAsync("camera_cctv", $"{prefix} – Quan sát thường", "/Streaming/Channels/101", $"camera_{ipTag}_normal");
-                created.Add(new { optical.Id, optical.Name, optical.Type, streamId = $"camera_{ipTag}_normal" });
+                if (caps.HasThermal)
+                {
+                    // Camera có cả ảnh nhiệt và quang học → tạo duy nhất 1 thiết bị camera_dual
+                    var cfgObj = new
+                    {
+                        ip = req.Ip,
+                        username = req.Username,
+                        password = req.Password,
+                        rtsp_optical = "/Streaming/Channels/101",
+                        go2rtc_optical = $"cam_{ipTag}_optical",
+                        rtsp_thermal = "/Streaming/Channels/201",
+                        go2rtc_thermal = $"cam_{ipTag}_thermal"
+                    };
+                    var device = new Device
+                    {
+                        StationId    = req.StationId,
+                        Name         = $"{prefix} – Dual Thermal & Optical",
+                        Type         = "camera_dual",
+                        Protocol     = "isapi",
+                        Config       = System.Text.Json.JsonSerializer.Serialize(cfgObj),
+                        Capabilities = capsJson,
+                        Status       = "online",
+                    };
+                    _db.Devices.Add(device);
+                    await _db.SaveChangesAsync();
+                    await _deviceService.RegisterCameraStreamAsync(device);
+                    created.Add(new { device.Id, device.Name, device.Type, streamId = $"cam_{ipTag}_optical, cam_{ipTag}_thermal" });
+                }
+                else
+                {
+                    // Camera thường — chỉ 1 luồng quang học
+                    var optical = await AddCameraAsync("camera_cctv", $"{prefix} – Quan sát thường", "/Streaming/Channels/101", $"camera_{ipTag}_normal");
+                    created.Add(new { optical.Id, optical.Name, optical.Type, streamId = $"camera_{ipTag}_normal" });
+                }
             }
-        }
 
-        return Ok(new { created, capabilities = caps });
+            return Ok(new { created, capabilities = caps });
+        }
+        finally
+        {
+            _deviceLock.Release();
+        }
     }
 
     /// <summary>
@@ -251,60 +273,91 @@ public class DevicesController : ControllerBase
     [HttpPost("devices")]
     public async Task<IActionResult> Create([FromBody] CreateDeviceRequest req)
     {
-        // Tôn trọng loại thiết bị user chọn — không tự override.
-        // Capabilities chỉ probe để LƯU vào DB (xem được ở UI), không sửa req.Type.
-        string? capsJson = null;
-        if (req.Type.StartsWith("camera"))
+        await _deviceLock.WaitAsync();
+        try
         {
-            var cfg = TryParseConfig(req.Config);
-            var ip       = cfg.GetValueOrDefault("ip") as string;
-            var username = cfg.GetValueOrDefault("username") as string ?? "admin";
-            var password = cfg.GetValueOrDefault("password") as string ?? "";
+            // Kiểm tra giới hạn trạm con theo license
+            var licenseStatus = await _license.GetStatusAsync();
+            var (maxNonCams, maxCams, maxRoiPoints) = licenseStatus != null
+                ? (licenseStatus.MaxDevices, licenseStatus.MaxCameras, licenseStatus.MaxRoiPoints)
+                : (5, 5, 10);
 
-            if (!string.IsNullOrEmpty(ip))
+            if (req.Type.StartsWith("camera"))
             {
-                var caps = await _isapi.DiscoverCapabilitiesAsync(ip, username, password);
-                if (caps != null)
-                    capsJson = JsonSerializer.Serialize(caps, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                var cameraCount = await _db.Devices.CountAsync(d => d.Type.StartsWith("camera"));
+                if (cameraCount >= maxCams)
+                {
+                    return BadRequest(new { message = $"Số lượng camera đã đạt giới hạn tối đa ({maxCams} camera). Vui lòng nâng cấp license key để tiếp tục." });
+                }
             }
-        }
+            else
+            {
+                var deviceCount = await _db.Devices.CountAsync(d => !d.Type.StartsWith("camera"));
+                if (deviceCount >= maxNonCams)
+                {
+                    return BadRequest(new { message = $"Số lượng thiết bị đã đạt giới hạn tối đa ({maxNonCams} thiết bị). Vui lòng nâng cấp license key để tiếp tục." });
+                }
+            }
 
-        var device = new Device
-        {
-            StationId    = req.StationId,
-            Name         = req.Name,
-            Type         = req.Type,
-            Protocol     = req.Protocol ?? (req.Type.StartsWith("camera") ? "isapi" : null),
-            // Encrypt password trước khi save DB (idempotent — không re-encrypt nếu đã có prefix)
-            Config       = _crypto.EncryptPasswordInConfigJson(req.Config),
-            Capabilities = capsJson,
-            Status       = "online"
-        };
-        _db.Devices.Add(device);
-        await _db.SaveChangesAsync();
+            // Tôn trọng loại thiết bị user chọn — không tự override.
+            // Capabilities chỉ probe để LƯU vào DB (xem được ở UI), không sửa req.Type.
+            string? capsJson = null;
+            if (req.Type.StartsWith("camera"))
+            {
+                var cfg = TryParseConfig(req.Config);
+                var ip       = cfg.GetValueOrDefault("ip") as string;
+                var username = cfg.GetValueOrDefault("username") as string ?? "admin";
+                var password = cfg.GetValueOrDefault("password") as string ?? "";
 
-        // Camera → đăng ký stream với go2rtc. Pass DECRYPTED config để build RTSP URL đúng.
-        if (device.Type.StartsWith("camera") && req.Config != null)
-        {
-            var deviceForStream = new Device {
-                Id = device.Id, Name = device.Name, Type = device.Type,
-                Config = _crypto.DecryptPasswordInConfigJson(device.Config),
+                if (!string.IsNullOrEmpty(ip))
+                {
+                    var caps = await _isapi.DiscoverCapabilitiesAsync(ip, username, password);
+                    if (caps != null)
+                        capsJson = JsonSerializer.Serialize(caps, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                }
+            }
+
+            var device = new Device
+            {
+                StationId    = req.StationId,
+                Name         = req.Name,
+                Type         = req.Type,
+                Protocol     = req.Protocol ?? (req.Type.StartsWith("camera") ? "isapi" : null),
+                // Encrypt password trước khi save DB (idempotent — không re-encrypt nếu đã có prefix)
+                Config       = _crypto.EncryptPasswordInConfigJson(req.Config),
+                Capabilities = capsJson,
+                Status       = "online"
             };
-            await _deviceService.RegisterCameraStreamAsync(deviceForStream);
-        }
+            _db.Devices.Add(device);
+            await _db.SaveChangesAsync();
 
-        // PD camera → tự động apply config siêu âm chuẩn StationOS
-        if (device.Type == "camera_pd")
+            // Camera → đăng ký stream với go2rtc. Pass DECRYPTED config để build RTSP URL đúng.
+            if (device.Type.StartsWith("camera") && req.Config != null)
+            {
+                var deviceForStream = new Device {
+                    Id = device.Id, Name = device.Name, Type = device.Type,
+                    Config = _crypto.DecryptPasswordInConfigJson(device.Config),
+                };
+                await _deviceService.RegisterCameraStreamAsync(deviceForStream);
+            }
+
+            // PD camera → tự động apply config siêu âm chuẩn StationOS
+            if (device.Type == "camera_pd")
+            {
+                var cfg2 = TryParseConfig(req.Config);
+                var ip2   = cfg2.GetValueOrDefault("ip")       as string;
+                var u2    = cfg2.GetValueOrDefault("username") as string ?? "admin";
+                var p2    = cfg2.GetValueOrDefault("password") as string ?? "";
+                if (!string.IsNullOrEmpty(ip2))
+                    _ = _isapi.ApplyDefaultPdConfigAsync(ip2, u2, p2); // fire-and-forget
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = device.Id }, device);
+        }
+        finally
         {
-            var cfg2 = TryParseConfig(req.Config);
-            var ip2   = cfg2.GetValueOrDefault("ip")       as string;
-            var u2    = cfg2.GetValueOrDefault("username") as string ?? "admin";
-            var p2    = cfg2.GetValueOrDefault("password") as string ?? "";
-            if (!string.IsNullOrEmpty(ip2))
-                _ = _isapi.ApplyDefaultPdConfigAsync(ip2, u2, p2); // fire-and-forget
+            _deviceLock.Release();
         }
-
-        return CreatedAtAction(nameof(GetById), new { id = device.Id }, device);
     }
 
     private static Dictionary<string, object?> TryParseConfig(string? json)
@@ -517,6 +570,16 @@ public class DevicesController : ControllerBase
     [HttpPost("devices/{deviceId}/roi-points")]
     public async Task<IActionResult> CreateRoiPoint(Guid deviceId, [FromBody] RoiPointRequest req)
     {
+        // Kiểm tra giới hạn số điểm nhiệt theo license
+        var licenseStatus = await _license.GetStatusAsync();
+        var maxRoiPoints = licenseStatus != null ? licenseStatus.MaxRoiPoints : 10;
+
+        var currentPointsCount = await _db.RoiPoints.CountAsync();
+        if (currentPointsCount >= maxRoiPoints)
+        {
+            return BadRequest(new { message = $"Tổng số lượng điểm nhiệt trong hệ thống đã đạt giới hạn tối đa ({maxRoiPoints} điểm). Vui lòng nâng cấp license key để tiếp tục." });
+        }
+
         string? assignedPointId = req.PointId;
         if (string.IsNullOrEmpty(assignedPointId))
         {

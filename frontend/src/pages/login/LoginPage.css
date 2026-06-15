@@ -94,3 +94,12 @@
   20%, 60% { transform: translateX(-6px); }
   40%, 80% { transform: translateX(6px); }
 }
+
+.gm-pulse {
+  animation: gmPulseKey 2s infinite ease-in-out;
+}
+
+@keyframes gmPulseKey {
+  0%, 100% { opacity: 0.6; transform: scale(0.96); filter: drop-shadow(0 0 10px rgba(2, 132, 199, 0.2)); }
+  50% { opacity: 1; transform: scale(1.04); filter: drop-shadow(0 0 20px rgba(2, 132, 199, 0.6)); }
+}

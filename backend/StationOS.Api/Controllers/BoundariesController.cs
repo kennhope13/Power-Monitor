@@ -31,13 +31,15 @@ public class BoundariesController : ControllerBase
     private readonly PermissionService _permissions;
     private readonly IRealtimeNotifier _notifier;
     private readonly DeviceService _deviceService;
+    private readonly LicenseService _license;
 
-    public BoundariesController(AppDbContext db, PermissionService permissions, IRealtimeNotifier notifier, DeviceService deviceService)
+    public BoundariesController(AppDbContext db, PermissionService permissions, IRealtimeNotifier notifier, DeviceService deviceService, LicenseService license)
     {
         _db = db;
         _permissions = permissions;
         _notifier = notifier;
         _deviceService = deviceService;
+        _license = license;
     }
 
     /// <summary>Lấy danh sách vùng polygon đã định nghĩa trên camera.</summary>
@@ -91,6 +93,28 @@ public class BoundariesController : ControllerBase
             return BadRequest(new { error = "Tên không được rỗng" });
         if (string.IsNullOrWhiteSpace(req.Polygon) || req.Polygon == "[]")
             return BadRequest(new { error = "Polygon không hợp lệ" });
+
+        var licenseStatus = await _license.GetStatusAsync();
+        var boundaryType = string.IsNullOrEmpty(req.Type) ? "pd" : req.Type.ToLower();
+
+        if (boundaryType == "roi")
+        {
+            var maxRoiRegions = licenseStatus != null ? licenseStatus.MaxRoiRegions : 5;
+            var currentRoiRegions = await _db.Boundaries.CountAsync(x => x.Type == "roi");
+            if (currentRoiRegions >= maxRoiRegions)
+            {
+                return BadRequest(new { error = $"Số lượng vùng nhiệt đã đạt giới hạn tối đa ({maxRoiRegions} vùng). Vui lòng nâng cấp license key để tiếp tục." });
+            }
+        }
+        else if (boundaryType == "pd")
+        {
+            var maxPdRegions = licenseStatus != null ? licenseStatus.MaxPdRegions : 5;
+            var currentPdRegions = await _db.Boundaries.CountAsync(x => x.Type == "pd");
+            if (currentPdRegions >= maxPdRegions)
+            {
+                return BadRequest(new { error = $"Số lượng vùng phóng điện đã đạt giới hạn tối đa ({maxPdRegions} vùng). Vui lòng nâng cấp license key để tiếp tục." });
+            }
+        }
 
         var b = new Boundary
         {

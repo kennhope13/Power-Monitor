@@ -8,6 +8,11 @@ interface LicenseStatus {
   activated: boolean;
   tier?: string;
   maxUsers?: number;
+  maxDevices?: number;
+  maxCameras?: number;
+  maxRoiPoints?: number;
+  maxRoiRegions?: number;
+  maxPdRegions?: number;
   expiresAt?: string;
   activatedAt?: string;
   activeSessions?: number;
@@ -83,11 +88,23 @@ export default function LicensePage() {
         <div className="status-box">
           <div className="status-row">
             <span>Trạng thái</span>
-            <span className="status-badge demo">Chưa kích hoạt (Demo)</span>
+            <span className="status-badge demo">Chưa kích hoạt (Dùng thử)</span>
           </div>
           <div className="status-row">
-            <span>Giới hạn</span>
-            <span>Không giới hạn (chế độ thử nghiệm)</span>
+            <span>Số người dùng tối đa</span>
+            <span>1 người dùng</span>
+          </div>
+          <div className="status-row">
+            <span>Số thiết bị tối đa</span>
+            <span>5 thiết bị</span>
+          </div>
+          <div className="status-row">
+            <span>Số camera tối đa</span>
+            <span>5 camera</span>
+          </div>
+          <div className="status-row">
+            <span>Số điểm nhiệt tối đa</span>
+            <span>10 điểm</span>
           </div>
         </div>
       );
@@ -98,6 +115,12 @@ export default function LicensePage() {
     const actDate = status.activatedAt ? new Date(status.activatedAt).toLocaleDateString('vi-VN') : '—';
     const statusCls = status.isValid ? 'valid' : 'expired';
     const statusTxt = status.isValid ? 'Đang hoạt động' : 'Đã hết hạn';
+
+    const maxNonCams = status.maxDevices && status.maxDevices >= 999 ? 'Không giới hạn' : (status.maxDevices ?? '—');
+    const maxCams = status.maxCameras && status.maxCameras >= 999 ? 'Không giới hạn' : (status.maxCameras ?? '—');
+    const maxRoiPoints = status.maxRoiPoints && status.maxRoiPoints >= 999 ? 'Không giới hạn' : (status.maxRoiPoints ?? '—');
+    const maxRoiRegions = status.maxRoiRegions && status.maxRoiRegions >= 999 ? 'Không giới hạn' : (status.maxRoiRegions ?? '—');
+    const maxPdRegions = status.maxPdRegions && status.maxPdRegions >= 999 ? 'Không giới hạn' : (status.maxPdRegions ?? '—');
 
     return (
       <div className={`status-box ${statusCls}`}>
@@ -120,6 +143,26 @@ export default function LicensePage() {
         <div className="status-row">
           <span>Phiên đang hoạt động</span>
           <span>{status.activeSessions ?? 0} / {status.maxUsers && status.maxUsers >= 999 ? '∞' : status.maxUsers}</span>
+        </div>
+        <div className="status-row">
+          <span>Số thiết bị tối đa</span>
+          <span>{maxNonCams}</span>
+        </div>
+        <div className="status-row">
+          <span>Số camera tối đa</span>
+          <span>{maxCams}</span>
+        </div>
+        <div className="status-row">
+          <span>Số điểm nhiệt tối đa</span>
+          <span>{maxRoiPoints}</span>
+        </div>
+        <div className="status-row">
+          <span>Số vùng nhiệt tối đa</span>
+          <span>{maxRoiRegions}</span>
+        </div>
+        <div className="status-row">
+          <span>Số vùng phóng điện tối đa</span>
+          <span>{maxPdRegions}</span>
         </div>
         <div className="status-row">
           <span>Ngày hết hạn</span>
@@ -148,6 +191,20 @@ export default function LicensePage() {
 
           {renderStatusBox()}
 
+          <div className="license-contact-info" style={{ 
+            marginTop: 15, 
+            padding: '12px 16px', 
+            borderRadius: 8, 
+            background: 'rgba(255, 255, 255, 0.03)', 
+            border: '1px dashed rgba(255, 255, 255, 0.1)',
+            fontSize: '13px',
+            color: '#aaa',
+            textAlign: 'center',
+            lineHeight: '1.5'
+          }}>
+            ℹ️ <strong>Hỗ trợ & Cấp License:</strong> Nếu có nhu cầu mở rộng/thêm thiết bị, camera hoặc tăng số điểm nhiệt, vui lòng liên hệ trực tiếp với <strong>Nhà phát triển (Lập trình viên)</strong> để được hỗ trợ và cấp mã kích hoạt mới.
+          </div>
+
           {isAdmin && (
             <div className="license-activate-section" id="activateSection">
               <h3>Kích hoạt License Key</h3>
@@ -174,26 +231,13 @@ export default function LicensePage() {
                 </button>
               </form>
 
-              <div className="license-tiers">
-                <div className="tier-card">
-                  <span className="tier-badge solo">SOLO</span>
-                  <span>1 người dùng đồng thời</span>
-                </div>
-                <div className="tier-card">
-                  <span className="tier-badge team">TEAM</span>
-                  <span>5 người dùng đồng thời</span>
-                </div>
-                <div className="tier-card">
-                  <span className="tier-badge ent">ENTERPRISE</span>
-                  <span>Không giới hạn</span>
-                </div>
-              </div>
+              {/* Removed license-tiers grid for a cleaner interface */}
             </div>
           )}
 
           <div className="license-actions">
             <button className="btn-license-skip" onClick={() => navigate('/dashboard')}>
-              Vào hệ thống (Chế độ demo)
+              Quay lại Dashboard
             </button>
           </div>
         </div>

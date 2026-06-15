@@ -28,12 +28,16 @@ const LicensePage = React.lazy(() => import('@/pages/license/LicensePage'));
 
 import { authService } from '@/services/AuthService';
 
-// Bảo vệ route và phân quyền theo vai trò
 const ProtectedRoute = ({ children, roles, denyRestricted }: { children: React.ReactNode, roles?: string[], denyRestricted?: boolean }) => {
   const user = authService.getUser();
+  const params = new URLSearchParams(window.location.search);
+  const hasSsoToken = params.has('token');
   
   if (!user) {
-    return <Navigate to="/login" replace />;
+    if (hasSsoToken) {
+      return <ScreenLoader />;
+    }
+    return <Navigate to={`/login${window.location.search}`} replace />;
   }
   
   if (denyRestricted && user.is_restricted) {
@@ -163,8 +167,8 @@ export default function App() {
              <Route path="device-management" element={<ProtectedRoute roles={['admin']}><DeviceManagementPage /></ProtectedRoute>} />
              <Route path="device-management/:deviceId/thermal-config" element={<ProtectedRoute roles={['admin']}><ThermalConfigPage /></ProtectedRoute>} />
              <Route path="user-management" element={<ProtectedRoute roles={['admin']}><UserManagementPage /></ProtectedRoute>} />
-             <Route path="settings" element={<ProtectedRoute roles={['admin']} denyRestricted><SettingsPage /></ProtectedRoute>} />
-             <Route path="license" element={<ProtectedRoute roles={['admin']} denyRestricted><LicensePage /></ProtectedRoute>} />
+             <Route path="settings" element={<ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>} />
+             <Route path="license" element={<ProtectedRoute roles={['admin']}><LicensePage /></ProtectedRoute>} />
              <Route path="*" element={<div style={{color:'var(--admin-text)', padding:20}}>404 - Page not found</div>} />
           </Route>
         </Routes>

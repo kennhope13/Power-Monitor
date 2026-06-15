@@ -219,7 +219,10 @@ export default function PdRegionTab({ initialCamera: cam }: Props) {
       setForm(EMPTY_FORM);
       setDraftVertices([]);
       loadBoundaries(cam.id);
-    } catch (e) { console.error(e); }
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || 'Lỗi khi lưu vùng PD');
+    }
   };
 
   const handleDelete = async (b: Boundary) => {

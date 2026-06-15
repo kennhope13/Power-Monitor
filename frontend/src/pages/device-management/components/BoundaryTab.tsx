@@ -179,8 +179,8 @@ export default function BoundaryTab({ cameras, initialCamera }: Props) {
       setEditingId(null);
       setDraftVertices([]);
       loadBoundaries(cam.id);
-    } catch (e) {
-      alert('Lỗi khi lưu vùng');
+    } catch (e: any) {
+      alert(e.message || 'Lỗi khi lưu vùng');
     }
   };
 

@@ -106,7 +106,15 @@ export async function apiFetch<T>(path: string): Promise<T> {
     }
   }
 
-  if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    let displayMsg = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      displayMsg = parsed.message || parsed.error || errText;
+    } catch {}
+    throw new Error(displayMsg || `API ${path} → ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -142,8 +150,13 @@ export async function apiMutate<T = any>(method: string, path: string, body?: ob
   }
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || `${method} ${path} → ${res.status}`);
+    const errText = await res.text();
+    let displayMsg = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      displayMsg = parsed.message || parsed.error || errText;
+    } catch {}
+    throw new Error(displayMsg || `${method} ${path} → ${res.status}`);
   }
   if (res.status === 204) return null as T;
   return res.json();

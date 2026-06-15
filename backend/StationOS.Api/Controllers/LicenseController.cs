@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // LicenseController — Quản lý license key
 // GET  /api/v1/license/status   — public, trả về trạng thái
 // POST /api/v1/license/activate — yêu cầu admin JWT
@@ -33,6 +33,11 @@ public class LicenseController : ControllerBase
             activated      = true,
             tier           = status.Tier,
             maxUsers       = status.MaxUsers,
+            maxDevices     = status.MaxDevices,
+            maxCameras     = status.MaxCameras,
+            maxRoiPoints   = status.MaxRoiPoints,
+            maxRoiRegions  = status.MaxRoiRegions,
+            maxPdRegions   = status.MaxPdRegions,
             expiresAt      = status.ExpiresAt,
             activatedAt    = status.ActivatedAt,
             activeSessions = status.ActiveSessions,
@@ -64,7 +69,7 @@ public class LicenseController : ControllerBase
     [HttpPost("validate")]
     public IActionResult Validate([FromBody] LicenseKeyRequest req)
     {
-        var (valid, tier, maxUsers, expiresAt, error) = _license.ValidateKey(req.Key ?? "");
+        var (valid, tier, maxUsers, maxDevices, maxCameras, maxRoiPoints, maxRoiRegions, maxPdRegions, expiresAt, error) = _license.ValidateKey(req.Key ?? "");
         if (!valid)
             return BadRequest(new { valid = false, message = error });
 
@@ -73,6 +78,11 @@ public class LicenseController : ControllerBase
             valid,
             tier,
             maxUsers,
+            maxDevices,
+            maxCameras,
+            maxRoiPoints = maxRoiPoints,
+            maxRoiRegions = maxRoiRegions,
+            maxPdRegions = maxPdRegions,
             expiresAt,
             daysRemaining = (int)(expiresAt - DateTime.UtcNow).TotalDays
         });

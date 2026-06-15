@@ -42,9 +42,9 @@ streams:
   cam_hanoi_optical_sub:
     - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/102
   cam_danang_pd:
-    - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
+    - rtsp://admin:Demo%402024@192.168.30.153:554/Streaming/Channels/101
   cam_danang_pd_sub:
-    - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/102
+    - rtsp://admin:Demo%402024@192.168.30.153:554/Streaming/Channels/102
   camera_152_normal:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101
   camera_152_normal_sub:
@@ -57,3 +57,7 @@ streams:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
   camera_153_pd_sub:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/102
+  camera_192_1689_1234__cctv:
+    - rtsp://admin:Admin%40123@192.1689.1234.:554
+  bd6cf5a7:
+    - rtsp://admin:Password123@192.168.10.155:554/stream1

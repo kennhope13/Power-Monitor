@@ -19,7 +19,7 @@ import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
   LayoutDashboard, Video, AlertTriangle, LineChart, FileText,
   Wrench, FileArchive, Map, Radio, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Key
 } from 'lucide-react';
 
 interface NavSubItem { id: string; path: string; label: string }
@@ -51,6 +51,7 @@ const CHILD_ADMIN_NAV: NavItem[] = [
   { id: 'device-management', path: '/device-management', icon: <Radio size={19} strokeWidth={1.5} />, label: 'Thiết bị', roles: ['admin'] },
   { id: 'user-management', path: '/user-management', icon: <Users size={19} strokeWidth={1.5} />, label: 'Người dùng', roles: ['admin'] },
   { id: 'settings', path: '/settings', icon: <Settings size={19} strokeWidth={1.5} />, label: 'Cài đặt', roles: ['admin'] },
+  { id: 'license', path: '/license', icon: <Key size={19} strokeWidth={1.5} />, label: 'Bản quyền', roles: ['admin'] },
 ];
 
 const THEME_NAMES: Record<string, string> = {
@@ -110,10 +111,10 @@ export default function AppShell() {
   const navItems = isCentralMode ? CENTRAL_NAV : CHILD_NAV;
 
   // Lọc adminNavItems theo quyền:
-  // - Restricted admin (trạm con): ẩn settings, license
-  // - Global admin (kể cả khi drill-down): giữ nguyên toàn bộ CHILD_ADMIN_NAV
+  // - Restricted admin (khi ở trạm tổng): ẩn settings, license
+  // - Trên trạm con (Power-Monitor): luôn hiển thị đầy đủ menu quản trị cho Admin
   const adminNavItems = (isCentralMode ? CENTRAL_ADMIN_NAV : CHILD_ADMIN_NAV).filter(item => {
-    if (user.is_restricted || (user.station_ids && user.station_ids.length > 0)) {
+    if (isCentralMode && (user.is_restricted || (user.station_ids && user.station_ids.length > 0))) {
       return !['settings', 'license'].includes(item.id);
     }
     return true;

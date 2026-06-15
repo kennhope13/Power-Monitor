@@ -435,7 +435,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
       setForm(EMPTY_FORM);
       load(); // Reload data from DB
       syncAI();
-    } catch(e) { alert("Lưu thất bại!"); }
+    } catch(e: any) { alert(e.message || "Lưu thất bại!"); }
   };
 
   const delMarker = async (id:string) => {
