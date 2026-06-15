@@ -42,16 +42,12 @@ fi
 
 # 3. Khởi động Video Streaming (go2rtc)
 echo "[3/4] Khởi động go2rtc Video Streamer..."
+kill -9 $(pgrep -f "go2rtc") >/dev/null 2>&1 || true
 if command -v docker &> /dev/null; then
     sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
-    sudo docker run -d --name stationos-go2rtc-monitor \
-        -p 1984:1984 -p 8554:8554 -p 8555:8555 \
-        -v "$ROOT/go2rtc/go2rtc.yaml:/config/go2rtc.yaml" \
-        alexxit/go2rtc:latest >/dev/null 2>&1
-    echo "✅ go2rtc đang chạy (Port: 1984)"
-else
-    echo "⚠️  Không thể chạy go2rtc qua Docker. Live stream video có thể không hoạt động."
 fi
+nohup "$ROOT/go2rtc/go2rtc" -c "$ROOT/go2rtc/go2rtc.yaml" > "$ROOT/go2rtc.log" 2>&1 &
+echo "✅ go2rtc đang chạy ngầm (Port: 1984)"
 
 # 4. Khởi động Backend (.NET 8)
 echo "[4/4] Khởi động C# Backend..."

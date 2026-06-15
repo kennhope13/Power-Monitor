@@ -8,10 +8,11 @@ echo "  StationOS Dev Stack — Stop All"
 echo "==============================================="
 echo ""
 
-echo "[1/2] Dừng container go2rtc..."
+echo "[1/2] Dừng container và tiến trình go2rtc..."
 if command -v docker &> /dev/null; then
     sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
 fi
+kill -9 $(pgrep -f "go2rtc") >/dev/null 2>&1 || true
 
 echo "[2/2] Dừng các tiến trình đang giữ cổng..."
 for port in 5173 5000 8100; do
