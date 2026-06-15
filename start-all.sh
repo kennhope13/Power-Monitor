@@ -46,6 +46,7 @@ kill -9 $(pgrep -f "go2rtc") >/dev/null 2>&1 || true
 if command -v docker &> /dev/null; then
     sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
 fi
+export PATH="$ROOT/go2rtc:$PATH"
 nohup "$ROOT/go2rtc/go2rtc" -c "$ROOT/go2rtc/go2rtc.yaml" > "$ROOT/go2rtc.log" 2>&1 &
 echo "✅ go2rtc đang chạy ngầm (Port: 1984)"
 
