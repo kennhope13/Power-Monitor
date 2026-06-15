@@ -112,12 +112,19 @@ function SsoAutoLogin() {
         setSession(user, token);
         localStorage.setItem('station_token', token);
 
-        // Xóa tham số token khỏi URL để bảo mật
+        // Xóa tham số token khỏi URL để bảo mật và chuyển hướng người dùng
+        const nextPath = params.get('next');
         params.delete('token');
         const searchStr = params.toString();
-        const cleanUrl = location.pathname + (searchStr ? `?${searchStr}` : '') + location.hash;
+
+        let targetPath = location.pathname;
+        if (location.pathname === '/login' || location.pathname === '/') {
+          targetPath = nextPath || '/dashboard';
+        }
+
+        const cleanUrl = targetPath + (searchStr ? `?${searchStr}` : '') + location.hash;
         
-        // Cập nhật URL và giữ nguyên trang hiện tại
+        // Cập nhật URL và chuyển hướng người dùng
         window.history.replaceState({}, document.title, cleanUrl);
         navigate(cleanUrl, { replace: true });
       } catch (error) {

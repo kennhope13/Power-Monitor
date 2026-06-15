@@ -222,7 +222,7 @@ function startLocalUiServer() {
     });
 
     server.on('error', reject);
-    server.listen(4173, '127.0.0.1', () => {
+    server.listen(4173, '0.0.0.0', () => {
       localUiServer = server;
       localUiPort = 4173;
       resolve(localUiPort);
