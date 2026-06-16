@@ -19,7 +19,7 @@ import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
   LayoutDashboard, Video, AlertTriangle, LineChart, FileText,
   Wrench, FileArchive, Map, Radio, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Key
 } from 'lucide-react';
 
 interface NavSubItem { id: string; path: string; label: string }
@@ -110,10 +110,10 @@ export default function AppShell() {
   const navItems = isCentralMode ? CENTRAL_NAV : CHILD_NAV;
 
   // Lọc adminNavItems theo quyền:
-  // - Restricted admin (trạm con): ẩn settings, license
-  // - Global admin (kể cả khi drill-down): giữ nguyên toàn bộ CHILD_ADMIN_NAV
+  // - Restricted admin (khi ở trạm tổng): ẩn settings, license
+  // - Trên trạm con (Power-Monitor): luôn hiển thị đầy đủ menu quản trị cho Admin
   const adminNavItems = (isCentralMode ? CENTRAL_ADMIN_NAV : CHILD_ADMIN_NAV).filter(item => {
-    if (user.is_restricted || (user.station_ids && user.station_ids.length > 0)) {
+    if (isCentralMode && (user.is_restricted || (user.station_ids && user.station_ids.length > 0))) {
       return !['settings', 'license'].includes(item.id);
     }
     return true;
@@ -576,6 +576,21 @@ export default function AppShell() {
                       </div>
                     )}
                     <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
+                    {user.role === 'admin' && (
+                      <>
+                        <div 
+                          className="sb-popover-item"
+                          onClick={() => {
+                            navigate('/license');
+                            setShowUserMenu(false);
+                          }}
+                          style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          <Key size={14} strokeWidth={2} /> <span>Giftcode bản quyền</span>
+                        </div>
+                        <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
+                      </>
+                    )}
                     <div className="sb-popover-item danger" onClick={() => { setShowLogoutModal(true); setShowUserMenu(false); }} style={{ padding: '8px 12px' }}>
                       <LogOut size={14} strokeWidth={2} /> <span>Đăng xuất</span>
                     </div>

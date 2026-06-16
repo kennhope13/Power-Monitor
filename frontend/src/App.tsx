@@ -164,7 +164,7 @@ export default function App() {
              <Route path="device-management/:deviceId/thermal-config" element={<ProtectedRoute roles={['admin']}><ThermalConfigPage /></ProtectedRoute>} />
              <Route path="user-management" element={<ProtectedRoute roles={['admin']}><UserManagementPage /></ProtectedRoute>} />
              <Route path="settings" element={<ProtectedRoute roles={['admin']} denyRestricted><SettingsPage /></ProtectedRoute>} />
-             <Route path="license" element={<ProtectedRoute roles={['admin']} denyRestricted><LicensePage /></ProtectedRoute>} />
+             <Route path="license" element={<ProtectedRoute roles={['admin']}><LicensePage /></ProtectedRoute>} />
              <Route path="*" element={<div style={{color:'var(--admin-text)', padding:20}}>404 - Page not found</div>} />
           </Route>
         </Routes>

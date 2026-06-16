@@ -57,3 +57,13 @@ streams:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
   camera_153_pd_sub:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/102
+  camera_192_1689_1234__cctv:
+    - rtsp://admin:Admin%40123@192.1689.1234.:554
+  bd6cf5a7:
+    - rtsp://admin:Password123@192.168.10.155:554/stream1
+  camera_192_168_10_113_cctv:
+    - rtsp://admin:Demo%402024@192.168.10.113:554
+  cam_192_168_10_100_thermal:
+    - rtsp://admin:Demo%402024@192.168.10.100:554/Streaming/Channels/201
+  cam_192_168_10_114_thermal:
+    - rtsp://admin:Admin%40123@192.168.10.114:554

@@ -543,7 +543,7 @@ export default function DeviceManagementPage({
               className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedRoiDevice(null); }}
             >
-              ← QUAY LẠI
+              ←
             </button>
             <h2 style={{ fontSize: '1rem', marginLeft: 15 }}>
               CẤU HÌNH NHIỆT: {selectedRoiDevice?.name || '---'}
@@ -557,7 +557,7 @@ export default function DeviceManagementPage({
               className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedFireDevice(null); }}
             >
-              ← QUAY LẠI
+              ←
             </button>
             <h2 style={{ fontSize: '1rem', marginLeft: 15 }}>
               CẤU HÌNH CẢNH BÁO CHÁY: {selectedFireDevice?.name || '---'}
@@ -571,7 +571,7 @@ export default function DeviceManagementPage({
               className="btn-industrial btn-sm btn-back"
               onClick={() => { setRoiTab(0); setSelectedPdDevice(null); }}
             >
-              ← QUAY LẠI
+              ←
             </button>
             <h2 style={{ fontSize: '1rem', marginLeft: 15 }}>
               VẼ VÙNG PD: {selectedPdDevice?.name || '---'}
