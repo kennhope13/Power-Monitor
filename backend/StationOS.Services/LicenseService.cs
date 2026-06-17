@@ -398,6 +398,19 @@ public class LicenseService
         return false;
     }
 
+    // ── Utility ───────────────────────────────────────────────
+    
+    /// <summary>
+    /// Remove all license entries from the database. Use with caution; intended for resetting license tokens.
+    /// </summary>
+    public async Task ClearAllLicensesAsync()
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Licenses.RemoveRange(db.Licenses);
+        await db.SaveChangesAsync();
+    }
+
     private void CleanExpiredSessions()
     {
         var now = DateTime.UtcNow;

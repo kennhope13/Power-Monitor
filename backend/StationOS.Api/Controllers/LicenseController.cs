@@ -93,6 +93,15 @@ public class LicenseController : ControllerBase
             daysRemaining = (int)(expiresAt - DateTime.UtcNow).TotalDays
         });
     }
+
+    /// <summary>Xoá toàn bộ license trong database. Yêu cầu quyền admin.</summary>
+    [Authorize(Roles = "admin")]
+    [HttpDelete("clear")]
+    public async Task<IActionResult> ClearAll()
+    {
+        await _license.ClearAllLicensesAsync();
+        return Ok(new { message = "Đã xoá toàn bộ license. Hệ thống sẵn sàng để kích hoạt giftcode mới." });
+    }
 }
 
 public record LicenseKeyRequest(string? Key);

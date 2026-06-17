@@ -32,7 +32,7 @@ streams:
   cam_192_168_10_120_optical:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/101
   cam_192_168_10_120_thermal:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201#video=h264
+    - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201
   cam_192_168_10_120_optical_sub:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/102
   cam_hanoi_optical:
@@ -50,7 +50,7 @@ streams:
   camera_152_normal_sub:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102
   camera_152_thermal:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#video=h264
+    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201
   camera_152_thermal_sub:
     - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/202#video=h264
   camera_153_pd:
@@ -63,3 +63,5 @@ streams:
     - rtsp://admin:Password123@192.168.10.155:554/stream1
   cam_192_168_10_114_thermal:
     - rtsp://admin:Admin%40123@192.168.10.114:554
+  camera_123_123_123_123_cctv:
+    - rtsp://admin:dsfasdf@123.123.123.123:554
