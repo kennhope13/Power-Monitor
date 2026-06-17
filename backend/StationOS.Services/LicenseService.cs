@@ -276,7 +276,19 @@ public class LicenseService
     public void RegisterActiveSession(string sessionId, string userId, DateTime expiresAt)
     {
         CleanExpiredSessions();
-        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+        bool isBypass = false;
+        if (_activeSessions.TryGetValue(sessionId, out var existing))
+        {
+            isBypass = existing.IsBypass;
+        }
+        else
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = db.Users.FirstOrDefault(u => u.Id == Guid.Parse(userId));
+            isBypass = user != null && (user.Username == "multi" || user.Role == "admin");
+        }
+        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
     }
 
     /// <summary>
@@ -290,6 +302,9 @@ public class LicenseService
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Guid.Parse(userId));
+        bool isBypass = user != null && (user.Username == "multi" || user.Role == "admin");
 
         var activeLicense = await db.Licenses
             .Where(l => l.IsActive)
@@ -315,18 +330,25 @@ public class LicenseService
         // Check if this specific session is already registered
         if (_activeSessions.ContainsKey(sessionId))
         {
-            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
             return (true, reason);
         }
 
-        // If not registered, check if we are at the limit
-        if (_activeSessions.Count >= maxUsers)
+        // Nếu là tài khoản trạm tổng (multi) hoặc admin thì cho qua không giới hạn
+        if (isBypass)
         {
-            // Block the new login directly rather than kicking out the existing session
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
+            return (true, reason);
+        }
+
+        // Chỉ tính tổng các session của user bình thường (không có bypass)
+        int activeCount = _activeSessions.Values.Count(s => !s.IsBypass);
+        if (activeCount >= maxUsers)
+        {
             return (false, "max_users");
         }
 
-        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
         return (true, reason);
     }
 
@@ -343,10 +365,14 @@ public class LicenseService
     {
         CleanExpiredSessions();
 
+        bool isBypass = false;
         int maxUsers = 1;
         using (var scope = _scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = db.Users.FirstOrDefault(u => u.Id == Guid.Parse(userId));
+            isBypass = user != null && (user.Username == "multi" || user.Role == "admin");
+
             var activeLicense = db.Licenses.FirstOrDefault(l => l.IsActive);
             if (activeLicense != null)
             {
@@ -355,9 +381,17 @@ public class LicenseService
             }
         }
 
-        if (_activeSessions.Count < maxUsers)
+        // Nếu là trạm tổng (multi) hoặc admin thì luôn cho qua
+        if (isBypass)
         {
-            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
+            return true;
+        }
+
+        int activeCount = _activeSessions.Values.Count(s => !s.IsBypass);
+        if (activeCount < maxUsers)
+        {
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
             return true;
         }
 
@@ -376,12 +410,13 @@ public class LicenseService
         return _activeSessions.Select(x => new {
             SessionId = x.Key,
             UserId = x.Value.UserId,
-            ExpiresAt = x.Value.ExpiresAt
+            ExpiresAt = x.Value.ExpiresAt,
+            IsBypass = x.Value.IsBypass
         }).ToList();
     }
 }
 
-public record ActiveSessionInfo(string UserId, DateTime ExpiresAt);
+public record ActiveSessionInfo(string UserId, DateTime ExpiresAt, bool IsBypass = false);
 
 public record LicenseStatusDto(
     string Tier,
