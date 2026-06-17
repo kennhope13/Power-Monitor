@@ -198,6 +198,50 @@ public class AuthController : ControllerBase
         return Ok(new { userId, username, role, fullName });
     }
 
+    /// <summary>
+    /// Đăng xuất — hủy bỏ phiên hoạt động trên server
+    /// Yêu cầu: Header Authorization: Bearer {token}
+    /// </summary>
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var sessionId = User.FindFirst("sessionId")?.Value;
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            var rawToken = Request.Headers["Authorization"].ToString().Replace("Bearer ", "").Trim();
+            if (!string.IsNullOrEmpty(rawToken))
+            {
+                var hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken));
+                sessionId = "legacy_" + Convert.ToHexString(hashBytes)[..16];
+            }
+        }
+
+        if (!string.IsNullOrEmpty(sessionId))
+        {
+            _license.ReleaseSession(sessionId);
+        }
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!string.IsNullOrEmpty(userId))
+        {
+            var station = await _db.Stations.FirstOrDefaultAsync();
+            if (station != null)
+            {
+                var key = $"refresh_token_{userId}";
+                var existing = await _db.SystemSettings
+                    .FirstOrDefaultAsync(s => s.StationId == station.Id && s.Key == key);
+                if (existing != null)
+                {
+                    _db.SystemSettings.Remove(existing);
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+
+        return Ok(new { message = "Đăng xuất thành công" });
+    }
+
     // ── Helpers ──────────────────────────────────────────────
     private async Task SaveRefreshTokenAsync(Guid userId, string token, string sessionId)
     {

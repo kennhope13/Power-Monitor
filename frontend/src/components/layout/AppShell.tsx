@@ -381,8 +381,8 @@ export default function AppShell() {
   };
 
   /** Đăng xuất người dùng, xóa phiên và reload toàn bộ state app. */
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    await authService.logout();
     navigate('/login');
     window.location.reload(); // reset toàn bộ state app
   };

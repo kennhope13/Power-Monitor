@@ -73,7 +73,20 @@ class AuthService {
     }
 
     /** Đăng xuất — xóa phiên khỏi store và localStorage. */
-    public logout(): void {
+    public async logout(): Promise<void> {
+        const token = this.getToken();
+        if (token) {
+            try {
+                await fetch(`${API_BASE}/auth/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+            } catch (err) {
+                console.warn('Backend logout failed:', err);
+            }
+        }
         useAuthStore.getState().clearSession();
         localStorage.removeItem('station_token');
     }
