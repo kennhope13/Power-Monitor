@@ -26,7 +26,14 @@ class AuthService {
             });
 
             if (!res.ok) {
-                return { success: false, error: 'Sai tên đăng nhập hoặc mật khẩu' };
+                let errorMsg = 'Sai tên đăng nhập hoặc mật khẩu';
+                try {
+                    const errData = await res.json();
+                    if (errData && errData.message) {
+                        errorMsg = errData.message;
+                    }
+                } catch {}
+                return { success: false, error: errorMsg };
             }
 
             const data = await res.json();

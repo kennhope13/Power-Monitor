@@ -21,8 +21,8 @@ public class LicenseService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _vendorSecret;
 
-    // In-memory session tracking: tokenHash → expiresAt
-    private readonly ConcurrentDictionary<string, DateTime> _activeSessions = new();
+    // In-memory session tracking: sessionId -> ActiveSessionInfo
+    private readonly ConcurrentDictionary<string, ActiveSessionInfo> _activeSessions = new();
 
     public LicenseService(IServiceScopeFactory scopeFactory, IConfiguration config)
     {
@@ -271,11 +271,20 @@ public class LicenseService
     // ── Session tracking ───────────────────────────────────────
 
     /// <summary>
+    /// Đăng ký/cập nhật phiên hoạt động từ Middleware JWT
+    /// </summary>
+    public void RegisterActiveSession(string sessionId, string userId, DateTime expiresAt)
+    {
+        CleanExpiredSessions();
+        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+    }
+
+    /// <summary>
     /// Gọi sau khi login thành công.
     /// Trả false nếu license valid mà đã đủ concurrent users.
     /// Nếu chưa có license thì vẫn cho vào (để admin kích hoạt).
     /// </summary>
-    public async Task<(bool allowed, string reason)> TryAcquireSessionAsync(string tokenHash, DateTime expiresAt)
+    public async Task<(bool allowed, string reason)> TryAcquireSessionAsync(string sessionId, string userId, DateTime expiresAt)
     {
         CleanExpiredSessions();
 
@@ -287,50 +296,92 @@ public class LicenseService
             .OrderByDescending(l => l.ActivatedAt)
             .FirstOrDefaultAsync();
 
-        if (activeLicense == null)
+        int maxUsers = 1;
+        bool hasLicense = false;
+        bool valid = false;
+
+        if (activeLicense != null)
         {
-            // No license in DB: Allow login but with "no_license" reason, limited to 1 user (SOLO trial limit)
-            if (_activeSessions.Count >= 1 && !_activeSessions.ContainsKey(tokenHash))
-            {
-                return (false, "max_users");
-            }
-            _activeSessions[tokenHash] = expiresAt;
-            return (true, "no_license");
+            var valResult = ValidateKey(activeLicense.Key);
+            valid = valResult.valid;
+            maxUsers = valResult.maxUsers;
+            hasLicense = true;
         }
 
-        var (valid, tier, maxUsers, maxDevices, maxCameras, maxRoiPoints, maxRoiRegions, maxPdRegions, expires, error) = ValidateKey(activeLicense.Key);
+        string reason = "";
+        if (!hasLicense) reason = "no_license";
+        else if (!valid) reason = "expired";
 
-        if (!valid)
+        // Check if this specific session is already registered
+        if (_activeSessions.ContainsKey(sessionId))
         {
-            // Expired or invalid license: Allow login but with "expired" reason, limited to 1 user (SOLO grace limit)
-            if (_activeSessions.Count >= 1 && !_activeSessions.ContainsKey(tokenHash))
-            {
-                return (false, "max_users");
-            }
-            _activeSessions[tokenHash] = expiresAt;
-            return (true, "expired");
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+            return (true, reason);
         }
 
-        // Valid license: limit by tier's max users
-        if (_activeSessions.Count >= maxUsers && !_activeSessions.ContainsKey(tokenHash))
+        // If not registered, check if we are at the limit
+        if (_activeSessions.Count >= maxUsers)
         {
+            // Block the new login directly rather than kicking out the existing session
             return (false, "max_users");
         }
 
-        _activeSessions[tokenHash] = expiresAt;
-        return (true, "");
+        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+        return (true, reason);
     }
 
-    public void ReleaseSession(string tokenHash)
-        => _activeSessions.TryRemove(tokenHash, out _);
+    public void ReleaseSession(string sessionId)
+        => _activeSessions.TryRemove(sessionId, out _);
+
+    public bool IsSessionActive(string sessionId)
+    {
+        CleanExpiredSessions();
+        return _activeSessions.ContainsKey(sessionId);
+    }
+
+    public bool TryRegisterOnRequest(string sessionId, string userId, DateTime expiresAt)
+    {
+        CleanExpiredSessions();
+
+        int maxUsers = 1;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var activeLicense = db.Licenses.FirstOrDefault(l => l.IsActive);
+            if (activeLicense != null)
+            {
+                var valResult = ValidateKey(activeLicense.Key);
+                if (valResult.valid) maxUsers = valResult.maxUsers;
+            }
+        }
+
+        if (_activeSessions.Count < maxUsers)
+        {
+            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt);
+            return true;
+        }
+
+        return false;
+    }
 
     private void CleanExpiredSessions()
     {
         var now = DateTime.UtcNow;
         foreach (var kvp in _activeSessions)
-            if (kvp.Value < now) _activeSessions.TryRemove(kvp.Key, out _);
+            if (kvp.Value.ExpiresAt < now) _activeSessions.TryRemove(kvp.Key, out _);
+    }
+
+    public object GetActiveSessionsForDebug()
+    {
+        return _activeSessions.Select(x => new {
+            SessionId = x.Key,
+            UserId = x.Value.UserId,
+            ExpiresAt = x.Value.ExpiresAt
+        }).ToList();
     }
 }
+
+public record ActiveSessionInfo(string UserId, DateTime ExpiresAt);
 
 public record LicenseStatusDto(
     string Tier,

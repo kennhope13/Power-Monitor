@@ -69,8 +69,8 @@ app.UseCors();
 app.UseRateLimiter();          // Rate limit: phải nằm SAU UseCors, TRƯỚC UseAuth
 app.UseAuthentication();
 // Dev only: auto-gán admin claims khi request không có Authorization header → khỏi login lại liên tục
-if (app.Environment.IsDevelopment())
-    app.UseMiddleware<StationOS.Api.Middleware.DevAutoAuthMiddleware>();
+// if (app.Environment.IsDevelopment())
+//     app.UseMiddleware<StationOS.Api.Middleware.DevAutoAuthMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<AuditMiddleware>(); // Ghi audit log tự động
 

@@ -32,7 +32,7 @@ public class AuthService
     /// Đăng nhập: kiểm tra username/password → trả JWT + refreshToken
     /// Trả null nếu sai thông tin hoặc tài khoản bị vô hiệu
     /// </summary>
-    public async Task<(string token, string refreshToken, User user)?> LoginAsync(string username, string password)
+    public async Task<(string token, string refreshToken, User user, string sessionId)?> LoginAsync(string username, string password)
     {
         // Tìm user active trong DB
         var user = await _db.Users
@@ -42,7 +42,8 @@ public class AuthService
         if (user == null || !BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             return null;
 
-        var token = GenerateJwt(user);
+        var sessionId = Guid.NewGuid().ToString();
+        var token = GenerateJwt(user, sessionId);
         var refreshToken = GenerateRefreshToken();
 
         // Update last login timestamp
@@ -57,7 +58,7 @@ public class AuthService
         });
         await _db.SaveChangesAsync();
 
-        return (token, refreshToken, user);
+        return (token, refreshToken, user, sessionId);
     }
 
     /// <summary>
@@ -97,7 +98,7 @@ public class AuthService
     /// Tạo JWT token chứa: userId, username, role, fullName
     /// Hết hạn sau ExpiryMinutes phút (config trong appsettings.json)
     /// </summary>
-    public string GenerateJwt(User user)
+    public string GenerateJwt(User user, string sessionId)
     {
         var key = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
@@ -109,6 +110,7 @@ public class AuthService
             new Claim(ClaimTypes.Name, user.Username),
             new Claim(ClaimTypes.Role, user.Role),
             new Claim("fullName", user.FullName ?? user.Username),
+            new Claim("sessionId", sessionId)
         };
 
         if (user.StationIds != null && user.StationIds.Length > 0)

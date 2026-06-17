@@ -46,6 +46,12 @@ public class LicenseController : ControllerBase
         });
     }
 
+    [HttpGet("sessions")]
+    public IActionResult Sessions()
+    {
+        return Ok(_license.GetActiveSessionsForDebug());
+    }
+
     /// <summary>Kích hoạt license key cho hệ thống. Yêu cầu quyền admin.</summary>
     /// <param name="req">License key cần kích hoạt.</param>
     /// <returns>Thông báo kích hoạt thành công hoặc lỗi nếu key không hợp lệ.</returns>

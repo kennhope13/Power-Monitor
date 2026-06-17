@@ -7,6 +7,8 @@
 import { useEffect, useState, Suspense, useRef, useCallback } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '@/services/AuthService';
+import { useAuthStore } from '@/store/authStore';
+import { apiFetch } from '@/services/api/BaseApiService';
 import { useAlertStore, useSensorStore, useStationStore } from '@/store';
 import { ALERT_STATUS } from '@/types/enums';
 import type { AlertItem, SensorPoint } from '@/types/api.types';
@@ -75,7 +77,7 @@ const isFireAlert = (alert: AlertItem) => {
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const user = authService.getUser();
+  const user = useAuthStore(s => s.user);
 
   // ── Security Check ──
   useEffect(() => {
@@ -83,6 +85,19 @@ export default function AppShell() {
       navigate('/login');
     }
   }, [user, navigate]);
+
+  // ── Session Validity Polling ──
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      try {
+        await apiFetch('/stations');
+      } catch (err) {
+        console.warn('Session validity check failed:', err);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   if (!user) return null;
 

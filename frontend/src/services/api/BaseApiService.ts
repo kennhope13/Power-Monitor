@@ -9,11 +9,15 @@ let refreshPromise: Promise<string | null> | null = null;
 async function performRefresh(): Promise<string | null> {
   const store = useAuthStore.getState();
   const refreshToken = store.refreshToken;
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    store.clearSession();
+    return null;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     });
@@ -89,6 +93,7 @@ async function getValidToken(): Promise<string | null> {
 export async function apiFetch<T>(path: string): Promise<T> {
   let token = await getValidToken();
   let res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   });
 
@@ -101,8 +106,11 @@ export async function apiFetch<T>(path: string): Promise<T> {
     token = await refreshPromise;
     if (token) {
       res = await fetch(`${API_BASE}${path}`, {
+        cache: 'no-store',
         headers: { Authorization: `Bearer ${token}` }
       });
+    } else {
+      useAuthStore.getState().clearSession();
     }
   }
 
@@ -120,6 +128,7 @@ export async function apiMutate<T = any>(method: string, path: string, body?: ob
 
   let res = await fetch(`${API_BASE}${path}`, {
     method,
+    cache: 'no-store',
     headers,
     body: body ? JSON.stringify(body) : undefined
   });
@@ -135,9 +144,12 @@ export async function apiMutate<T = any>(method: string, path: string, body?: ob
       headers['Authorization'] = `Bearer ${token}`;
       res = await fetch(`${API_BASE}${path}`, {
         method,
+        cache: 'no-store',
         headers,
         body: body ? JSON.stringify(body) : undefined
       });
+    } else {
+      useAuthStore.getState().clearSession();
     }
   }
 
