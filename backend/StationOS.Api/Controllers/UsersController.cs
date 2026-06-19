@@ -19,6 +19,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationOS.Data;
 using StationOS.Data.Entities;
+using Microsoft.AspNetCore.SignalR;
+using StationOS.Api.Hubs;
 
 namespace StationOS.Api.Controllers;
 
@@ -28,8 +30,13 @@ namespace StationOS.Api.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IHubContext<RealtimeHub> _hubContext;
 
-    public UsersController(AppDbContext db) => _db = db;
+    public UsersController(AppDbContext db, IHubContext<RealtimeHub> hubContext)
+    {
+        _db = db;
+        _hubContext = hubContext;
+    }
 
     // Lấy danh sách StationId mà caller được phép quản lý. null = không giới hạn.
     private (bool isRestricted, Guid[]? stationIds) GetCallerScope()
@@ -166,6 +173,7 @@ public class UsersController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await _hubContext.Clients.All.SendAsync("UserStatusChange", new { username = user.Username, status = "updated", ts = DateTime.UtcNow });
 
         return Ok(new
         {
@@ -239,6 +247,7 @@ public class UsersController : ControllerBase
 
         user.IsActive = false;
         await _db.SaveChangesAsync();
+        await _hubContext.Clients.All.SendAsync("UserStatusChange", new { username = user.Username, status = "deactivated", ts = DateTime.UtcNow });
 
         return Ok(new { message = $"Đã vô hiệu hóa tài khoản '{user.Username}'" });
     }

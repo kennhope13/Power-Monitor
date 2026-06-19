@@ -78,5 +78,43 @@ export default defineConfig({
         },
       }
     }
+  },
+  preview: {
+    port: 4173,
+    strictPort: true,
+    proxy: {
+      '/media': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/ws': {
+        target: 'http://127.0.0.1:5000',
+        ws: true,
+      },
+      '/api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+      '/ai-api': {
+        target: 'http://127.0.0.1:8100',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ai-api/, ''),
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if ('writeHead' in res) { res.writeHead(503); res.end(); }
+          });
+        },
+      },
+      '/pd-monitor': {
+        target: 'http://127.0.0.1:8100',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if ('writeHead' in res) { res.writeHead(503); res.end(); }
+          });
+        },
+      }
+    }
   }
 });

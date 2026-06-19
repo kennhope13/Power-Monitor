@@ -19,7 +19,7 @@ public class DevAutoAuthMiddleware
             (ctx.User?.Identity?.IsAuthenticated != true))
         {
             var admin = await db.Users
-                .Where(u => u.Username == "admin" && u.IsActive)
+                .Where(u => (u.Username == "stationadmin" || u.Username == "admin") && u.IsActive)
                 .Select(u => new { u.Id, u.Username, u.Role, u.FullName })
                 .FirstOrDefaultAsync();
 

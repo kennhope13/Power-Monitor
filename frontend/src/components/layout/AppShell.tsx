@@ -20,8 +20,8 @@ import { createRealtimeHub } from '@/services/realtime.service';
 import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
   LayoutDashboard, Video, AlertTriangle, LineChart, FileText,
-  Wrench, FileArchive, Map, Radio, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight, Key
+  Wrench, FileArchive, Map, Radio, Settings, LogOut,
+  ChevronLeft, ChevronRight, Key, Lock
 } from 'lucide-react';
 
 interface NavSubItem { id: string; path: string; label: string }
@@ -35,9 +35,7 @@ const CENTRAL_NAV: NavItem[] = [
   { id: 'audit-log', path: '/audit-log', icon: <FileArchive size={19} strokeWidth={1.5} />, label: 'Nhật ký hệ thống', roles: ['admin'] },
 ];
 
-const CENTRAL_ADMIN_NAV: NavItem[] = [
-  { id: 'user-management', path: '/user-management', icon: <Users size={19} strokeWidth={1.5} />, label: 'Người dùng', roles: ['admin'] },
-];
+const CENTRAL_ADMIN_NAV: NavItem[] = [];
 
 const CHILD_NAV: NavItem[] = [
   { id: 'dashboard', path: '/dashboard', icon: <LayoutDashboard size={19} strokeWidth={1.5} />, label: 'Tổng quan' },
@@ -51,7 +49,6 @@ const CHILD_NAV: NavItem[] = [
 
 const CHILD_ADMIN_NAV: NavItem[] = [
   { id: 'device-management', path: '/device-management', icon: <Radio size={19} strokeWidth={1.5} />, label: 'Thiết bị', roles: ['admin'] },
-  { id: 'user-management', path: '/user-management', icon: <Users size={19} strokeWidth={1.5} />, label: 'Người dùng', roles: ['admin'] },
   { id: 'settings', path: '/settings', icon: <Settings size={19} strokeWidth={1.5} />, label: 'Cài đặt', roles: ['admin'] },
 ];
 
@@ -273,6 +270,32 @@ export default function AppShell() {
       });
     });
 
+    // 5. Lắng nghe cập nhật thông tin tài khoản để đồng bộ realtime không cần reload
+    hub.on('UserStatusChange', (data: { username: string, status: string }) => {
+      const currentUser = useAuthStore.getState().user;
+      if (data && data.username === currentUser?.username) {
+        if (data.status === 'updated') {
+          console.log('[AppShell] User profile updated, performing silent refresh...');
+          authService.refreshSession().then((success) => {
+            if (success) {
+              // Invalidate and refresh store data reactively
+              useStationStore.getState().invalidate();
+              useStationStore.getState().fetch(true);
+              useAlertStore.getState().invalidate();
+              useAlertStore.getState().fetch(ALERT_STATUS.OPEN, true);
+              showToast('Thông tin phân quyền tài khoản đã được cập nhật thành công!', 'info');
+            }
+          });
+        } else if (data.status === 'deactivated') {
+          showToast('Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên.', 'error');
+          setTimeout(() => {
+            authService.logout();
+            navigate('/login');
+          }, 2000);
+        }
+      }
+    });
+
     let isMounted = true;
     const startHub = async () => {
       try {
@@ -295,6 +318,62 @@ export default function AppShell() {
 
   const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changePasswordError, setChangePasswordError] = useState('');
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState('');
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordError('');
+    setChangePasswordSuccess('');
+
+    if (!oldPassword) {
+      setChangePasswordError('Vui lòng nhập mật khẩu hiện tại');
+      return;
+    }
+    if (!newPassword) {
+      setChangePasswordError('Vui lòng nhập mật khẩu mới');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setChangePasswordError('Mật khẩu mới phải có tối thiểu 6 ký tự');
+      return;
+    }
+    if (newPassword === oldPassword) {
+      setChangePasswordError('Mật khẩu mới không được trùng với mật khẩu cũ');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setChangePasswordError('Mật khẩu xác nhận không khớp');
+      return;
+    }
+
+    setChangePasswordLoading(true);
+    try {
+      const res = await authService.changePassword(oldPassword, newPassword);
+      if (res.success) {
+        setChangePasswordSuccess('Đổi mật khẩu thành công!');
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setShowChangePasswordModal(false);
+          setChangePasswordSuccess('');
+        }, 1500);
+      } else {
+        setChangePasswordError(res.error || 'Đổi mật khẩu thất bại');
+      }
+    } catch (err) {
+      setChangePasswordError('Lỗi kết nối đến máy chủ');
+    } finally {
+      setChangePasswordLoading(false);
+    }
+  };
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showThemeList, setShowThemeList] = useState(false);
   const [popupPos, setPopupPos] = useState({ bottom: 0, left: 0 });
@@ -606,6 +685,22 @@ export default function AppShell() {
                         <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
                       </>
                     )}
+                    <div 
+                      className="sb-popover-item"
+                      onClick={() => {
+                        setShowChangePasswordModal(true);
+                        setShowUserMenu(false);
+                        setOldPassword('');
+                        setNewPassword('');
+                        setConfirmPassword('');
+                        setChangePasswordError('');
+                        setChangePasswordSuccess('');
+                      }}
+                      style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Lock size={14} strokeWidth={2} /> <span>Đổi mật khẩu</span>
+                    </div>
+                    <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
                     <div className="sb-popover-item danger" onClick={() => { setShowLogoutModal(true); setShowUserMenu(false); }} style={{ padding: '8px 12px' }}>
                       <LogOut size={14} strokeWidth={2} /> <span>Đăng xuất</span>
                     </div>
@@ -692,6 +787,90 @@ export default function AppShell() {
               <button onClick={() => setShowLogoutModal(false)} className="btn-industrial" style={{ minWidth: 100 }}>Hủy</button>
               <button onClick={handleLogout} className="btn-industrial btn-danger" style={{ minWidth: 100 }}>Đăng xuất</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Change Password modal ── */}
+      {showChangePasswordModal && (
+        <div className="modal-overlay active">
+          <div className="modal-content" style={{ width: 400 }}>
+            <div className="modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Lock size={18} strokeWidth={2} color="var(--admin-accent)" />
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--admin-text)' }}>Đổi mật khẩu tài khoản</h3>
+            </div>
+            <form onSubmit={handleChangePassword}>
+              <div className="modal-body" style={{ padding: '20px' }}>
+                {changePasswordError && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 4, color: 'var(--admin-danger)', fontSize: '0.85rem' }}>
+                    {changePasswordError}
+                  </div>
+                )}
+                {changePasswordSuccess && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.2)', borderRadius: 4, color: 'var(--admin-success, #22c55e)', fontSize: '0.85rem' }}>
+                    {changePasswordSuccess}
+                  </div>
+                )}
+                
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Mật khẩu hiện tại <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="••••••••" 
+                    value={oldPassword} 
+                    onChange={e => setOldPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Mật khẩu mới <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="••••••••" 
+                    value={newPassword} 
+                    onChange={e => setNewPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Xác nhận mật khẩu mới <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="••••••••" 
+                    value={confirmPassword} 
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+              <div className="modal-footer" style={{ padding: '16px 20px', borderTop: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowChangePasswordModal(false)} 
+                  className="btn-industrial" 
+                  disabled={changePasswordLoading}
+                  style={{ minWidth: 80 }}
+                >
+                  Hủy
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-industrial btn-primary" 
+                  disabled={changePasswordLoading}
+                  style={{ minWidth: 100 }}
+                >
+                  {changePasswordLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

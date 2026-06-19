@@ -147,14 +147,14 @@ public class AuthService
     /// </summary>
     public async Task SeedAdminIfNotExistsAsync()
     {
-        // 1. Upsert admin (Trạm con)
-        var admin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "admin");
+        // 1. Upsert stationadmin (Trạm con)
+        var admin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "stationadmin");
         if (admin == null)
         {
-            admin = new User { Username = "admin", Role = "admin" };
+            admin = new User { Username = "stationadmin", Role = "admin" };
             _db.Users.Add(admin);
         }
-        admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123", workFactor: 12);
+        admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Station@123", workFactor: 12);
         admin.FullName = "Quản trị viên";
         admin.Email = "admin@StationOS.vn";
         admin.IsActive = true;
@@ -172,6 +172,13 @@ public class AuthService
         multi.Email = "multi@StationOS.vn";
         multi.IsActive = true;
         multi.MustChangePassword = false;
+
+        // Xóa tài khoản admin cũ nếu có để tránh nhầm lẫn
+        var oldAdmin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "admin");
+        if (oldAdmin != null)
+        {
+            _db.Users.Remove(oldAdmin);
+        }
 
         await _db.SaveChangesAsync();
     }
