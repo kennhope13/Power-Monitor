@@ -670,7 +670,7 @@ export default function AppShell() {
                       </div>
                     )}
                     <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
-                    {user.role === 'admin' && (
+                    {authService.hasPermission('license:manage') && (
                       <>
                         <div 
                           className="sb-popover-item"

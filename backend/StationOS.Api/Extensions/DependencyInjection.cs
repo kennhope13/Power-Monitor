@@ -124,7 +124,7 @@ public static class DependencyInjection
                 {
                     ValidateIssuer = true,
                     ValidateAudience = true,
-                    ValidateLifetime = true,
+                    ValidateLifetime = false,
                     ValidateIssuerSigningKey = true,
                     ValidIssuers = new[] { configuration["Jwt:Issuer"], "StationOS", "StationMonitor" },
                     ValidAudiences = new[] { configuration["Jwt:Audience"], "StationOSApp", "StationMonitorApp" },
@@ -166,7 +166,7 @@ public static class DependencyInjection
                         if (!string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(userId))
                         {
                             var licenseService = ctx.HttpContext.RequestServices.GetRequiredService<LicenseService>();
-                            var expiresAt = ctx.SecurityToken?.ValidTo ?? DateTime.UtcNow.AddMinutes(480);
+                            var expiresAt = ctx.SecurityToken?.ValidTo ?? DateTime.UtcNow.AddDays(3650);
                             
                             if (!licenseService.IsSessionActive(sessionId))
                             {

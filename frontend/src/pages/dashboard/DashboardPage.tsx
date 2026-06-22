@@ -29,9 +29,10 @@ import AlertPanel from '@/components/dashboard/alerts/AlertPanel';
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Ưu tiên stationId từ URL (?stationId=...), nếu không có thì tự fetch trạm đầu tiên
+  // Ưu tiên stationId từ URL (?stationId=...), nếu không có thì thử stationCode, cuối cùng fetch trạm đầu tiên
   const [stationId, setStationId] = useState(searchParams.get('stationId') ?? '');
   const [stationName, setStationName] = useState(searchParams.get('stationName') ?? '');
+  const urlStationCode = searchParams.get('stationCode') ?? '';
   const [isEditMode, setIsEditMode] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [filters, setFilters] = useState({ thermal: true, pd: true, camera: true });
@@ -106,13 +107,29 @@ export default function DashboardPage() {
       localStorage.setItem('selected_station_id', stationId);
       return;
     }
+
+    // Nếu có stationCode từ URL, tìm station tương ứng theo code
+    if (urlStationCode) {
+      fetchStations().then(() => {
+        const found = useStationStore.getState().stations.find(
+          (s: any) => s.code?.toLowerCase() === urlStationCode.toLowerCase()
+        );
+        if (found) {
+          setStationId(found.id);
+          setStationName(found.name);
+          localStorage.setItem('selected_station_id', found.id);
+        }
+      }).catch(() => {});
+      return;
+    }
+
     getFirstStationId().then(id => { 
       if (id) {
         setStationId(id);
         localStorage.setItem('selected_station_id', id);
       } 
     }).catch(() => { });
-  }, [stationId, getFirstStationId]);
+  }, [stationId, urlStationCode, getFirstStationId, fetchStations]);
 
   /** Lưu camera đang chọn vào state và localStorage để giữ lại sau khi tải lại trang. */
   const handleCamChange = (srcId: string) => {

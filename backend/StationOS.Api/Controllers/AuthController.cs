@@ -51,7 +51,7 @@ public class AuthController : ControllerBase
         var (token, refreshToken, user, sessionId) = result.Value;
 
         // Kiểm tra license: giới hạn concurrent users
-        var jwtExpiry  = DateTime.UtcNow.AddMinutes(480);
+        var jwtExpiry  = DateTime.UtcNow.AddDays(3650);
         var (allowed, reason) = await _license.TryAcquireSessionAsync(sessionId, user.Id.ToString(), jwtExpiry);
         if (!allowed)
             return StatusCode(403, new { message = "Đã đạt giới hạn thiết bị đăng nhập đồng thời. Vui lòng cập nhật License Key mới để sử dụng thêm thiết bị." });
@@ -155,7 +155,7 @@ public class AuthController : ControllerBase
         if (!_license.IsSessionActive(sessionId))
         {
             // Try to register it (if server restarted or if there's room)
-            var registered = _license.TryRegisterOnRequest(sessionId, user.Id.ToString(), DateTime.UtcNow.AddMinutes(480));
+            var registered = _license.TryRegisterOnRequest(sessionId, user.Id.ToString(), DateTime.UtcNow.AddDays(3650));
             if (!registered)
             {
                 return Unauthorized(new { message = "Phiên hoạt động đã bị đăng xuất từ thiết bị khác" });

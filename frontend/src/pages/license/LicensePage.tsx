@@ -29,7 +29,7 @@ export default function LicensePage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const isAdmin = authService.getUser()?.role === 'admin';
+  const canManageLicense = authService.hasPermission('license:manage');
 
   const loadStatus = async () => {
     try {
@@ -177,7 +177,7 @@ export default function LicensePage() {
                 <p>Kích hoạt để mở rộng giới hạn hệ thống</p>
               </div>
 
-              {isAdmin && (
+              {canManageLicense && (
                 <div className="license-activate-section" id="activateSection">
                   <h3>Nhập Giftcode kích hoạt</h3>
                   <p className="license-hint">

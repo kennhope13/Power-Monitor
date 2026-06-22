@@ -341,13 +341,7 @@ public class LicenseService
             return (true, reason);
         }
 
-        // Chỉ tính tổng các session của user bình thường (không có bypass)
-        int activeCount = _activeSessions.Values.Count(s => !s.IsBypass);
-        if (activeCount >= maxUsers)
-        {
-            return (false, "max_users");
-        }
-
+        // Không giới hạn phiên đăng nhập đồng thời ở trạm
         _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
         return (true, reason);
     }
@@ -388,14 +382,9 @@ public class LicenseService
             return true;
         }
 
-        int activeCount = _activeSessions.Values.Count(s => !s.IsBypass);
-        if (activeCount < maxUsers)
-        {
-            _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
-            return true;
-        }
-
-        return false;
+        // Không giới hạn phiên đăng nhập đồng thời ở trạm
+        _activeSessions[sessionId] = new ActiveSessionInfo(userId, expiresAt, isBypass);
+        return true;
     }
 
     // ── Utility ───────────────────────────────────────────────
