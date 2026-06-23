@@ -63,10 +63,11 @@ public class CentralSyncWorker : BackgroundService
             try
             {
                 await PushBatchAsync(stoppingToken);
+                await PullTasksAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[CentralSync] Lỗi push batch");
+                _logger.LogError(ex, "[CentralSync] Lỗi sync");
             }
 
             await Task.Delay(IntervalMs, stoppingToken);
@@ -78,11 +79,21 @@ public class CentralSyncWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var pending = await db.SyncQueues
-            .Where(q => q.Status == "pending" && q.RetryCount < 3)
+        // Ưu tiên Reports/AuditLog/MaintenanceTask/LoginLog trước, sensor readings sau
+        var priorityTypes = new[] { "Report", "AuditLog", "MaintenanceTask", "LoginLog" };
+        var highPriority = await db.SyncQueues
+            .Where(q => q.Status == "pending" && q.RetryCount < 3 && priorityTypes.Contains(q.EntityType))
             .OrderBy(q => q.CreatedAt)
             .Take(BatchSize)
             .ToListAsync(ct);
+
+        var pending = highPriority.Count > 0
+            ? highPriority
+            : await db.SyncQueues
+                .Where(q => q.Status == "pending" && q.RetryCount < 3)
+                .OrderBy(q => q.CreatedAt)
+                .Take(BatchSize)
+                .ToListAsync(ct);
 
         if (pending.Count == 0) return;
 
@@ -100,10 +111,14 @@ public class CentralSyncWorker : BackgroundService
         {
             var endpoint = group.Key switch
             {
-                "Alert"          => "alerts",
-                "SensorReading"  => "sensors",
-                "DetectionEvent" => "events",
-                _                => null
+                "Alert"           => "alerts",
+                "SensorReading"   => "sensors",
+                "DetectionEvent"  => "events",
+                "Report"          => "reports",
+                "AuditLog"        => "audit-logs",
+                "LoginLog"        => "login-logs",
+                "MaintenanceTask" => "maintenance",
+                _                 => null
             };
 
             if (endpoint == null)
@@ -146,5 +161,88 @@ public class CentralSyncWorker : BackgroundService
 
         await db.SaveChangesAsync(ct);
         _logger.LogInformation("[CentralSync] Hoàn thành: {Success}/{Total} items", successTotal, pending.Count);
+    }
+
+    /// <summary>Pull task bảo trì từ trạm tổng về trạm con (chiều trên xuống).</summary>
+    private async Task PullTasksAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Station-Id", _stationId);
+        client.Timeout = TimeSpan.FromSeconds(15);
+
+        try
+        {
+            var url = $"{_centralUrl}/api/v1/ingest/tasks";
+            var response = await client.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[CentralSync] Pull tasks HTTP {Status}", response.StatusCode);
+                return;
+            }
+
+            var items = await response.Content.ReadFromJsonAsync<List<JsonElement>>(cancellationToken: ct);
+            if (items == null || items.Count == 0) return;
+
+            int created = 0;
+            foreach (var elem in items)
+            {
+                if (!elem.TryGetProperty("Id", out var idEl) && !elem.TryGetProperty("id", out idEl)) continue;
+                if (idEl.ValueKind != JsonValueKind.String || !idEl.TryGetGuid(out var id)) continue;
+
+                // Bỏ qua nếu đã tồn tại
+                if (await db.MaintenanceTasks.AnyAsync(t => t.Id == id, ct)) continue;
+
+                static string? Str(JsonElement e, string name)
+                {
+                    if (e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String) return v.GetString();
+                    var p = char.ToUpper(name[0]) + name[1..];
+                    if (e.TryGetProperty(p, out var v2) && v2.ValueKind == JsonValueKind.String) return v2.GetString();
+                    return null;
+                }
+                static bool TryDate(JsonElement e, string name, out DateTime result)
+                {
+                    if (e.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null && v.TryGetDateTime(out result)) return true;
+                    var p = char.ToUpper(name[0]) + name[1..];
+                    if (e.TryGetProperty(p, out var v2) && v2.ValueKind != JsonValueKind.Null && v2.TryGetDateTime(out result)) return true;
+                    result = default; return false;
+                }
+
+                var task = new StationOS.Data.Entities.MaintenanceTask
+                {
+                    Id         = id,
+                    Title      = Str(elem, "title")  ?? "(không có tiêu đề)",
+                    Type       = Str(elem, "type")   ?? "inspection",
+                    Status     = Str(elem, "status") ?? "pending",
+                    AssignedTo = Str(elem, "assignedTo"),
+                    Notes      = Str(elem, "notes"),
+                };
+
+                // StationId: lấy từ response hoặc dùng StationId của trạm con hiện tại
+                if (elem.TryGetProperty("StationId", out var siEl) || elem.TryGetProperty("stationId", out siEl))
+                    if (siEl.ValueKind == JsonValueKind.String && siEl.TryGetGuid(out var sId))
+                        task.StationId = sId;
+                else if (Guid.TryParse(_stationId, out var selfId))
+                    task.StationId = selfId;
+
+                if (TryDate(elem, "scheduledDate", out var sd)) task.ScheduledDate = sd;
+                if (TryDate(elem, "createdAt",     out var ca)) task.CreatedAt     = ca;
+
+                db.MaintenanceTasks.Add(task);
+                created++;
+            }
+
+            if (created > 0)
+            {
+                await db.SaveChangesAsync(ct);
+                _logger.LogInformation("[CentralSync] Pull được {Count} task bảo trì từ trạm tổng", created);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[CentralSync] Lỗi pull tasks từ trạm tổng");
+        }
     }
 }

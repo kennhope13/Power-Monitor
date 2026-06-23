@@ -129,7 +129,7 @@ public class AuditMiddleware
 
         try
         {
-            db.AuditLogs.Add(new AuditLog
+            var log = new AuditLog
             {
                 UserId     = Guid.TryParse(userId, out var uid) ? uid : null,
                 Action     = action,
@@ -138,7 +138,21 @@ public class AuditMiddleware
                 OldValue   = oldValue,
                 NewValue   = newValue,
                 IpAddress  = ctx.Connection.RemoteIpAddress?.ToString(),
+            };
+            db.AuditLogs.Add(log);
+
+            // Đẩy lên trạm tổng qua SyncQueue
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "AuditLog",
+                EntityId   = log.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    log.Id, log.Action, log.EntityType, log.EntityId,
+                    log.UserId, log.OldValue, log.NewValue, log.IpAddress,
+                    Ts = log.Ts,
+                }),
             });
+
             await db.SaveChangesAsync();
         }
         catch

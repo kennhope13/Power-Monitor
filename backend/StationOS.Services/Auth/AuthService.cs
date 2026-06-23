@@ -147,20 +147,18 @@ public class AuthService
     /// </summary>
     public async Task SeedAdminIfNotExistsAsync()
     {
-        // 1. Upsert stationadmin (Trạm con)
-        var admin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "stationadmin");
-        if (admin == null)
-        {
-            admin = new User { Username = "stationadmin", Role = "admin" };
-            _db.Users.Add(admin);
-        }
-        admin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Station@123", workFactor: 12);
-        admin.FullName = "Quản trị viên";
-        admin.Email = "admin@StationOS.vn";
-        admin.IsActive = true;
-        admin.MustChangePassword = false;
+        // Lấy thông tin các trạm mặc định để gán scope
+        var laStation = await _db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-LA01");
+        var tnStation = await _db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-TN01");
 
-        // 2. Upsert multi (Đa trạm)
+        var provinceStationIdsList = new List<Guid>();
+        if (laStation != null) provinceStationIdsList.Add(laStation.Id);
+        if (tnStation != null) provinceStationIdsList.Add(tnStation.Id);
+        var provinceStationIds = provinceStationIdsList.ToArray();
+
+        var laStationIds = laStation != null ? new[] { laStation.Id } : Array.Empty<Guid>();
+
+        // 1. Upsert Admin Toàn Cục (multi)
         var multi = await _db.Users.FirstOrDefaultAsync(u => u.Username == "multi");
         if (multi == null)
         {
@@ -168,10 +166,53 @@ public class AuthService
             _db.Users.Add(multi);
         }
         multi.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Demo@2024", workFactor: 12);
-        multi.FullName = "Quản trị viên Đa trạm";
+        multi.FullName = "Admin Toàn Cục";
         multi.Email = "multi@StationOS.vn";
         multi.IsActive = true;
         multi.MustChangePassword = false;
+        multi.StationIds = null;
+
+        // 2. Upsert Admin Tỉnh (provinceadmin)
+        var provinceadmin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "provinceadmin");
+        if (provinceadmin == null)
+        {
+            provinceadmin = new User { Username = "provinceadmin", Role = "admin" };
+            _db.Users.Add(provinceadmin);
+        }
+        provinceadmin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Province@123", workFactor: 12);
+        provinceadmin.FullName = "Admin Tỉnh";
+        provinceadmin.Email = "provinceadmin@StationOS.vn";
+        provinceadmin.IsActive = true;
+        provinceadmin.MustChangePassword = false;
+        provinceadmin.StationIds = provinceStationIds.Length > 0 ? provinceStationIds : null;
+
+        // 3. Upsert Tổ trưởng Tổ thao tác (teamleader)
+        var teamleader = await _db.Users.FirstOrDefaultAsync(u => u.Username == "teamleader");
+        if (teamleader == null)
+        {
+            teamleader = new User { Username = "teamleader", Role = "manager" };
+            _db.Users.Add(teamleader);
+        }
+        teamleader.PasswordHash = BCrypt.Net.BCrypt.HashPassword("TeamLeader@123", workFactor: 12);
+        teamleader.FullName = "Tổ trưởng Tổ thao tác";
+        teamleader.Email = "teamleader@StationOS.vn";
+        teamleader.IsActive = true;
+        teamleader.MustChangePassword = false;
+        teamleader.StationIds = laStationIds.Length > 0 ? laStationIds : null;
+
+        // 4. Upsert Admin Trạm (stationadmin)
+        var stationadmin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "stationadmin");
+        if (stationadmin == null)
+        {
+            stationadmin = new User { Username = "stationadmin", Role = "admin" };
+            _db.Users.Add(stationadmin);
+        }
+        stationadmin.PasswordHash = BCrypt.Net.BCrypt.HashPassword("Station@123", workFactor: 12);
+        stationadmin.FullName = "Admin Trạm";
+        stationadmin.Email = "stationadmin@StationOS.vn";
+        stationadmin.IsActive = true;
+        stationadmin.MustChangePassword = false;
+        stationadmin.StationIds = laStationIds.Length > 0 ? laStationIds : null;
 
         // Xóa tài khoản admin cũ nếu có để tránh nhầm lẫn
         var oldAdmin = await _db.Users.FirstOrDefaultAsync(u => u.Username == "admin");

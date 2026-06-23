@@ -51,6 +51,15 @@ public class ReportsController : ControllerBase
         var opts   = new ReportOptions(req.StationId, req.Type, req.From, req.To, userId);
         var report = await _generator.GenerateAsync(opts);
 
+        // Đẩy lên trạm tổng
+        _db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+        {
+            EntityType = "Report",
+            EntityId   = report.Id,
+            Payload    = System.Text.Json.JsonSerializer.Serialize(MapReport(report)),
+        });
+        await _db.SaveChangesAsync();
+
         return Ok(MapReport(report));
     }
 

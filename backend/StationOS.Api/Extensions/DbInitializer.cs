@@ -43,10 +43,19 @@ public static class DbInitializer
         // Đảm bảo các cột được thêm vào kể cả khi migration đã bị đánh dấu "applied" mà DDL chưa chạy
         await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Rules"" ADD COLUMN IF NOT EXISTS ""RuleSet"" text;");
 
-        var authService = services.GetRequiredService<AuthService>();
-        await authService.SeedAdminIfNotExistsAsync();   // Chỉ giữ admin user — không seed thêm data nào
+        // Reset SyncQueue items bị lỗi để gửi lại lên trạm tổng khi restart
+        await db.Database.ExecuteSqlRawAsync(@"UPDATE ""SyncQueues"" SET ""Status"" = 'pending', ""RetryCount"" = 0 WHERE ""Status"" = 'failed'");
+
+        // Reset Report/MaintenanceTask/AuditLog đã ghi ""sent"" nhưng ingest endpoint có thể đã thay đổi
+        await db.Database.ExecuteSqlRawAsync(@"UPDATE ""SyncQueues"" SET ""Status"" = 'pending', ""RetryCount"" = 0 WHERE ""Status"" = 'sent' AND ""EntityType"" IN ('Report', 'MaintenanceTask', 'AuditLog')");
+
+        // Backfill MaintenanceTasks và Reports chưa có trong SyncQueue
+        await BackfillSyncQueueAsync(db);
 
         await SeedDefaultStationAsync(db);
+
+        var authService = services.GetRequiredService<AuthService>();
+        await authService.SeedAdminIfNotExistsAsync();   // Chỉ giữ admin user — không seed thêm data nào
         // Tắt tính năng tự động tạo Rule mặc định
         // await SeedNetaRulesAsync(db);
         // await SeedTemperatureRulesAsync(db);
@@ -367,5 +376,56 @@ public static class DbInitializer
         }
         await db.SaveChangesAsync();
         Console.WriteLine("[Startup] Đã seed 20 rules nhiệt độ camera (P1-P20)");
+    }
+
+    private static async Task BackfillSyncQueueAsync(AppDbContext db)
+    {
+        var syncedList = await db.SyncQueues
+            .Where(q => q.EntityType == "MaintenanceTask" || q.EntityType == "Report")
+            .Select(q => q.EntityId)
+            .ToListAsync();
+        var syncedIds = syncedList.ToHashSet();
+
+        var maintenanceTasks = await db.MaintenanceTasks
+            .Where(t => !syncedIds.Contains(t.Id))
+            .ToListAsync();
+
+        foreach (var t in maintenanceTasks)
+        {
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "MaintenanceTask",
+                EntityId   = t.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    t.Id, t.StationId, t.DeviceId, t.Title, t.Type,
+                    t.ScheduledDate, t.AssignedTo, t.Notes, t.Status,
+                    t.CreatedAt, t.CompletedAt,
+                }),
+            });
+        }
+
+        var reports = await db.Reports
+            .Where(r => !syncedIds.Contains(r.Id))
+            .ToListAsync();
+
+        foreach (var r in reports)
+        {
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "Report",
+                EntityId   = r.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    r.Id, r.StationId, r.Type, r.PeriodFrom, r.PeriodTo,
+                    r.FileUrl, r.GeneratedBy, r.GeneratedAt,
+                }),
+            });
+        }
+
+        int total = maintenanceTasks.Count + reports.Count;
+        if (total > 0)
+        {
+            await db.SaveChangesAsync();
+            Console.WriteLine($"[Startup] Backfill SyncQueue: {maintenanceTasks.Count} maintenance tasks, {reports.Count} reports");
+        }
     }
 }

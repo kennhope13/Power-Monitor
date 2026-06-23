@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { stationApi, MaintenanceTask, Device } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore } from '@/store';
 import { Edit2 } from 'lucide-react';
+import { authService } from '@/services/AuthService';
 
 const DEFAULT_CHECKLIST: Record<string, string[]> = {
   inspection: ['Kiểm tra tổng quan', 'Đo nhiệt độ', 'Kiểm tra cách điện', 'Ghi nhật ký'],
@@ -51,6 +52,11 @@ export default function MaintenancePage() {
   const [stationId, setStationId] = useState('');
   const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
   const [filter, setFilter] = useState('all');
+
+  const canManageMaintenance = useMemo(() => {
+    // Trạm con không được phép tự tạo/sửa/xóa lịch bảo trì (chỉ đồng bộ từ trạm tổng)
+    return false;
+  }, []);
 
   const getFirstStationId = useStationStore(s => s.getFirstStationId);
   const fetchDevices = useDeviceStore(s => s.fetch);
@@ -189,13 +195,15 @@ export default function MaintenancePage() {
             ))}
           </div>
 
-          <button
-            className="btn-industrial btn-primary"
-            style={{ height: 32, padding: '0 12px', fontSize: '.75rem', fontWeight: 700 }}
-            onClick={() => openModal()}
-          >
-            + TẠO LỊCH MỚI
-          </button>
+          {canManageMaintenance && (
+            <button
+              className="btn-industrial btn-primary"
+              style={{ height: 32, padding: '0 12px', fontSize: '.75rem', fontWeight: 700 }}
+              onClick={() => openModal()}
+            >
+              + TẠO LỊCH MỚI
+            </button>
+          )}
 
           <button
             className="btn-industrial"
@@ -218,13 +226,13 @@ export default function MaintenancePage() {
               <th>NGÀY DỰ KIẾN</th>
               <th>GIAO CHO</th>
               <th>TRẠNG THÁI</th>
-              <th style={{ width: 60 }}>SỬA</th>
+              {canManageMaintenance && <th style={{ width: 60 }}>SỬA</th>}
             </tr>
           </thead>
           <tbody>
             {filteredTasks.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--admin-text-muted)' }}>
+                <td colSpan={canManageMaintenance ? 7 : 6} style={{ textAlign: 'center', padding: 40, color: 'var(--admin-text-muted)' }}>
                   Không có dữ liệu
                 </td>
               </tr>
@@ -241,17 +249,19 @@ export default function MaintenancePage() {
                       {STATUS_LABELS[t.status]}
                     </span>
                   </td>
-                  <td>
-                    <button
-                      onClick={() => openModal(t)}
-                      title="Sửa"
-                      style={{ background: 'transparent', border: 'none', padding: 6, borderRadius: '50%', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--admin-accent)'}
-                      onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--admin-text-muted)'}
-                    >
-                      <Edit2 size={15} />
-                    </button>
-                  </td>
+                  {canManageMaintenance && (
+                    <td>
+                      <button
+                        onClick={() => openModal(t)}
+                        title="Sửa"
+                        style={{ background: 'transparent', border: 'none', padding: 6, borderRadius: '50%', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--admin-accent)'}
+                        onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--admin-text-muted)'}
+                      >
+                        <Edit2 size={15} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
