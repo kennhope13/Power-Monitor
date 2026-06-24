@@ -366,8 +366,12 @@ async function createWindow() {
       log('localUiServer OK port:', localUiPort);
     } catch (err) {
       log('startLocalUiServer ERROR:', err.message);
-      await mainWindow.loadURL(errorHTML(`Không thể khởi động giao diện: ${err.message}`));
-      return;
+      if (err.code === 'EADDRINUSE') {
+        log('[Station Monitor] Cổng 4173 đã được sử dụng. Tiếp tục tải giao diện...');
+      } else {
+        await mainWindow.loadURL(errorHTML(`Không thể khởi động giao diện: ${err.message}`));
+        return;
+      }
     }
   }
 
@@ -386,6 +390,11 @@ async function createWindow() {
   // Bắt did-fail-load
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     log('did-fail-load:', code, desc, url);
+  });
+
+  // Bắt console logs từ renderer
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    log(`[CONSOLE L${level}] ${message} (${path.basename(sourceId)}:${line})`);
   });
 
   // Bắt renderer crash
