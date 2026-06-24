@@ -148,7 +148,12 @@ public class AuthService
     public async Task SeedAdminIfNotExistsAsync()
     {
         // Lấy thông tin các trạm mặc định để gán scope
-        var laStation = await _db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-LA01");
+        Guid.TryParse(_config["StationId"], out var localStationId);
+        var laStation = await _db.Stations.FirstOrDefaultAsync(s => s.Id == localStationId);
+        if (laStation == null)
+        {
+            laStation = await _db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-LA01");
+        }
         var tnStation = await _db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-TN01");
 
         var provinceStationIdsList = new List<Guid>();
