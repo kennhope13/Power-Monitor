@@ -15,7 +15,8 @@ using StationOS.Workers.Polling;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Register Services via Extension Method ───────────────
-builder.Services.AddStationOSServices(builder.Configuration);
+builder.Services.AddResponseCompression();
+builder.Services.AddResponseCaching();
 
 // ── Cấu hình ForwardedHeaders chống IP Spoofing qua Reverse Proxy ──
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -52,7 +53,9 @@ app.UseExceptionHandler(errorApp =>
 
 // ── Chống IP Spoofing qua Reverse Proxy ──────────────────
 // PHẢI đặt đầu tiên để nhận diện IP thật của client
-app.UseForwardedHeaders();
+app.UseResponseCompression();
+app.UseResponseCaching();
+
 
 // Serve static files (SVG diagrams) từ wwwroot/
 app.UseStaticFiles();

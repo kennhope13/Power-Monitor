@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // DetectionsController — Lấy danh sách camera detection events
 // GET /api/v1/detections
 // GET /api/v1/detections/{id}
@@ -27,15 +27,18 @@ public class DetectionsController : ControllerBase
     /// <param name="limit">Số lượng tối đa (max 500).</param>
     /// <returns>Danh sách detection event kèm tên camera.</returns>
     // GET /api/v1/detections?deviceId=&type=&from=&to=&limit=100
+    [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Any)]
     [HttpGet]
     public async Task<IActionResult> List(
         [FromQuery] Guid?   deviceId,
         [FromQuery] string? type,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        [FromQuery] int limit = 100)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
         var q = _db.DetectionEvents
+            .AsNoTracking()
             .Include(e => e.Camera)
             .AsQueryable();
 
@@ -46,7 +49,8 @@ public class DetectionsController : ControllerBase
 
         var events = await q
             .OrderByDescending(e => e.DetectedAt)
-            .Take(Math.Min(limit, 500))
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(e => new
             {
                 e.Id,

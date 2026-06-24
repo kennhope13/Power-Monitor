@@ -27,8 +27,8 @@ public class LicenseService
     public LicenseService(IServiceScopeFactory scopeFactory, IConfiguration config)
     {
         _scopeFactory = scopeFactory;
-        _vendorSecret = Environment.GetEnvironmentVariable("STATIONOS_VENDOR_SECRET") 
-                        ?? config["License:VendorSecret"] 
+        _vendorSecret = Environment.GetEnvironmentVariable("STATIONOS_VENDOR_SECRET")
+                        ?? config["License:VendorSecret"]
                         ?? throw new InvalidOperationException("Khóa bí mật nhà cung cấp (VendorSecret) chưa được cấu hình. Vui lòng thiết lập biến môi trường STATIONOS_VENDOR_SECRET.");
     }
 

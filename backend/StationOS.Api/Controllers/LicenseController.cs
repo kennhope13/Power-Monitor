@@ -21,6 +21,7 @@ public class LicenseController : ControllerBase
 
     /// <summary>Lấy trạng thái license hiện tại: tier, số người dùng tối đa, ngày hết hạn, số phiên đang hoạt động.</summary>
     /// <returns>Thông tin license đang kích hoạt hoặc activated = false nếu chưa kích hoạt.</returns>
+    [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Any)]
     [HttpGet("status")]
     public async Task<IActionResult> Status()
     {
@@ -45,6 +46,31 @@ public class LicenseController : ControllerBase
             daysRemaining  = (int)(status.ExpiresAt - DateTime.UtcNow).TotalDays
         });
     }
+
+    // New endpoint: Return only license limits (maxUsers, maxDevices, etc.)
+    [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Any)]
+    [HttpGet("limits")]
+    public async Task<IActionResult> Limits()
+    {
+        var status = await _license.GetStatusAsync();
+        if (status == null)
+            return Ok(new { activated = false });
+
+        return Ok(new
+        {
+            maxUsers       = status.MaxUsers,
+            maxDevices     = status.MaxDevices,
+            maxCameras     = status.MaxCameras,
+            maxRoiPoints   = status.MaxRoiPoints,
+            maxRoiRegions  = status.MaxRoiRegions,
+            maxPdRegions   = status.MaxPdRegions,
+            expiresAt      = status.ExpiresAt,
+            isValid        = status.IsValid,
+            daysRemaining  = (int)(status.ExpiresAt - DateTime.UtcNow).TotalDays
+        });
+    }
+
+
 
     [HttpGet("sessions")]
     public IActionResult Sessions()

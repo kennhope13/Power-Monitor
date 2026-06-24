@@ -19,25 +19,32 @@ public class AiConfigController : ControllerBase
     private readonly AppDbContext _db;
     private readonly CredentialEncryptionService _crypto;
 
-    public AiConfigController(AppDbContext db, CredentialEncryptionService crypto)
+    private static readonly System.Func<AppDbContext, System.Guid, System.Threading.Tasks.Task<StationOS.Data.Entities.Device?>> _getCameraById =
+        EF.CompileAsyncQuery((AppDbContext ctx, System.Guid id) =>
+            ctx.Devices.AsNoTracking().FirstOrDefault(d => d.Id == id));
+
+        public AiConfigController(AppDbContext db, CredentialEncryptionService crypto)
     {
         _db = db;
         _crypto = crypto;
     }
 
     /// <summary>Lấy cấu hình AI cho 1 camera cụ thể</summary>
+    [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any)]
     [HttpGet("{cameraId:guid}")]
     [AllowAnonymous] // AI Engine gọi lúc startup hoặc khi nhận SignalR thông báo đổi config
     public async Task<IActionResult> GetCameraConfig(Guid cameraId)
     {
-        var device = await _db.Devices.FindAsync(cameraId);
+        var device = await _getCameraById(_db, cameraId);
         if (device == null) return NotFound();
 
         var boundaries = await _db.Boundaries
+            .AsNoTracking()
             .Where(b => b.DeviceId == cameraId && b.Enabled)
             .ToListAsync();
 
         var roiPoints = await _db.RoiPoints
+            .AsNoTracking()
             .Where(r => r.DeviceId == cameraId)
             .ToListAsync();
 
@@ -66,19 +73,26 @@ public class AiConfigController : ControllerBase
     }
 
     /// <summary>Lấy toàn bộ cấu hình AI cho toàn bộ camera (Jetson startup)</summary>
+    [ResponseCache(Duration = 60, Location = ResponseCacheLocation.Any)]
     [HttpGet("all")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetAllConfigs()
+    public async Task<IActionResult> GetAllConfigs([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var cameras = await _db.Devices
+            .AsNoTracking()
             .Where(d => d.Type.StartsWith("camera"))
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync();
 
         var allBoundaries = await _db.Boundaries
+            .AsNoTracking()
             .Where(b => b.Enabled)
             .ToListAsync();
 
-        var allRoiPoints = await _db.RoiPoints.ToListAsync();
+        var allRoiPoints = await _db.RoiPoints
+            .AsNoTracking()
+            .ToListAsync();
 
         var result = cameras.Select(c => new
         {

@@ -63,6 +63,7 @@ public class CentralSyncWorker : BackgroundService
             try
             {
                 await PushBatchAsync(stoppingToken);
+                await PushDevicesAsync(stoppingToken);
                 await PullTasksAsync(stoppingToken);
             }
             catch (Exception ex)
@@ -161,6 +162,38 @@ public class CentralSyncWorker : BackgroundService
 
         await db.SaveChangesAsync(ct);
         _logger.LogInformation("[CentralSync] Hoàn thành: {Success}/{Total} items", successTotal, pending.Count);
+    }
+
+    /// <summary>Đẩy danh sách thiết bị của trạm con lên trạm tổng để hiển thị trong form giao việc.</summary>
+    private async Task PushDevicesAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var devices = await db.Devices
+            .AsNoTracking()
+            .Select(d => new { id = d.Id.ToString(), name = d.Name, type = d.Type, status = d.Status })
+            .ToListAsync(ct);
+
+        if (devices.Count == 0) return;
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Station-Id", _stationId);
+        client.Timeout = TimeSpan.FromSeconds(15);
+
+        try
+        {
+            var url = $"{_centralUrl}/api/v1/ingest/devices";
+            var resp = await client.PostAsJsonAsync(url, devices, ct);
+            if (!resp.IsSuccessStatusCode)
+                _logger.LogWarning("[CentralSync] PushDevices HTTP {Status}", resp.StatusCode);
+            else
+                _logger.LogInformation("[CentralSync] Đã push {Count} thiết bị lên trạm tổng", devices.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[CentralSync] Lỗi push devices lên trạm tổng");
+        }
     }
 
     /// <summary>Pull task bảo trì từ trạm tổng về trạm con (chiều trên xuống).</summary>
