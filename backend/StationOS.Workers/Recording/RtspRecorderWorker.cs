@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 using Microsoft.AspNetCore.Hosting;
+using System.IO;
 
 namespace StationOS.Workers.Recording;
 
@@ -51,7 +52,28 @@ public class RtspRecorderWorker : BackgroundService
         
         _segmentSeconds = cfg.GetValue("Recorder:SegmentSeconds", 5);
         _bufferSeconds = cfg.GetValue("Recorder:BufferSeconds", 60);
-        _ffmpegPath = cfg["Media:FFmpegPath"] ?? "ffmpeg";
+        var rawFfmpeg = cfg["Media:FFmpegPath"] ?? "ffmpeg";
+        if (rawFfmpeg == "ffmpeg")
+        {
+            var localFfmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+            if (File.Exists(localFfmpeg))
+            {
+                _ffmpegPath = localFfmpeg;
+            }
+            else
+            {
+                _ffmpegPath = rawFfmpeg; // rely on system PATH
+            }
+        }
+        else
+        {
+            _ffmpegPath = rawFfmpeg;
+        }
+        // Warn if executable cannot be found when not relying on PATH
+        if (_ffmpegPath != "ffmpeg" && !File.Exists(_ffmpegPath))
+        {
+            _logger?.LogWarning("[NVR] ffmpeg executable not found at configured path: {Path}. Ensure ffmpeg is installed or bundled.", _ffmpegPath);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

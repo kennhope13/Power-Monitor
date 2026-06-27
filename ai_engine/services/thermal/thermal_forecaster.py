@@ -123,7 +123,16 @@ def compute_prediction(targets: list[str], window_size: int, horizon: int, camer
     except Exception: pass
     pred = {"issued_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "input_timestamp": last_ts.strftime("%Y-%m-%d %H:%M:%S"), "forecast_timestamp": (last_ts + timedelta(minutes=horizon*5)).strftime("%Y-%m-%d %H:%M:%S")}
     for t in targets:
-        vals = [float(r[t]) for r in recent if r.get(t) is not None and r.get(t) != ""]
+        vals = []
+        for r in recent:
+            val_str = r.get(t)
+            if val_str is not None and val_str != "":
+                try:
+                    f = float(val_str)
+                    if -50.0 <= f <= 300.0:
+                        vals.append(f)
+                except ValueError:
+                    pass
         pred[f"{t}_pred"] = _linear_predict(vals, horizon) if vals else None # Dự báo h bước (mỗi bước 5p)
     return pred
 

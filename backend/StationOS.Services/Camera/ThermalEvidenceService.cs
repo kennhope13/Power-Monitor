@@ -17,9 +17,24 @@ public class ThermalEvidenceService
     private readonly ILogger<ThermalEvidenceService> _logger;
     private readonly IHttpClientFactory _http;
 
-    private string Go2RtcApiUrl => _config["Go2Rtc:ApiUrl"] ?? "http://localhost:1984";
-    private string Go2RtcRtspUrl => _config["Go2Rtc:RtspUrl"] ?? "rtsp://localhost:8554";
-    private string FfmpegPath => _config["Media:FFmpegPath"] ?? "ffmpeg";
+    private string Go2RtcApiUrl => _config["Go2Rtc:ApiUrl"] ?? "http://127.0.0.1:1984";
+    private string Go2RtcRtspUrl => _config["Go2Rtc:RtspUrl"] ?? "rtsp://127.0.0.1:8554";
+    private string FfmpegPath
+    {
+        get
+        {
+            var rawFfmpeg = _config["Media:FFmpegPath"] ?? "ffmpeg";
+            if (rawFfmpeg == "ffmpeg")
+            {
+                var localFfmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+                if (File.Exists(localFfmpeg))
+                {
+                    return localFfmpeg;
+                }
+            }
+            return rawFfmpeg;
+        }
+    }
     private int ClipSeconds => int.TryParse(_config["Media:ClipSeconds"], out var secs) ? Math.Clamp(secs, 5, 30) : 12;
 
     public ThermalEvidenceService(
@@ -206,7 +221,7 @@ public class ThermalEvidenceService
     {
         // 1. Ưu tiên dùng go2rtc proxy (localhost:8554)
         if (!string.IsNullOrWhiteSpace(streamId))
-            return $"rtsp://localhost:8554/{streamId}";
+            return $"rtsp://127.0.0.1:8554/{streamId}";
 
         // 2. Fallback sang RTSP trực tiếp
         if (string.IsNullOrWhiteSpace(ip))

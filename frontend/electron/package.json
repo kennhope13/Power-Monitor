@@ -1,0 +1,75 @@
+{
+  "name": "power-monitor",
+  "version": "1.0.0",
+  "description": "Realtime thermal monitoring and forecasting UI",
+  "main": "main.cjs",
+  "author": "Antigravity <admin@example.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --windows nsis",
+    "build:zip": "electron-builder --windows zip",
+    "build:dir": "electron-builder --dir --windows"
+  },
+  "devDependencies": {
+    "electron": "28.0.0",
+    "electron-builder": "^26.15.2"
+  },
+  "build": {
+    "appId": "com.antigravity.powermonitor",
+    "productName": "Power-Monitor",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "loading.html"
+    ],
+    "extraResources": [
+      {
+        "from": "../../backend_published/win-x64",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!wwwroot/media/detections/**/*",
+          "!wwwroot/media/recordings/**/*",
+          "!wwwroot/media/videos/**/*",
+          "!wwwroot/detections/**/*",
+          "!wwwroot/videos/**/*"
+        ]
+      },
+      {
+        "from": "../dist",
+        "to": "frontend-dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../docker-compose.db.yml",
+        "to": "docker-compose.db.yml"
+      },
+      {
+        "from": "../../pg_portable",
+        "to": "pg_portable",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../go2rtc",
+        "to": "go2rtc",
+        "filter": ["go2rtc.exe", "go2rtc", "go2rtc.yaml", "ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Power-Monitor"
+    }
+  }
+}

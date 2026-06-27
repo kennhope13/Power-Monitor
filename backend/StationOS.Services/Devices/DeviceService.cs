@@ -30,7 +30,7 @@ public class DeviceService
     private readonly IServiceScopeFactory _scopeFactory;
 
     // go2rtc REST API mặc định chạy tại port 1984
-    private string Go2RtcUrl => _config["Go2Rtc:ApiUrl"] ?? "http://localhost:1984";
+    private string Go2RtcUrl => _config["Go2Rtc:ApiUrl"] ?? "http://127.0.0.1:1984";
 
     public DeviceService(IHttpClientFactory http, IConfiguration config, ILogger<DeviceService> logger, CredentialEncryptionService crypto, IServiceScopeFactory scopeFactory)
     {

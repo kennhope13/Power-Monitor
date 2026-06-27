@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // ReportGeneratorService — Tạo PDF dùng QuestPDF
 // Supports: daily | monthly | event
 // ============================================================
@@ -24,9 +24,9 @@ public record ReportOptions(
 public class ReportGeneratorService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IHostEnvironment     _env;
+    private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment     _env;
 
-    public ReportGeneratorService(IServiceScopeFactory scopeFactory, IHostEnvironment env)
+    public ReportGeneratorService(IServiceScopeFactory scopeFactory, Microsoft.AspNetCore.Hosting.IWebHostEnvironment env)
     {
         _scopeFactory = scopeFactory;
         _env = env;
@@ -296,7 +296,7 @@ public class ReportGeneratorService
 
         // ── Lưu file ─────────────────────────────────────────
         var reportId = Guid.NewGuid();
-        var reportsDir = Path.Combine(_env.ContentRootPath, "wwwroot", "reports");
+        var reportsDir = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "reports");
         Directory.CreateDirectory(reportsDir);
         var fileName = $"{reportId}.pdf";
         var filePath = Path.Combine(reportsDir, fileName);

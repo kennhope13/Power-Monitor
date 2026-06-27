@@ -24,7 +24,7 @@ public class CentralSyncWorker : BackgroundService
     private readonly string? _centralUrl;
     private readonly string? _stationId;
     private const int IntervalMs = 30_000; // 30 giây
-    private const int BatchSize = 50;
+    private const int BatchSize = 200;
 
     public CentralSyncWorker(
         IServiceScopeFactory scopeFactory,
@@ -55,8 +55,8 @@ public class CentralSyncWorker : BackgroundService
 
         _logger.LogInformation("[CentralSync] Khởi động, trạm tổng: {Url}", _centralUrl);
 
-        // Delay 60s sau startup để tránh race với migration và startup các service khác
-        await Task.Delay(60_000, stoppingToken);
+        // Delay 10s sau startup để bắt đầu chạy nhanh hơn
+        await Task.Delay(10_000, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -80,21 +80,33 @@ public class CentralSyncWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Ưu tiên Reports/AuditLog/MaintenanceTask/LoginLog trước, sensor readings sau
-        var priorityTypes = new[] { "Report", "AuditLog", "MaintenanceTask", "LoginLog" };
-        var highPriority = await db.SyncQueues
-            .Where(q => q.Status == "pending" && q.RetryCount < 3 && priorityTypes.Contains(q.EntityType))
+        // 1. High priority: Alert, DetectionEvent, Report, MaintenanceTask
+        var highPriorityTypes = new[] { "Alert", "DetectionEvent", "Report", "MaintenanceTask" };
+        var pending = await db.SyncQueues
+            .Where(q => q.Status == "pending" && q.RetryCount < 3 && highPriorityTypes.Contains(q.EntityType))
             .OrderBy(q => q.CreatedAt)
             .Take(BatchSize)
             .ToListAsync(ct);
 
-        var pending = highPriority.Count > 0
-            ? highPriority
-            : await db.SyncQueues
-                .Where(q => q.Status == "pending" && q.RetryCount < 3)
+        // 2. Medium priority: AuditLog
+        if (pending.Count == 0)
+        {
+            pending = await db.SyncQueues
+                .Where(q => q.Status == "pending" && q.RetryCount < 3 && q.EntityType == "AuditLog")
                 .OrderBy(q => q.CreatedAt)
                 .Take(BatchSize)
                 .ToListAsync(ct);
+        }
+
+        // 3. Low priority: SensorReading
+        if (pending.Count == 0)
+        {
+            pending = await db.SyncQueues
+                .Where(q => q.Status == "pending" && q.RetryCount < 3 && q.EntityType == "SensorReading")
+                .OrderBy(q => q.CreatedAt)
+                .Take(BatchSize)
+                .ToListAsync(ct);
+        }
 
         if (pending.Count == 0) return;
 

@@ -14,6 +14,8 @@ using StationOS.Data;
 using StationOS.Data.Entities;
 using StationOS.Services;
 
+using System.Net.Http;
+
 namespace StationOS.Api.Controllers;
 
 [ApiController]
@@ -23,10 +25,12 @@ public class StationsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly PermissionService _permissions;
-    public StationsController(AppDbContext db, PermissionService permissions)
+    private readonly IHttpClientFactory _httpClientFactory;
+    public StationsController(AppDbContext db, PermissionService permissions, IHttpClientFactory httpClientFactory)
     {
         _db = db;
         _permissions = permissions;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>Lấy danh sách trạm biến áp. Operator chỉ thấy trạm được phân quyền.</summary>
@@ -49,7 +53,7 @@ public class StationsController : ControllerBase
     /// <summary>Lấy chi tiết 1 trạm theo ID.</summary>
     /// <param name="id">Station ID.</param>
     /// <returns>Đối tượng Station hoặc 404.</returns>
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
         var s = await _db.Stations.FindAsync(id);
@@ -80,7 +84,7 @@ public class StationsController : ControllerBase
     /// <param name="id">Station ID.</param>
     /// <param name="req">Thông tin cần cập nhật.</param>
     /// <returns>Station đã cập nhật.</returns>
-    [HttpPut("{id}")]
+    [HttpPut("{id:guid}")]
     [Authorize(Roles = "admin")]
     public async Task<IActionResult> Update(Guid id, [FromBody] StationRequest req)
     {
@@ -100,7 +104,7 @@ public class StationsController : ControllerBase
     /// <summary>Xóa trạm. Chỉ admin, và chỉ khi trạm không còn thiết bị nào.</summary>
     /// <param name="id">Station ID.</param>
     /// <returns>204 NoContent hoặc 400 nếu còn thiết bị.</returns>
-    [HttpDelete("{id}")]
+    [HttpDelete("{id:guid}")]
     [Authorize(Roles = "admin")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -115,6 +119,53 @@ public class StationsController : ControllerBase
         _db.Stations.Remove(station);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private async Task<IActionResult> ProxyToLocalAiEngineAsync(string subPath, string? queryString = null)
+    {
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+
+            var url = $"http://127.0.0.1:8100{subPath}";
+            if (!string.IsNullOrEmpty(queryString))
+            {
+                url += queryString;
+            }
+
+            var resp = await client.GetAsync(url);
+            var body = await resp.Content.ReadAsStringAsync();
+            return Content(body, "application/json");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(503, new { error = "ai_engine_unreachable", detail = ex.Message });
+        }
+    }
+
+    [HttpGet("local-prediction-history")]
+    public async Task<IActionResult> GetLocalPredictionHistory()
+    {
+        return await ProxyToLocalAiEngineAsync("/api/prediction/history", Request.QueryString.Value);
+    }
+
+    [HttpGet("local-latest-prediction")]
+    public async Task<IActionResult> GetLocalLatestPrediction()
+    {
+        return await ProxyToLocalAiEngineAsync("/api/latest-prediction", Request.QueryString.Value);
+    }
+
+    [HttpGet("local-training-status")]
+    public async Task<IActionResult> GetLocalTrainingStatus()
+    {
+        return await ProxyToLocalAiEngineAsync("/api/training-status", Request.QueryString.Value);
+    }
+
+    [HttpGet("local-prediction-config")]
+    public async Task<IActionResult> GetLocalPredictionConfig()
+    {
+        return await ProxyToLocalAiEngineAsync("/api/config", Request.QueryString.Value);
     }
 }
 

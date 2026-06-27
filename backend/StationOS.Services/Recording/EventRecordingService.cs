@@ -38,7 +38,23 @@ public class EventRecordingService
         var recSubDir = cfg["Recorder:RecordingsRoot"]?.Replace("wwwroot/", "") ?? "media/recordings";
         _recordingsRoot = Path.IsPathRooted(recSubDir) ? recSubDir : Path.Combine(webRoot, recSubDir);
         
-        _ffmpegPath = cfg["Media:FFmpegPath"] ?? "ffmpeg";
+        var rawFfmpeg = cfg["Media:FFmpegPath"] ?? "ffmpeg";
+        if (rawFfmpeg == "ffmpeg")
+        {
+            var localFfmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+            if (File.Exists(localFfmpeg))
+            {
+                _ffmpegPath = localFfmpeg;
+            }
+            else
+            {
+                _ffmpegPath = rawFfmpeg;
+            }
+        }
+        else
+        {
+            _ffmpegPath = rawFfmpeg;
+        }
     }
 
     /// <summary>

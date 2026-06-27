@@ -145,11 +145,18 @@ public class PersonDetectionController : ControllerBase
             var fname = $"{Guid.NewGuid()}_h264.mp4";
             var fullPath = Path.Combine(videosDir, fname);
             
+            var ffmpegExe = "ffmpeg";
+            var localFfmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg");
+            if (System.IO.File.Exists(localFfmpeg))
+            {
+                ffmpegExe = localFfmpeg;
+            }
+
             try 
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "ffmpeg",
+                    FileName = ffmpegExe,
                     Arguments = $"-y -i \"{tempPath}\" -c:v libx264 -preset fast -crf 28 -c:a aac -b:a 128k \"{fullPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -188,7 +195,7 @@ public class PersonDetectionController : ControllerBase
             {
                 var psiThumb = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "ffmpeg",
+                    FileName = ffmpegExe,
                     Arguments = $"-y -i \"{fullPath}\" -ss 00:00:00.5 -vframes 1 \"{thumbFullPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,

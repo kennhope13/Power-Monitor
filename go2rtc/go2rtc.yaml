@@ -65,3 +65,9 @@ streams:
     - rtsp://admin:Admin%40123@192.168.10.114:554
   camera_123_123_123_123_cctv:
     - rtsp://admin:dsfasdf@123.123.123.123:554
+  camera_192_168_10_223_cctv:
+    - rtsp://admin:Admin%40123@192.168.10.223:554
+  cam_192_168_10_125_optical:
+    - rtsp://admin:Admin%40123@192.168.10.125:554
+  cam_192_168_10_125_thermal:
+    - rtsp://admin:Admin%40123@192.168.10.125:554

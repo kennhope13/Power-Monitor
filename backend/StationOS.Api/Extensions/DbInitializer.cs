@@ -381,7 +381,7 @@ public static class DbInitializer
     private static async Task BackfillSyncQueueAsync(AppDbContext db)
     {
         var syncedList = await db.SyncQueues
-            .Where(q => q.EntityType == "MaintenanceTask" || q.EntityType == "Report")
+            .Where(q => q.EntityType == "MaintenanceTask" || q.EntityType == "Report" || q.EntityType == "Alert" || q.EntityType == "DetectionEvent" || q.EntityType == "LoginLog" || q.EntityType == "AuditLog")
             .Select(q => q.EntityId)
             .ToListAsync();
         var syncedIds = syncedList.ToHashSet();
@@ -397,9 +397,9 @@ public static class DbInitializer
                 EntityType = "MaintenanceTask",
                 EntityId   = t.Id,
                 Payload    = System.Text.Json.JsonSerializer.Serialize(new {
-                    t.Id, t.StationId, t.DeviceId, t.Title, t.Type,
-                    t.ScheduledDate, t.AssignedTo, t.Notes, t.Status,
-                    t.CreatedAt, t.CompletedAt,
+                    id = t.Id, stationId = t.StationId, deviceId = t.DeviceId,
+                    title = t.Title, type = t.Type, status = t.Status, assignedTo = t.AssignedTo, notes = t.Notes,
+                    scheduledDate = t.ScheduledDate, completedAt = t.CompletedAt
                 }),
             });
         }
@@ -415,17 +415,72 @@ public static class DbInitializer
                 EntityType = "Report",
                 EntityId   = r.Id,
                 Payload    = System.Text.Json.JsonSerializer.Serialize(new {
-                    r.Id, r.StationId, r.Type, r.PeriodFrom, r.PeriodTo,
-                    r.FileUrl, r.GeneratedBy, r.GeneratedAt,
+                    id = r.Id, stationId = r.StationId, type = r.Type, periodFrom = r.PeriodFrom, periodTo = r.PeriodTo,
+                    fileUrl = r.FileUrl, generatedAt = r.GeneratedAt, generatedBy = r.GeneratedBy
                 }),
             });
         }
 
-        int total = maintenanceTasks.Count + reports.Count;
+        var alerts = await db.Alerts
+            .Where(a => !syncedIds.Contains(a.Id))
+            .ToListAsync();
+
+        foreach (var a in alerts)
+        {
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "Alert",
+                EntityId   = a.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    id = a.Id, station_id = a.StationId, device_id = a.DeviceId, rule_id = a.RuleId,
+                    source = a.Source, level = a.Level, status = a.Status, message = a.Message,
+                    value = a.Value, triggered_at = a.TriggeredAt, imageUrl = a.ImageUrl,
+                    thumbnailUrl = a.ThumbnailUrl, videoUrl = a.VideoUrl
+                }),
+            });
+        }
+
+        var events = await db.DetectionEvents
+            .Where(e => !syncedIds.Contains(e.Id))
+            .ToListAsync();
+
+        foreach (var e in events)
+        {
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "DetectionEvent",
+                EntityId   = e.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    id = e.Id, cameraId = e.CameraId, stationId = e.StationId, source = e.Source,
+                    detectionType = e.DetectionType, confidence = e.Confidence, boundingBoxes = e.BoundingBoxes,
+                    metadata = e.Metadata, detectedAt = e.DetectedAt
+                }),
+            });
+        }
+
+        var audits = await db.AuditLogs
+            .Where(a => !syncedIds.Contains(a.Id))
+            .ToListAsync();
+
+        foreach (var a in audits)
+        {
+            db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+            {
+                EntityType = "AuditLog",
+                EntityId   = a.Id,
+                Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                    id = a.Id, userId = a.UserId, action = a.Action,
+                    entityType = a.EntityType, entityId = a.EntityId, ipAddress = a.IpAddress,
+                    oldValue = a.OldValue, newValue = a.NewValue, ts = a.Ts
+                }),
+            });
+        }
+
+        int total = maintenanceTasks.Count + reports.Count + alerts.Count + events.Count + audits.Count;
         if (total > 0)
         {
             await db.SaveChangesAsync();
-            Console.WriteLine($"[Startup] Backfill SyncQueue: {maintenanceTasks.Count} maintenance tasks, {reports.Count} reports");
+            Console.WriteLine($"[Startup] Backfill SyncQueue: {maintenanceTasks.Count} MTs, {reports.Count} reports, {alerts.Count} alerts, {events.Count} events, {audits.Count} audits");
         }
     }
 }

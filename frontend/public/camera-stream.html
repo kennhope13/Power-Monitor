@@ -17,7 +17,7 @@ import './video-stream.js';
 const p = new URLSearchParams(location.search);
 const src = p.get('src') || '';
 const mode = p.get('mode') || 'webrtc,mse';
-const go2rtc = p.get('go2rtc') || 'http://localhost:1984';
+const go2rtc = p.get('go2rtc') || 'http://127.0.0.1:1984';
 const el = document.createElement('video-stream');
 el.mode = mode;
 el.src = new URL('api/ws?src=' + encodeURIComponent(src), go2rtc);

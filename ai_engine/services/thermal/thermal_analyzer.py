@@ -266,7 +266,8 @@ class ThermalAnalyzer:
         now = time.time()
         if now < self._auth_cooldown_until: return None
         if not hasattr(self, '_http_client'):
-            self._http_client = httpx.AsyncClient(timeout=5.0)
+            limits = httpx.Limits(max_keepalive_connections=0)
+            self._http_client = httpx.AsyncClient(timeout=5.0, limits=limits)
         client = self._http_client
         for ch in [2, 1]:
             url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/{ch}/thermometry/jpegPicWithAppendData?format=json"
@@ -298,7 +299,12 @@ class ThermalAnalyzer:
                             if h_end != -1:
                                 matrix_bytes = part[h_end+4:][:data_len]
                                 if len(matrix_bytes) >= w * h * 4:
-                                    return np.frombuffer(matrix_bytes, dtype=np.float32), w, h
+                                    floats = np.frombuffer(matrix_bytes, dtype=np.float32)
+                                    bad = ~np.isfinite(floats) | (floats < -50.0) | (floats > 500.0)
+                                    if np.sum(bad) > len(floats) * 0.01:
+                                        logger.warning("[ThermalAnalyzer] Detected shifted/corrupted thermal matrix from %s, skipping frame.", self.camera_ip)
+                                        return None
+                                    return floats, w, h
                     break
             except Exception: pass
         return None

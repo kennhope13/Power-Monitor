@@ -275,7 +275,8 @@ _thermal_clients: dict[str, httpx.AsyncClient] = {}  # camera_ip -> httpx.AsyncC
 async def _get_thermal_client(camera_ip: str) -> httpx.AsyncClient:
     """Trả về AsyncClient được tái sử dụng cho một camera IP nhất định."""
     if camera_ip not in _thermal_clients:
-        _thermal_clients[camera_ip] = httpx.AsyncClient(timeout=4.0)
+        limits = httpx.Limits(max_keepalive_connections=0)
+        _thermal_clients[camera_ip] = httpx.AsyncClient(timeout=4.0, limits=limits)
     return _thermal_clients[camera_ip]
 
 async def _read_matrix_cached(camera_ip: str, username: str, password: str):
@@ -331,6 +332,9 @@ async def _read_matrix_cached(camera_ip: str, username: str, password: str):
                         if len(raw) >= w * h * 4:
                             matrix = np.frombuffer(raw, dtype=np.float32).reshape(h, w).copy()
                             bad = ~np.isfinite(matrix) | (matrix < -50) | (matrix > 500)
+                            if np.sum(bad) > matrix.size * 0.01:
+                                logger.warning("[Routes] Detected shifted/corrupted thermal matrix from %s, forcing fallback.", camera_ip)
+                                return None
                             if bad.any():
                                 matrix[bad] = np.nan
                             result = {"matrix": matrix, "w": w, "h": h, "mapping": mapping, "ts": now}
