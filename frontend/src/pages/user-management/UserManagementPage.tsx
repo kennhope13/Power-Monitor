@@ -262,7 +262,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
         </div>
       </div>
       
-      <div className="admin-card" style={{ padding: 0, overflow: 'auto', flex: 1, marginTop: 12 }}>
+      <div className="admin-card" style={{ padding: 0, overflow: 'auto', flex: 1 }}>
           <table className="data-table">
             <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
@@ -323,7 +323,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
         </table>
       </div>
 
-      <div className="admin-card" style={{ padding: '12px 20px', marginTop: 12 }}>
+      <div className="admin-card" style={{ padding: '12px 20px' }}>
         <div 
           style={{ 
             display: 'flex', 
@@ -376,7 +376,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
         )}
       </div>
 
-      <div className="admin-card" style={{ padding: '12px 20px', marginTop: 12 }}>
+      <div className="admin-card" style={{ padding: '12px 20px' }}>
         <div 
           style={{ 
             display: 'flex', 

@@ -14,6 +14,7 @@ using System.Net.Http.Json;
 using StationOS.Data;
 using StationOS.Data.Entities;
 using StationOS.Services;
+using StationOS.Workers.Polling;
 using System.Security.Claims;
 
 namespace StationOS.Api.Controllers;
@@ -28,19 +29,22 @@ public class AlertsController : ControllerBase
     private readonly IRealtimeNotifier _notifier;
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly HealthScoreWorker _healthWorker;
 
     public AlertsController(
         AppDbContext db,
         PermissionService permissions,
         IRealtimeNotifier notifier,
         IConfiguration config,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        HealthScoreWorker healthWorker)
     {
         _db = db;
         _permissions = permissions;
         _notifier = notifier;
         _config = config;
         _httpClientFactory = httpClientFactory;
+        _healthWorker = healthWorker;
     }
 
     /// <summary>
@@ -73,8 +77,11 @@ public class AlertsController : ControllerBase
         [FromQuery] string? status,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        [FromQuery] int limit = 200)
+        [FromQuery] Guid? deviceId,
+        [FromQuery] int pageSize = 200,
+        [FromQuery] int limit = 0)
     {
+        var take = limit > 0 ? limit : (pageSize > 0 ? pageSize : 200);
         var q = _db.Alerts.AsQueryable();
 
         var allowed = await _permissions.GetAllowedStationIdsAsync();
@@ -83,12 +90,15 @@ public class AlertsController : ControllerBase
         if (!string.IsNullOrEmpty(status))
             q = q.Where(a => a.Status == status);
 
+        if (deviceId.HasValue)
+            q = q.Where(a => a.DeviceId == deviceId.Value);
+
         if (from.HasValue) q = q.Where(a => a.TriggeredAt >= from.Value);
         if (to.HasValue)   q = q.Where(a => a.TriggeredAt <= to.Value);
 
         var alertsRaw = await q
             .OrderByDescending(a => a.TriggeredAt)
-            .Take(limit)
+            .Take(take)
             .GroupJoin(
                 _db.DetectionEvents,
                 a => a.Id,
@@ -240,6 +250,43 @@ public class AlertsController : ControllerBase
         await _db.SaveChangesAsync();
         await _notifier.SendAlertUpdatedAsync(new { alert.Id, alert.Status, alert.DeviceId, alert.Level });
         return Ok(new { alert.Id, alert.Status, alert.ClosedAt });
+    }
+
+    /// <summary>
+    /// Đóng hàng loạt tất cả alert open/acked của 1 thiết bị.
+    /// POST /api/v1/alerts/close-device/{deviceId}
+    /// </summary>
+    [HttpPost("close-device/{deviceId:guid}")]
+    [Authorize(Roles = "admin,manager")]
+    public async Task<IActionResult> CloseAllForDevice(Guid deviceId)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        Guid? uid = Guid.TryParse(userId, out var parsed) ? parsed : null;
+        var now = DateTime.UtcNow;
+
+        var alerts = await _db.Alerts
+            .Where(a => a.DeviceId == deviceId && (a.Status == "open" || a.Status == "acked"))
+            .ToListAsync();
+
+        foreach (var a in alerts)
+        {
+            a.Status   = "closed";
+            a.ClosedAt = now;
+            _db.AlertHistories.Add(new AlertHistory
+            {
+                AlertId   = a.Id,
+                Status    = "closed",
+                ChangedBy = uid,
+                Note      = "Đóng hàng loạt bởi người dùng",
+            });
+        }
+
+        await _db.SaveChangesAsync();
+
+        // Trigger tính lại health score ngay
+        _ = _healthWorker.RecalculateNowAsync();
+
+        return Ok(new { closed = alerts.Count, deviceId });
     }
 
     /// <summary>

@@ -24,6 +24,8 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
   const did = dev.id;
   const [markers, setMarkers] = useState<any[]>([]);
   const [rois, setRois] = useState<any[]>([]);
+  const [selectedMarkerIds, setSelectedMarkerIds] = useState<string[]>([]);
+  const [selectedRoiIds, setSelectedRoiIds] = useState<string[]>([]);
   const mksRef = useRef(markers); mksRef.current = markers;
   const roisRef = useRef(rois); roisRef.current = rois;
   const [vvr, setVvr] = useState<VVR>(() => {
@@ -143,6 +145,13 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
   }, [did]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const markerIds = new Set(markers.map(m => m.id));
+    const roiIds = new Set(rois.map(r => r.id));
+    setSelectedMarkerIds(prev => prev.filter(id => markerIds.has(id)));
+    setSelectedRoiIds(prev => prev.filter(id => roiIds.has(id)));
+  }, [markers, rois]);
 
   // Lắng nghe SignalR SensorUpdate — cùng nguồn với realtime page
   useEffect(() => {
@@ -460,6 +469,62 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
     } catch (err: any) {
       console.error("[ThermalConfigTab] Delete ROI failed:", err);
       alert("Xóa vùng đo thất bại: " + (err.message || err));
+    }
+  };
+
+  const toggleMarkerSelection = (id: string) => {
+    setSelectedMarkerIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const toggleRoiSelection = (id: string) => {
+    setSelectedRoiIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const selectAllMarkers = () => {
+    setSelectedMarkerIds(markers.map(m => m.id));
+  };
+
+  const selectAllRois = () => {
+    setSelectedRoiIds(rois.map(r => r.id));
+  };
+
+  const bulkDeleteMarkers = async () => {
+    if (selectedMarkerIds.length === 0) return;
+    if (!await confirmDialog({
+      title: 'Xóa hàng loạt điểm đo',
+      message: `Xóa ${selectedMarkerIds.length} điểm đo đã chọn? Thao tác này không thể hoàn tác.`,
+      confirmText: 'Xóa đã chọn',
+      danger: true,
+    })) return;
+
+    try {
+      await Promise.all(selectedMarkerIds.map(id => stationApi.deleteRoiPoint(did, id)));
+      setSelectedMarkerIds([]);
+      await load();
+      syncAI();
+    } catch (err: any) {
+      console.error("[ThermalConfigTab] Bulk delete markers failed:", err);
+      alert("Xóa hàng loạt điểm đo thất bại: " + (err.message || err));
+    }
+  };
+
+  const bulkDeleteRois = async () => {
+    if (selectedRoiIds.length === 0) return;
+    if (!await confirmDialog({
+      title: 'Xóa hàng loạt vùng đo',
+      message: `Xóa ${selectedRoiIds.length} vùng đo đã chọn? Thao tác này không thể hoàn tác.`,
+      confirmText: 'Xóa đã chọn',
+      danger: true,
+    })) return;
+
+    try {
+      await Promise.all(selectedRoiIds.map(id => stationApi.deleteBoundary(id)));
+      setSelectedRoiIds([]);
+      await load();
+      syncAI();
+    } catch (err: any) {
+      console.error("[ThermalConfigTab] Bulk delete ROIs failed:", err);
+      alert("Xóa hàng loạt vùng đo thất bại: " + (err.message || err));
     }
   };
 
@@ -801,8 +866,33 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                   <button className="btn-industrial" style={{ width:'100%', height:30, background:'rgba(59,130,246,0.1)', border:'1px dashed var(--admin-accent)', color:'var(--admin-accent)', fontWeight:800, fontSize:'.7rem' }} onClick={()=>setDrawMode(drawMode==='point'?'none':'point')}>
                     {drawMode==='point' ? 'HỦY CHẤM ĐIỂM' : '+ THÊM ĐIỂM ĐO'}
                   </button>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button
+                      className="btn-industrial btn-sm"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={selectAllMarkers}
+                      disabled={markers.length === 0}
+                    >
+                      Chọn tất cả
+                    </button>
+                    <button
+                      className="btn-industrial btn-sm btn-danger"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={bulkDeleteMarkers}
+                      disabled={selectedMarkerIds.length === 0}
+                    >
+                      Xóa đã chọn
+                    </button>
+                  </div>
                   {markers.map(m => (
                     <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background:'var(--admin-layer-2)', border:'1px solid var(--admin-border)', borderRadius:0 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedMarkerIds.includes(m.id)}
+                        onChange={() => toggleMarkerSelection(m.id)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ accentColor: 'var(--admin-accent)', cursor: 'pointer' }}
+                      />
                       <div style={{ width:8, height:8, borderRadius:'50%', background:clr(m.temp,m.preAlarm,m.alarm) }} />
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:'.75rem', fontWeight:700, color:'var(--admin-text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.name}</div>
@@ -823,10 +913,35 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                   <button className="btn-industrial" style={{ width:'100%', height:30, background:'rgba(59,130,246,0.1)', border:'1px dashed var(--admin-accent)', color:'var(--admin-accent)', fontWeight:800, fontSize:'.7rem' }} onClick={()=>setDrawMode(drawMode==='rect'?'none':'rect')}>
                     {drawMode==='rect' ? 'HỦY VẼ VÙNG' : '⬜ VẼ VÙNG ĐO MỚI'}
                   </button>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button
+                      className="btn-industrial btn-sm"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={selectAllRois}
+                      disabled={rois.length === 0}
+                    >
+                      Chọn tất cả
+                    </button>
+                    <button
+                      className="btn-industrial btn-sm btn-danger"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={bulkDeleteRois}
+                      disabled={selectedRoiIds.length === 0}
+                    >
+                      Xóa đã chọn
+                    </button>
+                  </div>
                   {rois.map(r => {
                     const c = clr(r.maxTemp, r.preAlarm, r.alarm);
                     return (
                       <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background:'var(--admin-layer-2)', border:'1px solid var(--admin-border)', borderRadius:0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRoiIds.includes(r.id)}
+                          onChange={() => toggleRoiSelection(r.id)}
+                          onClick={e => e.stopPropagation()}
+                          style={{ accentColor: 'var(--admin-accent)', cursor: 'pointer' }}
+                        />
                         <div style={{ width:8, height:8, background:c+'44', border:`1px solid ${c}` }} />
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontSize:'.75rem', fontWeight:700, color:'var(--admin-text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>

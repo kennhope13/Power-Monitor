@@ -44,6 +44,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      usePolling: true,
+    },
     proxy: {
       '/media': {
         target: 'http://127.0.0.1:5000',

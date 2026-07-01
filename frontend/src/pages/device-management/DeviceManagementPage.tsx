@@ -28,6 +28,118 @@ const FALLBACK_POINTS = [
   { value: PT_PD,     label: `${TEMP_LABELS[PT_PD]} (dB)` },
 ];
 
+type CabinetPointTemplate = {
+  pointId: string;
+  name: string;
+  tagName: string;
+  type: 'Int' | 'UInt' | 'DInt' | 'Real' | 'Bool';
+  dbAddress: string;
+  valueRange: string;
+  note: string;
+  unit?: string;
+  offset?: number;
+  bit?: number;
+};
+
+const CABINET_POINT_SAMPLE: CabinetPointTemplate[] = [
+  {
+    pointId: 'cable_temp1',
+    name: 'Cable_temp1',
+    tagName: 'MC471.TempCable.Cable_temp1',
+    type: 'Int',
+    dbAddress: 'DB32.DBD0',
+    offset: 0,
+    valueRange: '-50 -> 125',
+    note: 'If -50, sensor lost connection',
+    unit: '°C',
+  },
+  {
+    pointId: 'cable_temp2',
+    name: 'Cable_temp2',
+    tagName: 'MC471.TempCable.Cable_temp2',
+    type: 'Int',
+    dbAddress: 'DB32.DBD2',
+    offset: 2,
+    valueRange: '-50 -> 125',
+    note: 'If -50, sensor lost connection',
+    unit: '°C',
+  },
+  {
+    pointId: 'cable_temp3',
+    name: 'Cable_temp3',
+    tagName: 'MC471.TempCable.Cable_temp3',
+    type: 'Int',
+    dbAddress: 'DB32.DBD4',
+    offset: 4,
+    valueRange: '-50 -> 125',
+    note: 'If -50, sensor lost connection',
+    unit: '°C',
+  },
+  {
+    pointId: 'pd_eppc',
+    name: 'PD_EPPC',
+    tagName: 'MC471.PD_SENSOR.PD_EPPC',
+    type: 'UInt',
+    dbAddress: 'DB32.DBD12',
+    offset: 12,
+    valueRange: '0 -> 65535',
+    note: '',
+  },
+  {
+    pointId: 'ratio',
+    name: 'Ratio',
+    tagName: 'MC471.PD_SENSOR.Ratio',
+    type: 'Int',
+    dbAddress: 'DB32.DBD14',
+    offset: 14,
+    valueRange: '-60 -> +15',
+    note: '',
+  },
+  {
+    pointId: 'indi',
+    name: 'INDI',
+    tagName: 'MC471.PD_SENSOR.INDI',
+    type: 'UInt',
+    dbAddress: 'DB32.DBD18',
+    offset: 18,
+    valueRange: '0, 1, 2',
+    note: '0, normal, 1 warning, 2 alarm',
+  },
+];
+
+const makeCabinetPointTemplate = (cabinetName: string): CabinetPointTemplate[] => {
+  const prefix = cabinetName.trim().replace(/\s+/g, '') || 'MC471';
+  return CABINET_POINT_SAMPLE.map(point => ({
+    ...point,
+    tagName: point.tagName.replace(/^MC471/i, prefix),
+  }));
+};
+
+const formatCabinetTemplateJson = (cabinetName: string) => JSON.stringify(makeCabinetPointTemplate(cabinetName), null, 2);
+
+const parseCabinetPointsJson = (text: string): CabinetPointTemplate[] => {
+  if (!text.trim()) return [];
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed)) throw new Error('Cabinet points phải là một mảng JSON.');
+  return parsed.map((item, index) => {
+    if (!item || typeof item !== 'object') {
+      throw new Error(`Point #${index + 1} không hợp lệ.`);
+    }
+    return {
+      pointId: String(item.pointId ?? item.id ?? item.name ?? `point_${index + 1}`),
+      name: String(item.name ?? item.label ?? item.pointId ?? `Point ${index + 1}`),
+      tagName: String(item.tagName ?? item.tagname ?? item.name ?? item.pointId ?? `Point ${index + 1}`),
+      type: (item.type ?? 'Int') as CabinetPointTemplate['type'],
+      dbAddress: String(item.dbAddress ?? item.db_address ?? ''),
+      valueRange: String(item.valueRange ?? ''),
+      note: String(item.note ?? ''),
+      unit: item.unit != null ? String(item.unit) : undefined,
+      offset: item.offset != null ? Number(item.offset) : undefined,
+      bit: item.bit != null ? Number(item.bit) : undefined,
+    };
+  });
+};
+
 // Nhãn hiển thị theo loại thiết bị — import từ constants để dùng chung
 const TYPE_LABELS = DEVICE_TYPE_LABELS;
 
@@ -73,6 +185,7 @@ export default function DeviceManagementPage({
     port: 502, unitId: 1,
     enableHealthScore: false
   });
+  const [cabinetPointsJson, setCabinetPointsJson] = useState('');
 
 
   const [roiTab, setRoiTab] = useState(0); // page tabs: 0=all, 2=pd region, 3=thermal, 4=fire config
@@ -89,6 +202,8 @@ export default function DeviceManagementPage({
   const [scanSubnet, setScanSubnet] = useState('192.168.10');
   const [isScanning, setIsScanning] = useState(false);
   const [scanResults, setScanResults] = useState<any[] | null>(null);
+
+  const [cabinetImportFile, setCabinetImportFile] = useState<File | null>(null);
 
   // Auto-configure Hikvision modal
   const [autoConfigTarget, setAutoConfigTarget] = useState<{ ip: string } | null>(null);
@@ -368,6 +483,7 @@ export default function DeviceManagementPage({
     setEditingId(d?.id ?? null);
     setTestConnResult({ show: false });
     setShowPassword(false);
+    setCabinetImportFile(null);
     if (d) {
       const cfg = d.config || {};
       setFormData({
@@ -381,6 +497,14 @@ export default function DeviceManagementPage({
         port: cfg.port ?? 502, unitId: cfg.unit_id ?? 1,
         enableHealthScore: cfg.enableHealthScore ?? false
       });
+      if (d.type === 'cabinet') {
+        const points = cfg.points ?? cfg.cabinet_points ?? [];
+        setCabinetPointsJson(points && Array.isArray(points) && points.length > 0
+          ? JSON.stringify(points, null, 2)
+          : formatCabinetTemplateJson(cfg.cabinet_code || d.name));
+      } else {
+        setCabinetPointsJson('');
+      }
     } else {
       setFormData({
         name: '', type: 'camera_cctv', ip: '',
@@ -393,6 +517,7 @@ export default function DeviceManagementPage({
         port: 502, unitId: 1,
         enableHealthScore: false
       });
+      setCabinetPointsJson(formatCabinetTemplateJson('MC471'));
     }
     setIsDeviceModalOpen(true);
   };
@@ -405,12 +530,9 @@ export default function DeviceManagementPage({
       const configObj: any = { ip: formData.ip };
       let protocol = 'modbus';
       
-      if (formData.type === 'plc_s7') {
+      if (formData.type === 'plc_s7' || formData.type === 'cabinet') {
         protocol = 'snap7';
         Object.assign(configObj, { rack: formData.rack, slot: formData.slot, db: formData.db, offset: 0, length: formData.length, enableHealthScore: formData.enableHealthScore });
-      } else if (formData.type === 'cabinet') {
-        protocol = 'json';
-        // Only IP is needed for cabinet configuration
       } else if (formData.type === 'camera_dual') {
         protocol = 'rtsp';
         const gOptical = formData.go2rtcOptical.trim() || `cam_${formData.ip.replace(/\./g, '_')}_optical`;
@@ -435,6 +557,15 @@ export default function DeviceManagementPage({
         Object.assign(configObj, { rtsp_path: rp, go2rtc_id: gid, username: formData.username, password: formData.password });
       } else if (formData.type === 'modbus_tcp') {
         Object.assign(configObj, { port: formData.port, unit_id: formData.unitId, username: formData.username, password: formData.password });
+      }
+
+      if (formData.type === 'cabinet') {
+        const trimmedPoints = cabinetPointsJson.trim();
+        const points = trimmedPoints ? parseCabinetPointsJson(trimmedPoints) : makeCabinetPointTemplate(formData.name || 'MC471');
+        Object.assign(configObj, {
+          cabinet_code: formData.name.trim(),
+          points,
+        });
       }
 
       const configStr = JSON.stringify(configObj);
@@ -464,7 +595,7 @@ export default function DeviceManagementPage({
       const configObj: any = { ip: formData.ip };
       let protocol = 'rtsp';
       
-      if (formData.type === 'plc_s7') {
+      if (formData.type === 'plc_s7' || formData.type === 'cabinet') {
         protocol = 'snap7';
         Object.assign(configObj, { rack: formData.rack, slot: formData.slot, db: formData.db, length: formData.length });
       } else if (formData.type === 'camera_dual' || formData.type === 'camera_thermal' || formData.type.startsWith('camera')) {
@@ -525,6 +656,42 @@ export default function DeviceManagementPage({
       alert('Lỗi test kết nối');
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleImportCabinetFromForm = async () => {
+    if (!stationId) {
+      alert('Chưa chọn trạm');
+      return;
+    }
+    if (!cabinetImportFile) {
+      alert('Vui lòng chọn file CSV hoặc Excel cho tủ');
+      return;
+    }
+    if (!formData.name.trim()) {
+      alert('Vui lòng nhập tên tủ');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const result = await stationApi.importCabinetTemplate({
+        stationId,
+        ip: formData.ip.trim(),
+        cabinetName: formData.name.trim(),
+        file: cabinetImportFile,
+        rack: formData.rack,
+        slot: formData.slot,
+        db: formData.db,
+      });
+      setIsDeviceModalOpen(false);
+      setCabinetImportFile(null);
+      loadDevices();
+      alert(result.message || `Đã import ${result.totalGroups} tủ`);
+    } catch (err: any) {
+      alert(`Import thất bại: ${err.message || err}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -634,37 +801,55 @@ export default function DeviceManagementPage({
               ) : (
                 devices.map(d => (
                   <tr key={d.id}>
-                    <td><b>{d.name}</b></td>
-                    <td>{TYPE_LABELS[d.type] || d.type}</td>
                     <td>
-                      <code style={{ fontSize: '.8rem' }}>{d.config?.ip || '---'}</code>
-                      {d.type.startsWith('camera') && d.config?.go2rtc_id && <><br/><small style={{ opacity: .5 }}>go2rtc: {d.config.go2rtc_id}</small></>}
-                      {d.type.startsWith('camera') && d.config?.go2rtc_thermal && <><br/><small style={{ opacity: .5, color: 'var(--admin-danger)' }}>thermal: {d.config.go2rtc_thermal}</small></>}
-                      {d.type === 'camera_pd' && <><br/><small style={{ opacity: .7, color: 'var(--admin-accent)', fontWeight: 700 }}>PD band 25–49 kHz</small></>}
-                      {d.type === 'cabinet' && <><br/><small style={{ opacity: .5 }}>3 cảm biến nhiệt + 1 PD</small></>}
+                      <div className="device-table-cell device-table-cell--name">
+                        <b>{d.name}</b>
+                      </div>
                     </td>
                     <td>
-                      <span className="status-dot" style={{ background: d.status === 'online' ? 'var(--admin-success)' : 'var(--admin-danger)' }}></span>
-                      {d.status === 'online' ? ' Online' : ' Offline'}
+                      <div className="device-table-cell device-table-cell--type">
+                        {TYPE_LABELS[d.type] || d.type}
+                      </div>
                     </td>
-                    <td style={{ fontSize: '.8rem', opacity: .7 }}>{new Date(d.createdAt).toLocaleDateString('vi-VN')}</td>
+                    <td>
+                      <div className="device-table-cell device-table-cell--ip">
+                        <code style={{ fontSize: '.8rem' }}>{d.config?.ip || '---'}</code>
+                        {d.type.startsWith('camera') && d.config?.go2rtc_id && <><br/><small style={{ opacity: .5 }}>go2rtc: {d.config.go2rtc_id}</small></>}
+                        {d.type.startsWith('camera') && d.config?.go2rtc_thermal && <><br/><small style={{ opacity: .5, color: 'var(--admin-danger)' }}>thermal: {d.config.go2rtc_thermal}</small></>}
+                        {d.type === 'camera_pd' && <><br/><small style={{ opacity: .7, color: 'var(--admin-accent)', fontWeight: 700 }}>PD band 25–49 kHz</small></>}
+                        {d.type === 'cabinet' && <><br/><small style={{ opacity: .5 }}>3 cảm biến nhiệt + 1 PD</small></>}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="device-table-cell device-table-cell--status">
+                        <span className="status-dot" style={{ background: d.status === 'online' ? 'var(--admin-success)' : 'var(--admin-danger)' }}></span>
+                        {d.status === 'online' ? ' Online' : ' Offline'}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="device-table-cell device-table-cell--date" style={{ fontSize: '.8rem', opacity: .7 }}>
+                        {new Date(d.createdAt).toLocaleDateString('vi-VN')}
+                      </div>
+                    </td>
 
-                    <td style={{ textAlign: 'center' }}>
-                      <ActionDropdown>
-                        <ActionDropdownItem icon={<Settings size={14} />} label="Sửa thiết bị" onClick={() => openDeviceModal(d)} />
-                        <ActionDropdownItem icon={<LayoutList size={14} />} label="Kiểm tra kết nối" onClick={() => handleTestDevice(d.id)} />
-                        <ActionDropdownItem icon={<ShieldAlert size={14} />} label="Quy tắc giám sát" onClick={() => handleOpenRulesModal(d)} />
-                        {(d.type === 'camera_thermal' || d.type === 'camera_dual') && (
-                          <ActionDropdownItem icon={<Thermometer size={14} />} label="Cấu hình nhiệt" onClick={() => { setSelectedRoiDevice(d as CameraDevice); setRoiTab(3); }} />
-                        )}
-                        {(d.type === 'camera_thermal' || d.type === 'camera_dual') && (
-                          <ActionDropdownItem icon={<Flame size={14} />} label="Cấu hình cảnh báo cháy" onClick={() => { setSelectedFireDevice(d as CameraDevice); setRoiTab(4); }} />
-                        )}
-                        {d.type === 'camera_pd' && (
-                          <ActionDropdownItem icon={<Zap size={14} />} label="Vẽ vùng PD" onClick={() => { setSelectedPdDevice(d as CameraDevice); setRoiTab(2); }} />
-                        )}
-                        <ActionDropdownItem icon={<Trash2 size={14} />} label="Xóa thiết bị" danger onClick={() => handleDelete(d)} />
-                      </ActionDropdown>
+                    <td>
+                      <div className="device-table-cell device-table-cell--actions">
+                        <ActionDropdown>
+                          <ActionDropdownItem icon={<Settings size={14} />} label="Sửa thiết bị" onClick={() => openDeviceModal(d)} />
+                          <ActionDropdownItem icon={<LayoutList size={14} />} label="Kiểm tra kết nối" onClick={() => handleTestDevice(d.id)} />
+                          <ActionDropdownItem icon={<ShieldAlert size={14} />} label="Quy tắc giám sát" onClick={() => handleOpenRulesModal(d)} />
+                          {(d.type === 'camera_thermal' || d.type === 'camera_dual') && (
+                            <ActionDropdownItem icon={<Thermometer size={14} />} label="Cấu hình nhiệt" onClick={() => { setSelectedRoiDevice(d as CameraDevice); setRoiTab(3); }} />
+                          )}
+                          {(d.type === 'camera_thermal' || d.type === 'camera_dual') && (
+                            <ActionDropdownItem icon={<Flame size={14} />} label="Cấu hình cảnh báo cháy" onClick={() => { setSelectedFireDevice(d as CameraDevice); setRoiTab(4); }} />
+                          )}
+                          {d.type === 'camera_pd' && (
+                            <ActionDropdownItem icon={<Zap size={14} />} label="Vẽ vùng PD" onClick={() => { setSelectedPdDevice(d as CameraDevice); setRoiTab(2); }} />
+                          )}
+                          <ActionDropdownItem icon={<Trash2 size={14} />} label="Xóa thiết bị" danger onClick={() => handleDelete(d)} />
+                        </ActionDropdown>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -733,7 +918,7 @@ export default function DeviceManagementPage({
                 <div style={{ padding: '15px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', alignItems: 'center', gap: 15 }}>
                     <label style={{ fontSize: '.68rem', fontWeight: 800, color: 'var(--admin-text-muted)', textAlign: 'right' }}>TÊN HIỂN THỊ</label>
-                    <input type="text" className="form-input" style={{ borderRadius: 0 }} placeholder="VD: CAMERA NHIET 01" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                    <input type="text" className="form-input" style={{ borderRadius: 0 }} placeholder="VD: Sensor Tủ 477" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', alignItems: 'center', gap: 15 }}>
                     <label style={{ fontSize: '.68rem', fontWeight: 800, color: 'var(--admin-text-muted)', textAlign: 'right' }}>PHÂN LOẠI</label>
@@ -743,7 +928,7 @@ export default function DeviceManagementPage({
                       <option value="camera_cctv">Camera CCTV thường (RTSP)</option>
                       <option value="camera_pd">Camera Phóng điện (RTSP)</option>
                       <option value="plc_s7">Siemens S7-1200/1500</option>
-                      <option value="cabinet">Cabinet Unit (3 Temp + 1 PD)</option>
+                      <option value="cabinet">Sensor Tủ (3 Temp + 1 PD)</option>
                       <option value="modbus_tcp">Modbus TCP Device</option>
                     </select>
                   </div>
@@ -772,12 +957,83 @@ export default function DeviceManagementPage({
                     </div>
                   </div>
 
-                  {formData.type === 'plc_s7' && (
+                  {(formData.type === 'plc_s7' || formData.type === 'cabinet') && (
                     <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, border: '1px solid var(--admin-border)', padding: 10, background: 'rgba(0,0,0,0.1)' }}>
                       <div><label style={{ fontSize: '.55rem', display: 'block', marginBottom: 2 }}>RACK</label><input type="number" className="form-input" value={formData.rack} onChange={e => setFormData({ ...formData, rack: Number(e.target.value) })} /></div>
                       <div><label style={{ fontSize: '.55rem', display: 'block', marginBottom: 2 }}>SLOT</label><input type="number" className="form-input" value={formData.slot} onChange={e => setFormData({ ...formData, slot: Number(e.target.value) })} /></div>
                       <div><label style={{ fontSize: '.55rem', display: 'block', marginBottom: 2 }}>DB NO.</label><input type="number" className="form-input" value={formData.db} onChange={e => setFormData({ ...formData, db: Number(e.target.value) })} /></div>
                       <div><label style={{ fontSize: '.55rem', display: 'block', marginBottom: 2 }}>LEN</label><input type="number" className="form-input" value={formData.length} onChange={e => setFormData({ ...formData, length: Number(e.target.value) })} /></div>
+                    </div>
+                  )}
+
+                  {formData.type === 'cabinet' && (
+                    <div style={{ gridColumn: 'span 2', border: '1px solid var(--admin-border)', padding: 10, background: 'rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontSize: '.62rem', fontWeight: 900, color: 'var(--admin-accent)', letterSpacing: '0.04em' }}>IMPORT FILE CSV / EXCEL</span>
+                          <span style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', lineHeight: 1.45 }}>
+                            PLC engineer chỉ cần gửi file bảng điểm. Hệ thống sẽ đọc `Name`, `Tagname`, `Type`, `DB address`, `Value`, `Note` và tự ghép thành `config.points`.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-industrial"
+                          style={{ padding: '4px 10px', height: 28, fontSize: '.68rem', flexShrink: 0 }}
+                          onClick={() => document.getElementById('cabinet-import-input')?.click()}
+                        >
+                          Chọn file
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                        <div style={{ border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)', padding: 8, minHeight: 76 }}>
+                          <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-warning)', marginBottom: 4 }}>1. Dòng tủ</div>
+                          <div style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', lineHeight: 1.45 }}>Một dòng chỉ có `Name` sẽ được hiểu là tên tủ, ví dụ `MC471`.</div>
+                        </div>
+                        <div style={{ border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)', padding: 8, minHeight: 76 }}>
+                          <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-accent)', marginBottom: 4 }}>2. Dòng điểm</div>
+                          <div style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', lineHeight: 1.45 }}>Dòng có `Tagname`, `Type`, `DB address` là một điểm đo. `DB32.DBD0` = DB32, offset 0.</div>
+                        </div>
+                        <div style={{ border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)', padding: 8, minHeight: 76 }}>
+                          <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-success)', marginBottom: 4 }}>3. Worker PLC</div>
+                          <div style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', lineHeight: 1.45 }}>PLC worker sẽ đọc `dbAddress` của từng điểm để lấy dữ liệu đúng vị trí trong DB.</div>
+                        </div>
+                      </div>
+
+                      <input
+                        id="cabinet-import-input"
+                        type="file"
+                        accept=".csv,.xlsx,.xlsm"
+                        style={{ display: 'none' }}
+                        onChange={e => setCabinetImportFile(e.target.files?.[0] ?? null)}
+                      />
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 8, border: '1px dashed var(--admin-border)', background: 'rgba(255,255,255,0.02)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontSize: '.68rem', fontWeight: 800, color: 'var(--admin-text)' }}>
+                            {cabinetImportFile ? cabinetImportFile.name : 'Chưa chọn file import'}
+                          </span>
+                          <span style={{ fontSize: '.66rem', color: 'var(--admin-text-muted)' }}>
+                            Khi bấm lưu, hệ thống sẽ import file này và tạo/cập nhật tủ theo tên đã nhập.
+                          </span>
+                        </div>
+                        {cabinetImportFile && (
+                          <button
+                            type="button"
+                            className="btn-industrial"
+                            style={{ padding: '4px 10px', height: 28, fontSize: '.68rem' }}
+                            onClick={() => setCabinetImportFile(null)}
+                          >
+                            Bỏ file
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: '.68rem', color: 'var(--admin-text-muted)', lineHeight: 1.5 }}>
+                        <span style={{ padding: '3px 8px', border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.03)' }}>Hỗ trợ `csv`, `xlsx`, `xlsm`</span>
+                        <span style={{ padding: '3px 8px', border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.03)' }}>Có thể import nhiều tủ trong cùng 1 file</span>
+                        <span style={{ padding: '3px 8px', border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.03)' }}>DB mặc định lấy từ field `DB NO.` nếu file thiếu</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -868,8 +1124,26 @@ export default function DeviceManagementPage({
             <div className="modal-footer">
               <button className="btn-industrial" onClick={testModalConn}>Test kết nối</button>
               <div style={{ flex: 1 }}></div>
-              <button className="btn-industrial" onClick={() => setIsDeviceModalOpen(false)}>Hủy</button>
-              <button className="btn-industrial btn-primary" onClick={saveDevice} disabled={isSaving}>{isSaving ? '⏳ Đang lưu...' : 'Lưu thiết bị'}</button>
+              <button
+                className="btn-industrial"
+                onClick={() => {
+                  setIsDeviceModalOpen(false);
+                  setCabinetImportFile(null);
+                }}
+              >
+                Hủy
+              </button>
+              <button
+                className="btn-industrial btn-primary"
+                onClick={formData.type === 'cabinet' && cabinetImportFile ? handleImportCabinetFromForm : saveDevice}
+                disabled={isSaving}
+              >
+                {isSaving
+                  ? '⏳ Đang xử lý...'
+                  : formData.type === 'cabinet' && cabinetImportFile
+                    ? 'Import và lưu'
+                    : 'Lưu thiết bị'}
+              </button>
             </div>
           </div>
         </div>

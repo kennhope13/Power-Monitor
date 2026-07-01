@@ -84,20 +84,6 @@ public class MeasurementsController : ControllerBase
             }
         }
 
-        // 5. Nếu chưa có dữ liệu cache, mô phỏng/kéo dữ liệu từ DB (Dành cho trạm con hoặc dữ liệu lịch sử vừa sync)
-        if (result.Count == 0 && devices.Count > 0)
-        {
-            var rand = new Random();
-            foreach (var dev in devices)
-            {
-                if (dev.Type == "plc_s7" || dev.Type == "cabinet")
-                {
-                    AddPointHelper(result, dev.Id, "temp_1", 38.0 + rand.NextDouble() * 4.0, "°C", null);
-                    AddPointHelper(result, dev.Id, "pd", 12.0 + rand.NextDouble() * 4.0, "dB", null);
-                }
-            }
-        }
-
         return Ok(result);
     }
 

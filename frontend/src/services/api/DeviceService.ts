@@ -5,7 +5,8 @@
 // Export: deviceService (singleton), dùng qua StationApiService facade
 // ============================================================
 
-import { apiFetch, apiMutate } from './BaseApiService';
+import { apiFetch, apiMutate, API_BASE } from './BaseApiService';
+import { authService } from '../AuthService';
 import type { Device, CameraDevice, RoiPoint, Boundary } from '@/types/api.types';
 import { AI_ENGINE_URL } from '@/utils/env';
 
@@ -81,6 +82,46 @@ export class DeviceService {
     capabilities: any;
   }> {
     return apiMutate('POST', '/devices/auto-configure', { stationId, ip, username, password, namePrefix });
+  }
+
+  /** Import danh sách tủ điện từ file CSV/Excel. */
+  async importCabinetTemplate(data: {
+    stationId: string;
+    ip: string;
+    cabinetName?: string;
+    file: File;
+    rack?: number;
+    slot?: number;
+    db?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    created: Array<{ deviceId: string; name: string; points: number }>;
+    updated: Array<{ deviceId: string; name: string; points: number }>;
+    totalGroups: number;
+  }> {
+    const token = authService.getToken();
+    const form = new FormData();
+    form.append('stationId', data.stationId);
+    form.append('ip', data.ip);
+    if (data.cabinetName) form.append('CabinetName', data.cabinetName);
+    form.append('rack', String(data.rack ?? 0));
+    form.append('slot', String(data.slot ?? 1));
+    if (data.db !== undefined && data.db !== null) form.append('db', String(data.db));
+    form.append('file', data.file);
+
+    const res = await fetch(`${API_BASE}/cabinet-import`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `Import failed ${res.status}`);
+    }
+
+    return res.json();
   }
 
   // ── ROI Points (điểm chấm nhiệt trên camera nhiệt) ────────────

@@ -47,18 +47,22 @@ public class AnalyticsController : ControllerBase
             var setting = await _db.SystemSettings
                 .FirstOrDefaultAsync(s => s.StationId == d.StationId && s.Key == key);
 
-            int    score = 100;
-            string risk  = "good";
-            DateTime? ts = null;
+            int    score        = 100;
+            string risk         = "good";
+            int    alarmCount   = 0;
+            int    warningCount = 0;
+            DateTime? ts        = null;
 
             if (setting is not null)
             {
                 try
                 {
                     var obj = JsonSerializer.Deserialize<JsonElement>(setting.Value);
-                    if (obj.TryGetProperty("score", out var s2)) score = s2.GetInt32();
-                    if (obj.TryGetProperty("risk",  out var r2)) risk  = r2.GetString() ?? "good";
-                    if (obj.TryGetProperty("ts",    out var t2) &&
+                    if (obj.TryGetProperty("score",        out var s2)) score        = s2.GetInt32();
+                    if (obj.TryGetProperty("risk",         out var r2)) risk         = r2.GetString() ?? "good";
+                    if (obj.TryGetProperty("alarmCount",   out var a2)) alarmCount   = a2.GetInt32();
+                    if (obj.TryGetProperty("warningCount", out var w2)) warningCount = w2.GetInt32();
+                    if (obj.TryGetProperty("ts",           out var t2) &&
                         t2.TryGetDateTime(out var dt)) ts = dt;
                 }
                 catch { /* keep defaults */ }
@@ -66,12 +70,14 @@ public class AnalyticsController : ControllerBase
 
             result.Add(new
             {
-                deviceId   = d.Id,
-                deviceName = d.Name,
-                deviceType = d.Type,
-                status     = d.Status,
+                deviceId     = d.Id,
+                deviceName   = d.Name,
+                deviceType   = d.Type,
+                status       = d.Status,
                 score,
                 risk,
+                alarmCount,
+                warningCount,
                 ts,
             });
         }
@@ -107,6 +113,10 @@ public class AnalyticsController : ControllerBase
             ["nhiet_do_pha_2"] = "Nhiệt độ Pha 2",
             ["nhiet_do_pha_3"] = "Nhiệt độ Pha 3",
             ["phong_dien"]     = "Phóng điện (PD)",
+            ["nhiet_do_pha_2_1"] = "Nhiệt độ Pha 1 (Bộ 2)",
+            ["nhiet_do_pha_2_2"] = "Nhiệt độ Pha 2 (Bộ 2)",
+            ["nhiet_do_pha_2_3"] = "Nhiệt độ Pha 3 (Bộ 2)",
+            ["phong_dien_2"]     = "Phóng điện (PD 2)",
         };
 
         var result = new List<object>();

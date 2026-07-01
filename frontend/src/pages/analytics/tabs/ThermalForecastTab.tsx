@@ -4,10 +4,22 @@ import { getCSSColor } from '@/utils/theme-colors';
 import { AI_ENGINE_URL, GO2RTC_URL } from '@/utils/env';
 import { stationApi } from '@/services/StationApiService';
 import { RotateCw } from 'lucide-react';
+import ToolbarSelect from '@/components/ui/ToolbarSelect';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface HistoryPoint {
   timestamp: string;
   [key: string]: number | null | string;
+}
+
+interface ExportFns { xlsx: () => void; csv: () => void; pdf: () => void; }
+
+interface ThermalForecastTabProps {
+  fromDate: string;
+  toDate: string;
+  registerExport?: (fns: ExportFns | null) => void;
 }
 
 // Helper for natural sorting (Point 1, Point 2, Point 10)
@@ -15,7 +27,7 @@ const naturalSort = (a: string, b: string) => {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 };
 
-export default function ThermalForecastTab() {
+export default function ThermalForecastTab({ fromDate, toDate, registerExport }: ThermalForecastTabProps) {
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<any>(null);
   const [modelStatus, setModelStatus] = useState({ status: 'Idle', last_updated: 'Đang cập nhật...' });
@@ -24,7 +36,6 @@ export default function ThermalForecastTab() {
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Record<string, boolean>>({});
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [roiPoints, setRoiPoints] = useState<any[]>([]);
   const [boundaries, setBoundaries] = useState<any[]>([]);
@@ -39,65 +50,111 @@ export default function ThermalForecastTab() {
     return c.go2rtc_thermal || c.go2rtc_id || `cam_${(c.ip || '').replace(/\./g, '_')}_thermal`;
   }, [selectedCamera]);
 
+  const isOutdoorThermalCamera = useMemo(() => {
+    if (!selectedCamera) return false;
+    const type = String(selectedCamera.type || '').toLowerCase();
+    const mountType = String(selectedCamera.config?.mountType || '').toLowerCase();
+    return (type === 'camera_thermal' || type === 'camera_dual') && mountType === 'outdoor';
+  }, [selectedCamera]);
+
+  const normalizeTargetKey = (s: string) => (s || '').normalize('NFC').toLowerCase().trim().replace(/[\s_]/g, '');
+  const asciiTargetKey = (s: string) => normalizeTargetKey(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const canonicalTargetKey = (s: string) => asciiTargetKey(s).replace(/^(diem|point)/, '').replace(/^([dp])(?=\d)/, '');
+  const formatPointLabel = (s: string) => {
+    const raw = (s || '').trim();
+    const noPrefix = raw.replace(/^(Điểm|Point|P|D)\s*/gi, '').replace(/^\s+|\s+$/g, '');
+    if (!noPrefix) return raw;
+    if (/^\d+$/.test(noPrefix)) return `Điểm ${noPrefix}`;
+    return raw.startsWith('Điểm') ? raw : `Điểm ${noPrefix}`;
+  };
+
+  const visibleTargets = useMemo(() => {
+    const seen = new Map<string, string>();
+    targets.forEach(target => {
+      const key = canonicalTargetKey(target);
+      const current = seen.get(key);
+      if (!current) {
+        seen.set(key, target);
+        return;
+      }
+
+      const currentScore = /diem|point|vung|zone/.test(asciiTargetKey(current)) ? 2 : 1;
+      const nextScore = /diem|point|vung|zone/.test(asciiTargetKey(target)) ? 2 : 1;
+      if (nextScore > currentScore || (nextScore === currentScore && target.length > current.length)) {
+        seen.set(key, target);
+      }
+    });
+    return [...seen.values()];
+  }, [targets]);
+
   // Filter targets based on selected camera
   const filteredTargets = useMemo(() => {
-    if (!selectedCamera || targets.length === 0) return [];
+    if (!selectedCamera || visibleTargets.length === 0) return [];
     const camTargetNames = new Set<string>();
-    
-    // Helper to normalize names for comparison using NFC normalization to prevent tone mark mismatches
-    const normalize = (s: string) => (s || '').normalize('NFC').toLowerCase().trim().replace(/[\s_]/g, '');
 
     roiPoints.forEach(p => {
-      if (p.name) camTargetNames.add(normalize(p.name));
-      if (p.pointId) camTargetNames.add(normalize(p.pointId));
+      if (p.name) camTargetNames.add(normalizeTargetKey(p.name));
+      if (p.pointId) camTargetNames.add(normalizeTargetKey(p.pointId));
     });
     boundaries.forEach(b => {
-      if (b.name) camTargetNames.add(normalize(b.name));
+      if (b.name) camTargetNames.add(normalizeTargetKey(b.name));
     });
 
-    return targets.filter(t => {
-      const nt = normalize(t);
+    return visibleTargets.filter(t => {
+      const nt = normalizeTargetKey(t);
       return camTargetNames.has(nt);
     });
-  }, [selectedCamera, targets, roiPoints, boundaries]);
+  }, [selectedCamera, visibleTargets, roiPoints, boundaries]);
 
   // Derive timestamps for the footer
   const liveTime = useMemo(() => {
-    if (historyData.length === 0 || targets.length === 0) return null;
+    if (historyData.length === 0 || visibleTargets.length === 0) return null;
     for (let i = historyData.length - 1; i >= 0; i--) {
       const item = historyData[i];
-      const hasAnyActual = item ? targets.some(t => item[`${t}_actual`] !== null && item[`${t}_actual`] !== undefined && item[`${t}_actual`] !== '') : false;
+      const hasAnyActual = item ? visibleTargets.some(t => item[`${t}_actual`] !== null && item[`${t}_actual`] !== undefined && item[`${t}_actual`] !== '') : false;
       if (hasAnyActual && item) return item.timestamp;
     }
     return null;
-  }, [historyData, targets]);
+  }, [historyData, visibleTargets]);
 
   const forecastTime = useMemo(() => {
-    if (historyData.length === 0 || targets.length === 0) return null;
+    if (historyData.length === 0 || visibleTargets.length === 0) return null;
     // Tìm mốc thời gian của dự báo mới nhất có dữ liệu (quét từ cuối lên)
     for (let i = historyData.length - 1; i >= 0; i--) {
       const item = historyData[i];
       if (item) {
-        const hasAnyPred = targets.some(t => item[`${t}_pred`] !== null && item[`${t}_pred`] !== undefined && item[`${t}_pred`] !== '');
+        const hasAnyPred = visibleTargets.some(t => item[`${t}_pred`] !== null && item[`${t}_pred`] !== undefined && item[`${t}_pred`] !== '');
         if (hasAnyPred) {
           return item.timestamp;
         }
       }
     }
     return null;
-  }, [historyData, targets]);
+  }, [historyData, visibleTargets]);
+
+  const buildDateList = (from: string, to: string) => {
+    if (!from || !to) return [new Date().toISOString().split('T')[0] || ''];
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    if (start > end) return [to];
+    const days: string[] = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      days.push(cursor.toISOString().split('T')[0] || '');
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days.filter(Boolean);
+  };
 
   const updateStatusAndHistory = useCallback(async (showChartSpinner = true) => {
     try {
       if (showChartSpinner) setChartLoading(true);
       const devId = selectedCamera?.id || '';
-      const [statusResp, historyResp, configResp] = await Promise.all([
+      const [statusResp, configResp] = await Promise.all([
         fetch(`${AI_ENGINE_URL}/api/training-status`),
-        fetch(`${AI_ENGINE_URL}/api/prediction/history?points=1440&date=${selectedDate}&device_id=${devId}`),
         fetch(`${AI_ENGINE_URL}/api/config?device_id=${devId}`)
       ]);
       const statusData = await statusResp.json();
-      const hData = await historyResp.json();
       const configData = await configResp.json();
 
       setModelStatus(statusData);
@@ -116,15 +173,24 @@ export default function ThermalForecastTab() {
         });
       }
 
-      if (hData.success) {
-        setHistoryData(hData.history);
-      }
+      const days = buildDateList(fromDate, toDate);
+      const histories = await Promise.all(days.map(async date => {
+        const resp = await fetch(`${AI_ENGINE_URL}/api/prediction/history?points=1440&date=${date}&device_id=${devId}`);
+        const data = await resp.json();
+        return data.success ? data.history : [];
+      }));
+      const merged = histories.flat().sort((a: any, b: any) => {
+        const ta = new Date(a.full_ts || a.timestamp || 0).getTime();
+        const tb = new Date(b.full_ts || b.timestamp || 0).getTime();
+        return ta - tb;
+      });
+      setHistoryData(merged);
     } catch (err) {
       console.warn('[AI Forecast] Polling failed:', err);
     } finally {
       if (showChartSpinner) setChartLoading(false);
     }
-  }, [selectedCamera, selectedDate, targets]);
+  }, [selectedCamera, fromDate, toDate, targets]);
 
   // Fetch ROI Points & Boundaries
   useEffect(() => {
@@ -182,7 +248,7 @@ export default function ThermalForecastTab() {
     updateStatusAndHistory(true);
     const timer = setInterval(() => { updateStatusAndHistory(false); }, 10000);
     return () => clearInterval(timer);
-  }, [selectedCamera?.id, selectedDate]);
+  }, [selectedCamera?.id, fromDate, toDate]);
 
   // Chart Effect
   useEffect(() => {
@@ -214,16 +280,16 @@ export default function ThermalForecastTab() {
     ];
     const datasets: any[] = [];
     let currentIdx = 0;
-    if (historyData.length > 0 && targets.length > 0) {
+    if (historyData.length > 0 && visibleTargets.length > 0) {
       for (let i = historyData.length - 1; i >= 0; i--) {
         const item = historyData[i];
-        if (item && !item.is_future && targets.some(t => item[`${t}_actual`] !== null)) {
+        if (item && !item.is_future && visibleTargets.some(t => item[`${t}_actual`] !== null)) {
           currentIdx = i; break;
         }
       }
     }
 
-    targets.forEach((target, i) => {
+    visibleTargets.forEach((target, i) => {
       if (activeFilters[target] === false) return;
       const colors = targetColors[i % targetColors.length] || { actual: '#3B82F6', pred: '#93C5FD' };
       
@@ -239,16 +305,18 @@ export default function ThermalForecastTab() {
         spanGaps: true, 
       });
 
-      datasets.push({
-        label: `${target} (Dự báo)`, 
-        data: historyData.map(h => h[`${target}_pred`]), 
-        borderColor: colors.pred, 
-        borderWidth: 1.5,
-        borderDash: [5, 5], 
-        tension: 0.3, 
-        pointRadius: 0, 
-        spanGaps: true,
-      });
+      if (!isOutdoorThermalCamera) {
+        datasets.push({
+          label: `${target} (Dự báo)`, 
+          data: historyData.map(h => h[`${target}_pred`]), 
+          borderColor: colors.pred, 
+          borderWidth: 1.5,
+          borderDash: [5, 5], 
+          tension: 0.3, 
+          pointRadius: 0, 
+          spanGaps: true,
+        });
+      }
     });
 
     const currentLinePlugin = {
@@ -281,18 +349,17 @@ export default function ThermalForecastTab() {
       plugins: [currentLinePlugin]
     });
     return () => chartInst.current?.destroy();
-  }, [historyData, targets, activeFilters]);
+  }, [historyData, visibleTargets, activeFilters]);
 
   const latestReadings = useMemo(() => {
-    if (historyData.length === 0 || targets.length === 0) return {};
+    if (historyData.length === 0 || visibleTargets.length === 0) return {};
     const readings: Record<string, { actual: number; hasActual: boolean; pred: number; hasPred: boolean }> = {};
-    const normalize = (s: string) => (s || '').normalize('NFC').toLowerCase().trim().replace(/[\s_]/g, '');
     const targetMap: Record<string, string> = {};
-    targets.forEach(t => { targetMap[normalize(t)] = t; });
+    visibleTargets.forEach(t => { targetMap[normalizeTargetKey(t)] = t; });
 
 
 // Map each target to its latest reading
-targets.forEach(t => {
+visibleTargets.forEach(t => {
   let actualVal: number | null = null;
   let currentIdx = historyData.length - 1;
   for (let i = historyData.length - 1; i >= 0; i--) {
@@ -320,21 +387,83 @@ targets.forEach(t => {
 
     const aliasedReadings: Record<string, any> = { ...readings };
     roiPoints.forEach(p => {
-       const np = normalize(p.name || '');
-       const nid = normalize(p.pointId || '');
+       const np = normalizeTargetKey(p.name || '');
+       const nid = normalizeTargetKey(p.pointId || '');
        const match = targetMap[np] || targetMap[nid];
        if (match && readings[match]) aliasedReadings[p.name || p.pointId] = readings[match];
     });
     boundaries.forEach(b => {
-       const nb = normalize(b.name || '');
+       const nb = normalizeTargetKey(b.name || '');
        const match = targetMap[nb];
        if (match && readings[match]) aliasedReadings[b.name] = readings[match];
     });
 
     return aliasedReadings;
-  }, [historyData, targets, roiPoints, boundaries]);
+  }, [historyData, visibleTargets, roiPoints, boundaries]);
+
+  useEffect(() => {
+    if (!registerExport) return;
+    if (historyData.length === 0) { registerExport(null); return; }
+
+    const fmt = (v: any) => v != null && v !== '' ? Number(v).toFixed(1) : '';
+
+    // Headers UTF-8 cho XLSX/CSV; ASCII cho PDF
+    const hdrsUtf  = ['Thoi gian', ...targets.flatMap(t => [`${t} (thuc te)`, `${t} (du bao)`])];
+    const hdrsPdf  = ['Thoi gian', ...targets.flatMap(t => [t + ' (TT)', t + ' (DB)'])];
+
+    // Chỉ lấy dòng có ít nhất 1 giá trị thực tế
+    const rows = historyData
+      .filter(h => targets.some(t => h[`${t}_actual`] != null && h[`${t}_actual`] !== ''))
+      .map(h => {
+        const row: Record<string, string> = { 'Thoi gian': String(h.full_ts || h.timestamp) };
+        targets.forEach(t => {
+          row[`${t} (thuc te)`] = fmt(h[`${t}_actual`]);
+          row[`${t} (du bao)`]  = fmt(h[`${t}_pred`]);
+        });
+        return row;
+      });
+
+    const fname = `Du_lieu_nhiet_do_${new Date().toISOString().slice(0, 10)}`;
+
+    const xlsx = () => {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = hdrsUtf.map(() => ({ wch: 16 }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Nhiet do');
+      XLSX.writeFile(wb, `${fname}.xlsx`);
+    };
+
+    const csv = () => {
+      const text = [hdrsUtf.join(','), ...rows.map(r => hdrsUtf.map(h => `"${(r[h] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' }));
+      a.download = `${fname}.csv`; a.click();
+    };
+
+    const pdf = () => {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      doc.setFontSize(11); doc.text('DU LIEU NHIET DO', 40, 28);
+      autoTable(doc, {
+        startY: 42,
+        head: [hdrsPdf],
+        body: rows.map(r => hdrsPdf.map((h, i) => {
+          const key = i === 0 ? 'Thoi gian' : hdrsUtf[i]!;
+          return r[key] ?? '';
+        })),
+        styles: { fontSize: 7, cellPadding: 3 },
+        headStyles: { fillColor: [30, 41, 59], fontSize: 7 },
+        columnStyles: { 0: { cellWidth: 80 } },
+        margin: { top: 28, left: 20, right: 20 },
+      });
+      doc.save(`${fname}.pdf`);
+    };
+
+    registerExport({ xlsx, csv, pdf });
+    return () => registerExport(null);
+  }, [historyData, targets, registerExport]);
 
   const toggleFilter = (t: string) => setActiveFilters(prev => ({ ...prev, [t]: !prev[t] }));
+  const metricGridCols = isOutdoorThermalCamera ? '1fr 60px' : '1fr 60px 60px';
 
   if (loading) return (
     <div style={{ display: 'flex', flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', gap: 10, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
@@ -347,22 +476,6 @@ targets.forEach(t => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12, overflow: 'hidden' }}>
       
-      {/* TOOLBAR */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', padding: '8px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
-           <div style={{ fontSize: '.75rem', fontWeight: 800, color: 'var(--admin-text-muted)', letterSpacing: '0.5px' }}>XEM LỊCH SỬ NGÀY:</div>
-           <input 
-             type="date" 
-             value={selectedDate} 
-             onChange={(e) => setSelectedDate(e.target.value)}
-             style={{ background: 'var(--admin-layer-2)', border: '1px solid var(--admin-border)', color: 'var(--admin-text)', fontSize: '.75rem', padding: '4px 10px', borderRadius: 2, outline: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
-           />
-        </div>
-        <div style={{ fontSize: '.65rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>
-           <span style={{ color: 'var(--admin-accent)' }}>●</span> TỰ ĐỘNG CẬP NHẬT (10S)
-        </div>
-      </div>
-
       <div style={{ display: 'flex', flex: 1, gap: 12, overflow: 'hidden', minHeight: 0 }}>
         {/* SIDEBAR */}
         <div style={{ width: 340, flexShrink: 0, height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr', gap: 12, overflow: 'hidden', minHeight: 0 }}>
@@ -372,9 +485,12 @@ targets.forEach(t => {
             <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--admin-layer-1)' }}>
               <span style={{ fontSize: '.6rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>LUỒNG NHIỆT TRỰC TIẾP</span>
               {cameras.length > 1 && (
-                <select value={selectedCamera?.id || ''} onChange={(e) => setSelectedCamera(cameras.find(c => c.id === e.target.value))} style={{ background: 'transparent', border: 'none', color: 'var(--admin-accent)', fontSize: '.65rem', cursor: 'pointer', fontWeight: 700, outline: 'none' }}>
-                  {cameras.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <ToolbarSelect
+                  value={selectedCamera?.id || ''}
+                  onChange={(id) => setSelectedCamera(cameras.find(c => c.id === id))}
+                  options={cameras.map(c => ({ value: c.id, label: c.name }))}
+                  width={160}
+                />
               )}
             </div>
             <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative', overflow: 'hidden' }}>
@@ -396,7 +512,12 @@ targets.forEach(t => {
                           <div style={{ position: 'absolute', left: `${x1 * 100}%`, top: `${y1 * 100}%`, width: `${(x2 - x1) * 100}%`, height: `${(y2 - y1) * 100}%`, border: `1.5px solid ${color}`, background: `${color}11` }} />
                           <div style={{ position: 'absolute', left: `${cx * 100}%`, top: `${cy * 100}%`, transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.8)', padding: '2px 6px', borderRadius: 2, color: '#fff', fontSize: 9, whiteSpace: 'nowrap', display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 12 }}>
                             <span style={{ fontWeight: 800, fontSize: 8, opacity: 0.8 }}>{b.name.replace(/Vùng\s*/gi, 'V').replace(/Zone\s*/gi, 'V')}</span>
-                            <span style={{ fontWeight: 900, color }}>{r.actual.toFixed(1)}° / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></span>
+                            <span style={{ fontWeight: 900, color }}>
+                              {r.actual.toFixed(1)}°
+                              {!isOutdoorThermalCamera && (
+                                <> / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></>
+                              )}
+                            </span>
                           </div>
                         </div>
                       );
@@ -408,8 +529,13 @@ targets.forEach(t => {
                         <div key={p.id} style={{ position: 'absolute', left: `${p.tx * 100}%`, top: `${p.ty * 100}%`, transform: 'translate(-50%, -50%)' }}>
                           <div style={{ position: 'absolute', width: 14, height: 1.5, background: color, left: -7 }} /><div style={{ position: 'absolute', height: 14, width: 1.5, background: color, top: -7 }} />
                           <div style={{ position: 'absolute', left: 10, top: -10, background: 'rgba(0,0,0,0.75)', padding: '2px 5px', borderRadius: 0, display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap' }}>
-                             <span style={{ fontSize: 8, color: 'var(--admin-text-muted)', fontWeight: 700 }}>{(p.pointId || p.name).replace(/^(Điểm|Point|P)\s*/gi, 'D').replace(/\s+/g, '')}</span>
-                             <span style={{ fontSize: 10, fontWeight: 800, color }}>{r.actual.toFixed(1)}° / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></span>
+                             <span style={{ fontSize: 8, color: 'var(--admin-text-muted)', fontWeight: 700 }}>{formatPointLabel(p.pointId || p.name || '')}</span>
+                             <span style={{ fontSize: 10, fontWeight: 800, color }}>
+                               {r.actual.toFixed(1)}°
+                               {!isOutdoorThermalCamera && (
+                                 <> / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></>
+                               )}
+                             </span>
                           </div>
                         </div>
                       );
@@ -427,7 +553,7 @@ targets.forEach(t => {
               <button 
                 onClick={() => {
                   const updated: Record<string, boolean> = {};
-                  targets.forEach(t => updated[t] = true);
+                  visibleTargets.forEach(t => updated[t] = true);
                   setActiveFilters(updated);
                 }}
                 style={{ background: 'transparent', border: 'none', color: 'var(--admin-accent)', fontSize: '.55rem', cursor: 'pointer', padding: 0, fontWeight: 800, letterSpacing: '0.3px' }}
@@ -438,7 +564,7 @@ targets.forEach(t => {
               <button 
                 onClick={() => {
                   const updated: Record<string, boolean> = {};
-                  targets.forEach(t => updated[t] = false);
+                  visibleTargets.forEach(t => updated[t] = false);
                   setActiveFilters(updated);
                 }}
                 style={{ background: 'transparent', border: 'none', color: 'var(--admin-text-muted)', fontSize: '.55rem', cursor: 'pointer', padding: 0, fontWeight: 800, letterSpacing: '0.3px' }}
@@ -446,12 +572,12 @@ targets.forEach(t => {
                 BỎ CHỌN HẾT
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px', gap: 4, padding: '6px 12px', background: 'var(--admin-layer-2)', borderBottom: '1px solid var(--admin-border)', fontSize: '.52rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>
-              <span>ĐỐI TƯỢNG</span> <span style={{ textAlign: 'right' }}>LIVE</span> <span style={{ textAlign: 'right' }}>DỰ BÁO 5P</span>
+            <div style={{ display: 'grid', gridTemplateColumns: metricGridCols, gap: 4, padding: '6px 12px', background: 'var(--admin-layer-2)', borderBottom: '1px solid var(--admin-border)', fontSize: '.52rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>
+              <span>ĐỐI TƯỢNG</span> <span style={{ textAlign: 'right' }}>LIVE</span> {!isOutdoorThermalCamera && <span style={{ textAlign: 'right' }}>DỰ BÁO 5P</span>}
             </div>
             <div className="sidebar-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 0', minHeight: 0 }}>
               <div style={{ padding: '8px 12px 4px 12px', fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-accent)', textTransform: 'uppercase', letterSpacing: '.5px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 8, height: 8, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ position: 'absolute', width: '100%', height: 1.5, background: 'var(--admin-accent)' }} /><div style={{ position: 'absolute', width: 1.5, height: '100%', background: 'var(--admin-accent)' }} /></div> ĐIỂM ĐO (D)
+                <div style={{ width: 8, height: 8, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ position: 'absolute', width: '100%', height: 1.5, background: 'var(--admin-accent)' }} /><div style={{ position: 'absolute', width: 1.5, height: '100%', background: 'var(--admin-accent)' }} /></div> ĐIỂM ĐO
               </div>
               {filteredTargets.filter(t => {
                 const lt = t.toLowerCase();
@@ -459,13 +585,15 @@ targets.forEach(t => {
               }).sort(naturalSort).map(target => {
                 const r = latestReadings[target]; const isChecked = activeFilters[target] !== false;
                 const temp = r?.hasActual ? r.actual : 0; const statusColor = temp >= 70 ? '#EF4444' : temp >= 50 ? '#F59E0B' : '#10B981';
-                const displayLabel = target.replace(/^(Điểm|Point|P)\s*/gi, 'D').replace(/\s+/g, '');
+                const displayLabel = formatPointLabel(target);
 
                 return (
-                  <div key={target} onClick={() => toggleFilter(target)} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--admin-border-light)', cursor: 'pointer', background: isChecked ? 'transparent' : 'rgba(0,0,0,0.05)', opacity: isChecked ? 1 : 0.6 }}>
+                  <div key={target} onClick={() => toggleFilter(target)} style={{ display: 'grid', gridTemplateColumns: metricGridCols, gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--admin-border-light)', cursor: 'pointer', background: isChecked ? 'transparent' : 'rgba(0,0,0,0.05)', opacity: isChecked ? 1 : 0.6 }}>
                     <div style={{ fontSize: '.75rem', fontWeight: 700, color: isChecked ? 'var(--admin-text)' : 'var(--admin-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><div style={{ position: 'absolute', width: '100%', height: 2, background: statusColor }} /><div style={{ position: 'absolute', width: 2, height: '100%', background: statusColor }} /></div>{displayLabel}</div>
                     <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasActual ? statusColor : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasActual ? r.actual.toFixed(1) : '--'}°</div>
-                    <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasPred ? 'var(--admin-accent)' : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</div>
+                    {!isOutdoorThermalCamera && (
+                      <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasPred ? 'var(--admin-accent)' : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</div>
+                    )}
                   </div>
                 );
               })}
@@ -485,10 +613,12 @@ targets.forEach(t => {
                 else if (target.toLowerCase().includes('zone')) displayLabel = target.replace(/zone/gi, 'V').replace(/\s+/g, '');
 
                 return (
-                  <div key={target} onClick={() => toggleFilter(target)} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--admin-border-light)', cursor: 'pointer', background: isChecked ? 'transparent' : 'rgba(0,0,0,0.05)', opacity: isChecked ? 1 : 0.6 }}>
+                  <div key={target} onClick={() => toggleFilter(target)} style={{ display: 'grid', gridTemplateColumns: metricGridCols, gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--admin-border-light)', cursor: 'pointer', background: isChecked ? 'transparent' : 'rgba(0,0,0,0.05)', opacity: isChecked ? 1 : 0.6 }}>
                     <div style={{ fontSize: '.75rem', fontWeight: 700, color: isChecked ? 'var(--admin-text)' : 'var(--admin-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, border: `1.5px solid ${statusColor}`, flexShrink: 0 }} />{displayLabel}</div>
                     <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasActual ? statusColor : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasActual ? r.actual.toFixed(1) : '--'}°</div>
-                    <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasPred ? 'var(--admin-accent)' : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</div>
+                    {!isOutdoorThermalCamera && (
+                      <div style={{ fontSize: '.8rem', fontWeight: 800, color: r?.hasPred ? 'var(--admin-accent)' : 'var(--admin-text-muted)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r?.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</div>
+                    )}
                   </div>
                 );
               })}
@@ -507,7 +637,9 @@ targets.forEach(t => {
             <div style={{ flex: 1, position: 'relative' }}>{chartLoading && (<div style={{ position: 'absolute', inset: 0, background: 'rgba(9, 14, 26, 0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}><RotateCw className="animate-spin" size={24} color="var(--admin-accent)" /></div>)}<canvas ref={chartRef} /></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginTop: 12, justifyContent: 'center', borderTop: '1px solid var(--admin-border-light)', paddingTop: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 24, height: 2, background: '#9CA3AF' }} /><span style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--admin-text-muted)', letterSpacing: '.5px' }}>THỰC TẾ (NÉT LIỀN)</span></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 24, height: 0, borderBottom: '2px dashed #9CA3AF' }} /><span style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--admin-text-muted)', letterSpacing: '.5px' }}>DỰ BÁO AI (NÉT ĐỨT)</span></div>
+              {!isOutdoorThermalCamera && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 24, height: 0, borderBottom: '2px dashed #9CA3AF' }} /><span style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--admin-text-muted)', letterSpacing: '.5px' }}>DỰ BÁO AI (NÉT ĐỨT)</span></div>
+              )}
             </div>
           </div>
           <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 0, padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

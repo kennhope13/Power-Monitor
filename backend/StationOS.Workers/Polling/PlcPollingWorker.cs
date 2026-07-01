@@ -14,6 +14,7 @@
 // ============================================================
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -172,6 +173,25 @@ public class PlcPollingWorker : BackgroundService
         var offset   = GetInt(config, "offset");
         var length   = GetInt(config, "length");
 
+        var cabinetPoints = GetCabinetPointDefinitions(config);
+        if (cabinetPoints.Count > 0)
+        {
+            length = Math.Max(length, GetRequiredCabinetPayloadLength(cabinetPoints));
+        }
+
+        int t1Offset   = config.ContainsKey("t1_offset")   ? GetInt(config, "t1_offset")   : 0;
+        int t2Offset   = config.ContainsKey("t2_offset")   ? GetInt(config, "t2_offset")   : 4;
+        int t3Offset   = config.ContainsKey("t3_offset")   ? GetInt(config, "t3_offset")   : 2;
+        int pdOffset   = config.ContainsKey("pd_offset")   ? GetInt(config, "pd_offset")   : 14;
+        int eppcOffset = config.ContainsKey("eppc_offset") ? GetInt(config, "eppc_offset") : -1;
+        int indiOffset = config.ContainsKey("indi_offset") ? GetInt(config, "indi_offset") : -1;
+        var fallbackSetting = await db.SystemSettings.FirstOrDefaultAsync(s => s.Key == "plc_fallback_simulation_enabled", ct);
+        var isFallbackEnabled = true;
+        if (fallbackSetting != null && fallbackSetting.Value != null && bool.TryParse(fallbackSetting.Value.Trim('"'), out var fbVal))
+        {
+            isFallbackEnabled = fbVal;
+        }
+
         // Đã TẮT HOÀN TOÀN chế độ demo/giả lập theo yêu cầu để chạy hệ thống giám sát dữ liệu thật 100%
         bool isSimMode = false;
 
@@ -221,7 +241,7 @@ public class PlcPollingWorker : BackgroundService
                     _logger.LogWarning("[PLC] Mất kết nối vật lý tới {Ip} ({Msg}) - Đánh dấu thiết bị Offline", ip, ex.Message);
                 }
                 isSimulated = true;
-                bytes = new byte[length];
+                bytes = new byte[length > 0 ? length : 24];
             }
 
             if (isSimulated)
@@ -229,33 +249,49 @@ public class PlcPollingWorker : BackgroundService
                 // Cập nhật trạng thái tủ là "offline" ngay lập tức vì không kết nối được vật lý!
                 await UpdateDeviceStatusAsync(db, _notifier, device.Id, "offline");
 
-                // Kiểm tra xem hệ thống có cho phép kích hoạt Giả lập dự phòng (Fallback Simulation) khi mất mạng không
-                bool isFallbackEnabled = true; // Mặc định bật để hỗ trợ duyệt giao diện khi đứt dây mạng
-                var fallbackSetting = db.SystemSettings.FirstOrDefault(s => s.Key == "plc_fallback_simulation_enabled");
-                if (fallbackSetting != null && fallbackSetting.Value != null && bool.TryParse(fallbackSetting.Value.Trim('"'), out var fbVal))
+                if (cabinetPoints.Count > 0)
                 {
-                    isFallbackEnabled = fbVal;
-                }
+                    var nowTime2 = DateTime.UtcNow;
+                    var fallbackReadings = BuildCabinetReadings(device, cabinetPoints, Array.Empty<byte>(), nowTime2, simulated: true);
 
-                if (isFallbackEnabled)
+                    // Cập nhật IMemoryCache để các RuleEngine hoạt động bình thường
+                    var fbCachedDict = _cache.GetOrCreate("LatestReadings", entry => new Dictionary<string, SensorReading>());
+                    if (fbCachedDict != null)
+                    {
+                        foreach (var r in fallbackReadings)
+                        {
+                            var cacheKey = $"{r.DeviceId}_{r.PointId}".ToLower();
+                            fbCachedDict[cacheKey] = r;
+                        }
+                    }
+
+                    // TUYỆT ĐỐI KHÔNG lưu vào DB đo lường để giữ dữ liệu DB sạch 100% không bị lẫn lộn dữ liệu giả!
+                    // Chỉ gửi SignalR realtime với Quality = 1 (Tín hiệu dự phòng)
+                    var fbPayload = fallbackReadings.Select(r => new {
+                        deviceId = r.DeviceId,
+                        pointId = r.PointId,
+                        value = r.Value,
+                        unit = r.Unit,
+                        time = r.Time,
+                        quality = 1
+                    });
+                    await _notifier.SendSensorUpdateAsync(fbPayload);
+                    return;
+                }
+                else if (isFallbackEnabled)
                 {
-                    // Sinh dữ liệu mô phỏng dự phòng để giao diện không bị đóng băng
                     var rand = new Random();
                     short pha1 = (short)(38 + rand.Next(-3, 3));
-                    bytes[0] = (byte)(pha1 >> 8);
-                    bytes[1] = (byte)(pha1 & 0xFF);
+                    if (bytes.Length >= 2) { bytes[0] = (byte)(pha1 >> 8); bytes[1] = (byte)(pha1 & 0xFF); }
 
                     short pha3 = (short)(39 + rand.Next(-3, 3));
-                    bytes[2] = (byte)(pha3 >> 8);
-                    bytes[3] = (byte)(pha3 & 0xFF);
+                    if (bytes.Length >= 4) { bytes[2] = (byte)(pha3 >> 8); bytes[3] = (byte)(pha3 & 0xFF); }
 
                     short pha2 = (short)(41 + rand.Next(-3, 3));
-                    bytes[4] = (byte)(pha2 >> 8);
-                    bytes[5] = (byte)(pha2 & 0xFF);
+                    if (bytes.Length >= 6) { bytes[4] = (byte)(pha2 >> 8); bytes[5] = (byte)(pha2 & 0xFF); }
 
                     short pd = (short)(-60 + rand.Next(-5, 5));
-                    bytes[8] = (byte)(pd >> 8);
-                    bytes[9] = (byte)(pd & 0xFF);
+                    if (bytes.Length >= 10) { bytes[8] = (byte)(pd >> 8); bytes[9] = (byte)(pd & 0xFF); }
 
                     var nowTime2 = DateTime.UtcNow;
                     var fbRawReadings = new[]
@@ -275,28 +311,26 @@ public class PlcPollingWorker : BackgroundService
                             PointId = r.id,
                             Value = r.val,
                             Unit = r.unit,
-                            Quality = 1 // Quality = 1 nghĩa là dữ liệu Giả lập dự phòng (Offline Fallback)
+                            Quality = 1
                         }).ToList();
 
-                    // Cập nhật IMemoryCache để các RuleEngine hoạt động bình thường
                     var fbCachedDict = _cache.GetOrCreate("LatestReadings", entry => new Dictionary<string, SensorReading>());
                     if (fbCachedDict != null)
                     {
                         foreach (var r in fbReadings)
                         {
-                            fbCachedDict[r.PointId] = r;
+                            var cacheKey = $"{r.DeviceId}_{r.PointId}".ToLower();
+                            fbCachedDict[cacheKey] = r;
                         }
                     }
 
-                    // TUYỆT ĐỐI KHÔNG lưu vào DB đo lường để giữ dữ liệu DB sạch 100% không bị lẫn lộn dữ liệu giả!
-                    // Chỉ gửi SignalR realtime với Quality = 1 (Tín hiệu dự phòng)
                     var fbPayload = fbReadings.Select(r => new {
                         deviceId = r.DeviceId,
                         pointId = r.PointId,
                         value = r.Value,
                         unit = r.Unit,
                         time = r.Time,
-                        quality = 1 // 1: Fallback Sim
+                        quality = 1
                     });
                     await _notifier.SendSensorUpdateAsync(fbPayload);
                     return;
@@ -309,7 +343,9 @@ public class PlcPollingWorker : BackgroundService
                         new { deviceId = device.Id, pointId = "nhiet_do_pha_1", value = 0.0, unit = "°C", time = DateTime.UtcNow, quality = 2 },
                         new { deviceId = device.Id, pointId = "nhiet_do_pha_2", value = 0.0, unit = "°C", time = DateTime.UtcNow, quality = 2 },
                         new { deviceId = device.Id, pointId = "nhiet_do_pha_3", value = 0.0, unit = "°C", time = DateTime.UtcNow, quality = 2 },
-                        new { deviceId = device.Id, pointId = "phong_dien",     value = 0.0, unit = "dB", time = DateTime.UtcNow, quality = 2 }
+                        new { deviceId = device.Id, pointId = "phong_dien",     value = 0.0, unit = "dB", time = DateTime.UtcNow, quality = 2 },
+                        new { deviceId = device.Id, pointId = "pd_eppc",        value = 0.0, unit = "",   time = DateTime.UtcNow, quality = 2 },
+                        new { deviceId = device.Id, pointId = "pd_indi",        value = 0.0, unit = "",   time = DateTime.UtcNow, quality = 2 }
                     };
                     await _notifier.SendSensorUpdateAsync(offlinePayload);
                     return;
@@ -318,18 +354,9 @@ public class PlcPollingWorker : BackgroundService
 
             var now = DateTime.UtcNow;
 
-            // Parse 4 điểm đo theo mapping DB32
-            var rawReadings = new[]
-            {
-                (id: "nhiet_do_pha_1", val: (double)ReadInt16(bytes, 0), unit: "°C"),
-                (id: "nhiet_do_pha_3", val: (double)ReadInt16(bytes, 2), unit: "°C"),
-                (id: "nhiet_do_pha_2", val: (double)ReadInt16(bytes, 4), unit: "°C"),
-                (id: "phong_dien",     val: (double)ReadInt16(bytes, 8), unit: "dB"),
-            };
-
-            var readings = rawReadings
-                .Select(r => MakeReading(device, r.id, r.val, r.unit, now))
-                .ToList();
+            var readings = cabinetPoints.Count > 0
+                ? BuildCabinetReadings(device, cabinetPoints, bytes, now, simulated: false)
+                : BuildLegacyReadings(device, bytes, now, t1Offset, t2Offset, t3Offset, pdOffset, eppcOffset, indiOffset);
 
             // Lưu vào IMemoryCache để RuleEngine dùng mà không cần query DB (Key = LatestReadings)
             var cachedDict = _cache.GetOrCreate("LatestReadings", entry => new Dictionary<string, SensorReading>());
@@ -378,11 +405,11 @@ public class PlcPollingWorker : BackgroundService
                 value = r.Value,
                 unit = r.Unit,
                 time = r.Time,
-                quality = 0 // Good
+                quality = (int)r.Quality
             });
             await _notifier.SendSensorUpdateAsync(payload);
 
-            var logParts = readings.Select(r => $"{r.PointId}={r.Value:0.#}{r.Unit}");
+            var logParts = readings.Select(r => $"{r.PointId}={(r.Value.HasValue ? r.Value.Value.ToString("0.#") : "null")}{r.Unit}");
             _logger.LogDebug("[PLC] {Ip} (Simulated={Sim}, Saved={Save}) → {Points}", ip, isSimulated, shouldSaveDb, string.Join(", ", logParts));
 
             await UpdateDeviceStatusAsync(db, _notifier, device.Id, "online");
@@ -401,22 +428,338 @@ public class PlcPollingWorker : BackgroundService
     // ── Helpers ───────────────────────────────────────────
 
     private static SensorReading MakeReading(Device device, string pointId, double value, string unit, DateTime time)
-        => new()
+    {
+        short quality = 0;
+        double? val = value;
+
+        // Note: If -50, sensor lost connection
+        if (pointId.StartsWith("nhiet_do_pha_") && value == -50.0)
+        {
+            val = null;
+            quality = 2; // bad quality / lost connection
+        }
+
+        return new SensorReading
         {
             Time = time,
             StationId = device.StationId,
             DeviceId = device.Id,
             PointId = pointId,
-            Value = value,
+            Value = val,
             Unit = unit,
-            Quality = 0 // good
+            Quality = quality
         };
+    }
+
+    private static List<SensorReading> BuildLegacyReadings(
+        Device device,
+        byte[] bytes,
+        DateTime now,
+        int t1Offset,
+        int t2Offset,
+        int t3Offset,
+        int pdOffset,
+        int eppcOffset,
+        int indiOffset)
+    {
+        var rawReadingsList = new List<(string id, double val, string unit)>();
+        if (t1Offset + 1 < bytes.Length) rawReadingsList.Add(("nhiet_do_pha_1", (double)ReadInt16(bytes, t1Offset), "°C"));
+        if (t2Offset + 1 < bytes.Length) rawReadingsList.Add(("nhiet_do_pha_2", (double)ReadInt16(bytes, t2Offset), "°C"));
+        if (t3Offset + 1 < bytes.Length) rawReadingsList.Add(("nhiet_do_pha_3", (double)ReadInt16(bytes, t3Offset), "°C"));
+        if (pdOffset + 1 < bytes.Length) rawReadingsList.Add(("phong_dien", (double)ReadInt16(bytes, pdOffset), "dB"));
+        if (eppcOffset >= 0 && eppcOffset + 1 < bytes.Length) rawReadingsList.Add(("pd_eppc", (double)ReadUInt16(bytes, eppcOffset), ""));
+        if (indiOffset >= 0 && indiOffset + 1 < bytes.Length) rawReadingsList.Add(("pd_indi", (double)ReadUInt16(bytes, indiOffset), ""));
+
+        return rawReadingsList
+            .Select(r => MakeReading(device, r.id, r.val, r.unit, now))
+            .ToList();
+    }
+
+    private static List<SensorReading> BuildCabinetReadings(
+        Device device,
+        IReadOnlyList<CabinetPointDefinition> points,
+        byte[] bytes,
+        DateTime now,
+        bool simulated)
+    {
+        var readings = new List<SensorReading>();
+
+        foreach (var point in points)
+        {
+            if (!TryReadCabinetPointValue(bytes, point, out var value, out var quality, out var unit))
+            {
+                if (simulated)
+                {
+                    value = 0;
+                    quality = 1;
+                    unit = ResolveCabinetUnit(point);
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            if (!simulated && ShouldTreatAsDisconnected(point, value))
+            {
+                readings.Add(new SensorReading
+                {
+                    Time = now,
+                    StationId = device.StationId,
+                    DeviceId = device.Id,
+                    PointId = point.PointId,
+                    Value = null,
+                    Unit = unit,
+                    Quality = 2
+                });
+                continue;
+            }
+
+            readings.Add(new SensorReading
+            {
+                Time = now,
+                StationId = device.StationId,
+                DeviceId = device.Id,
+                PointId = point.PointId,
+                Value = value,
+                Unit = unit,
+                Quality = quality
+            });
+        }
+
+        return readings;
+    }
+
+    private static bool ShouldTreatAsDisconnected(CabinetPointDefinition point, double value)
+    {
+        if (value != -50) return false;
+        var name = $"{point.Name} {point.TagName} {point.PointId} {point.Note}".ToLowerInvariant();
+        return name.Contains("temp") || name.Contains("temperature") || name.Contains("nhiệt");
+    }
+
+    private static string ResolveCabinetUnit(CabinetPointDefinition point)
+    {
+        if (!string.IsNullOrWhiteSpace(point.Unit))
+            return point.Unit!;
+
+        var name = $"{point.Name} {point.TagName} {point.PointId} {point.Note}".ToLowerInvariant();
+        if (name.Contains("pd") || name.Contains("indi") || name.Contains("eppc"))
+            return string.Empty;
+        if (name.Contains("temp") || name.Contains("nhiệt") || name.Contains("temperature"))
+            return "°C";
+        return string.Empty;
+    }
+
+    private static bool TryReadCabinetPointValue(byte[] bytes, CabinetPointDefinition point, out double value, out short quality, out string unit)
+    {
+        value = 0;
+        quality = 0;
+        unit = ResolveCabinetUnit(point);
+
+        var offset = point.Offset ?? TryParseCabinetOffset(point.DbAddress);
+        if (offset < 0)
+            return false;
+
+        var kind = (point.Type ?? string.Empty).Trim().ToUpperInvariant();
+        if (kind is "INT" or "DBW")
+        {
+            if (offset + 1 >= bytes.Length) return false;
+            value = ReadInt16(bytes, offset);
+            return true;
+        }
+
+        if (kind is "UINT" or "WORD" or "DBD" or "DBWU")
+        {
+            if (offset + 1 >= bytes.Length) return false;
+            value = ReadUInt16(bytes, offset);
+            return true;
+        }
+
+        if (kind is "DINT" or "DWORD")
+        {
+            if (offset + 3 >= bytes.Length) return false;
+            value = ReadInt32(bytes, offset);
+            return true;
+        }
+
+        if (kind is "REAL" or "FLOAT")
+        {
+            if (offset + 3 >= bytes.Length) return false;
+            value = ReadReal(bytes, offset);
+            return true;
+        }
+
+        if (kind is "BOOL" or "BIT")
+        {
+            if (offset >= bytes.Length) return false;
+            var bit = point.Bit ?? 0;
+            value = ((bytes[offset] >> bit) & 1) == 1 ? 1 : 0;
+            return true;
+        }
+
+        // Mặc định của tủ là số nguyên 16 bit
+        if (offset + 1 >= bytes.Length) return false;
+        value = ReadInt16(bytes, offset);
+        return true;
+    }
+
+    private static int GetRequiredCabinetPayloadLength(IReadOnlyList<CabinetPointDefinition> points)
+    {
+        var max = 0;
+        foreach (var point in points)
+        {
+            var offset = point.Offset ?? TryParseCabinetOffset(point.DbAddress);
+            if (offset < 0) continue;
+
+            var size = PointSizeBytes(point.Type);
+            max = Math.Max(max, offset + size);
+        }
+
+        return max;
+    }
+
+    private static int PointSizeBytes(string? type)
+    {
+        var kind = (type ?? string.Empty).Trim().ToUpperInvariant();
+        return kind switch
+        {
+            "DINT" or "DWORD" or "REAL" or "FLOAT" => 4,
+            "BOOL" or "BIT" => 1,
+            _ => 2,
+        };
+    }
+
+    private static int TryParseCabinetOffset(string? dbAddress)
+    {
+        if (string.IsNullOrWhiteSpace(dbAddress)) return -1;
+
+        var match = Regex.Match(dbAddress.Trim().ToUpperInvariant(), @"^DB\d+[.,](?:DBX|DBD|DBW|DBB|INT|UINT|DINT|REAL|WORD|DWORD|BOOL)?(?<offset>\d+)(?:\.(?<bit>\d+))?$");
+        if (!match.Success) return -1;
+
+        return int.TryParse(match.Groups["offset"].Value, out var offset) ? offset : -1;
+    }
+
+    private static List<CabinetPointDefinition> GetCabinetPointDefinitions(Dictionary<string, object> config)
+    {
+        if (!config.TryGetValue("points", out var rawPoints) || rawPoints == null)
+            return [];
+
+        if (rawPoints is JsonElement element && element.ValueKind == JsonValueKind.Array)
+        {
+            var points = new List<CabinetPointDefinition>();
+            foreach (var item in element.EnumerateArray())
+            {
+                if (!TryParseCabinetPoint(item, points.Count, out var point))
+                    continue;
+                points.Add(point);
+            }
+            return points;
+        }
+
+        if (rawPoints is string rawJson && !string.IsNullOrWhiteSpace(rawJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(rawJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    var points = new List<CabinetPointDefinition>();
+                    foreach (var item in doc.RootElement.EnumerateArray())
+                    {
+                        if (!TryParseCabinetPoint(item, points.Count, out var point))
+                            continue;
+                        points.Add(point);
+                    }
+                    return points;
+                }
+            }
+            catch { }
+        }
+
+        return [];
+    }
+
+    private static bool TryParseCabinetPoint(JsonElement item, int index, out CabinetPointDefinition point)
+    {
+        point = new CabinetPointDefinition();
+        if (item.ValueKind != JsonValueKind.Object)
+            return false;
+
+        point.PointId = GetPointString(item, "pointId", "id", "point_id");
+        point.Name    = GetPointString(item, "name", "label");
+        point.TagName = GetPointString(item, "tagName", "tagname");
+        point.Type    = GetPointString(item, "type", "dataType", "data_type");
+        point.DbAddress = GetPointString(item, "dbAddress", "db_address", "address");
+        point.Unit    = GetPointString(item, "unit");
+        point.Note    = GetPointString(item, "note");
+        point.Offset  = GetPointInt(item, "offset", "byteOffset", "byte_offset");
+        point.Bit     = GetPointInt(item, "bit", "bitIndex", "bit_index");
+
+        point.PointId ??= SanitizeCabinetPointId(point.Name ?? point.TagName ?? $"point_{index + 1}");
+        point.Name ??= point.PointId;
+        point.TagName ??= point.PointId;
+
+        return true;
+    }
+
+    private static string? GetPointString(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value)) continue;
+            if (value.ValueKind == JsonValueKind.String) return value.GetString();
+            return value.ToString();
+        }
+        return null;
+    }
+
+    private static int? GetPointInt(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value)) continue;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n)) return n;
+            if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var s)) return s;
+        }
+        return null;
+    }
+
+    private static string SanitizeCabinetPointId(string value)
+    {
+        var sanitized = Regex.Replace(value.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "_");
+        return string.IsNullOrWhiteSpace(sanitized) ? "point" : sanitized.Trim('_');
+    }
 
     // Đọc Int16 big-endian từ byte array (chuẩn Siemens)
     private static double ReadInt16(byte[] data, int offset)
     {
         if (offset + 1 >= data.Length) return 0;
         return (short)((data[offset] << 8) | data[offset + 1]);
+    }
+
+    private static double ReadInt32(byte[] data, int offset)
+    {
+        if (offset + 3 >= data.Length) return 0;
+        var raw = (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3];
+        return raw;
+    }
+
+    private static double ReadReal(byte[] data, int offset)
+    {
+        if (offset + 3 >= data.Length) return 0;
+        var buffer = new byte[4];
+        buffer[0] = data[offset + 3];
+        buffer[1] = data[offset + 2];
+        buffer[2] = data[offset + 1];
+        buffer[3] = data[offset];
+        return BitConverter.ToSingle(buffer, 0);
+    }
+
+    // Đọc UInt16 big-endian (cho PD_EPPC và INDI — giá trị không âm)
+    private static double ReadUInt16(byte[] data, int offset)
+    {
+        if (offset + 1 >= data.Length) return 0;
+        return (ushort)((data[offset] << 8) | data[offset + 1]);
     }
 
     // JsonElement → string
@@ -491,5 +834,18 @@ public class PlcPollingWorker : BackgroundService
                 }
             }
         }
+    }
+
+    private sealed class CabinetPointDefinition
+    {
+        public string? PointId { get; set; }
+        public string? Name { get; set; }
+        public string? TagName { get; set; }
+        public string? Type { get; set; }
+        public string? DbAddress { get; set; }
+        public int? Offset { get; set; }
+        public int? Bit { get; set; }
+        public string? Unit { get; set; }
+        public string? Note { get; set; }
     }
 }

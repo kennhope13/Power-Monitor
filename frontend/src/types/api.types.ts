@@ -144,6 +144,7 @@ export interface Rule {
   id: string;
   name: string;
   ruleSet?: string;       // nhóm quy tắc, vd: "Tủ điện A"
+  stationId?: string;
   condition: string;      // JSON: { point, op, value } — điều kiện kích hoạt
   actions: string;        // JSON: [{ type, level }] — hành động khi vi phạm
   enabled: boolean;
@@ -337,6 +338,8 @@ export interface HealthScore {
   status: string;
   score: number;          // 0–100, điểm sức khỏe (100 = tốt nhất)
   risk: string;           // good | fair | poor | critical
+  alarmCount?: number;
+  warningCount?: number;
   ts?: string;
 }
 

@@ -6,8 +6,10 @@
 // ============================================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
-import { Calendar, RefreshCw, Play, Camera } from 'lucide-react';
+import DateRangePicker from '@/components/ui/DateRangePicker';
+import { Play, Camera, Download, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { stationApi, AlertItem, AlertHistoryEntry } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore, useAlertStore } from '@/store';
@@ -18,6 +20,9 @@ import { confirmDialog } from '@/utils/confirm';
 import { showToast } from '@/utils/toast';
 import { GO2RTC_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import './AlertsHistoryPage.css';
 
 type SortCol = 'time' | 'level';
@@ -135,7 +140,8 @@ export default function AlertsHistoryPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
-  const [timeRange, setTimeRange] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState<SortCol>('time');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -154,21 +160,15 @@ export default function AlertsHistoryPage() {
   const ackAlertInStore = useAlertStore(s => s.ack);
   const closeAlertInStore = useAlertStore(s => s.close);
   const [filterDevice, setFilterDevice] = useState('');
+  const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false);
+  const downloadDropdownRef = React.useRef<HTMLDivElement>(null);
+  const downloadMenuRef = React.useRef<HTMLDivElement>(null);
+  const [downloadMenuPos, setDownloadMenuPos] = useState({ top: 0, left: 0, width: 0 });
 
-  // Bộ lọc nâng cao — loại sự kiện và cấp độ
+  // Bộ lọc nâng cao — loại sự kiện, cấp độ và nguồn hành động
   const [filterType, setFilterType] = useState('');
   const [filterLevel, setFilterLevel] = useState('');
-
-  // Modal chọn khoảng ngày tùy chỉnh
-  const [dateModalOpen, setDateModalOpen] = useState(false);
-
-  // Khoảng thời gian mặc định: Tất cả lịch sử
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-
-  // Giá trị tạm trong modal (chưa áp dụng cho đến khi bấm Xác nhận)
-  const [tempStartDate, setTempStartDate] = useState('');
-  const [tempEndDate, setTempEndDate] = useState('');
+  const [filterSource, setFilterSource] = useState('');
 
   // Load devices list on mount (qua store — chia sẻ với các page khác)
   useEffect(() => {
@@ -176,35 +176,6 @@ export default function AlertsHistoryPage() {
       stations.forEach(s => fetchDevices(s.id));
     }).catch(e => console.error("Lỗi tải stations/devices:", e));
   }, [fetchStations, fetchDevices]);
-
-  // Presets trigger date changes
-  useEffect(() => {
-    if (timeRange === 'custom') return;
-    const now = new Date();
-    let start = new Date();
-    if (timeRange === 'today') {
-      // start is today
-    } else if (timeRange === 'yesterday') {
-      start.setDate(now.getDate() - 1);
-      now.setDate(now.getDate() - 1);
-    } else if (timeRange === '7d') {
-      start.setDate(now.getDate() - 7);
-    } else if (timeRange === '30d') {
-      start.setDate(now.getDate() - 30);
-    } else if (timeRange === 'all') {
-      setStartDate('');
-      setEndDate('');
-      return;
-    }
-    setStartDate(start.toISOString().split('T')[0] ?? '');
-    setEndDate(now.toISOString().split('T')[0] ?? '');
-  }, [timeRange]);
-
-  // Sync temp dates when main dates are set
-  useEffect(() => {
-    setTempStartDate(startDate);
-    setTempEndDate(endDate);
-  }, [startDate, endDate]);
 
   // Ack modal state
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -215,7 +186,6 @@ export default function AlertsHistoryPage() {
   const loadAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      // Chuyển ngày text sang ISO để gửi API
       const from = startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined;
       const to = endDate ? new Date(endDate + 'T23:59:59').toISOString() : undefined;
       const data = await stationApi.getAlerts(filterStatus || undefined, from, to);
@@ -230,6 +200,43 @@ export default function AlertsHistoryPage() {
   useEffect(() => {
     loadAlerts();
   }, [loadAlerts]);
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!downloadDropdownRef.current) return;
+      if (downloadDropdownRef.current.contains(target)) return;
+      if (downloadMenuRef.current?.contains(target)) return;
+      if (!downloadDropdownRef.current.contains(target)) {
+        setDownloadDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  useEffect(() => {
+    if (!downloadDropdownOpen || !downloadDropdownRef.current) return;
+
+    const updateMenuPos = () => {
+      const trigger = downloadDropdownRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setDownloadMenuPos({
+        top: rect.bottom + 6,
+        left: rect.right - Math.max(rect.width, 170),
+        width: Math.max(rect.width, 170),
+      });
+    };
+
+    updateMenuPos();
+    window.addEventListener('resize', updateMenuPos);
+    window.addEventListener('scroll', updateMenuPos, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuPos);
+      window.removeEventListener('scroll', updateMenuPos, true);
+    };
+  }, [downloadDropdownOpen]);
 
   // Realtime
   useEffect(() => {
@@ -347,7 +354,7 @@ export default function AlertsHistoryPage() {
   };
 
   /** Xuất danh sách cảnh báo hiện tại ra file CSV và kích hoạt tải về. */
-  const exportCsv = () => {
+  const exportCsvServer = () => {
     const opts = {
       status: filterStatus || undefined,
       from: startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined,
@@ -374,17 +381,21 @@ export default function AlertsHistoryPage() {
       result = result.filter(a => a.deviceId === filterDevice);
     }
     if (filterType) {
-      // Lọc theo từ khóa trong nội dung message
       if (filterType === 'nguoi') {
         result = result.filter(a => a.message?.toLowerCase().includes('người') || a.message?.toLowerCase().includes('xâm nhập'));
       } else if (filterType === 'chay') {
         result = result.filter(a => a.message?.toLowerCase().includes('cháy') || a.message?.toLowerCase().includes('khói'));
       } else if (filterType === 'diem') {
         result = result.filter(a => a.message?.toLowerCase().includes('điểm') || a.message?.toLowerCase().includes('nhiệt độ'));
+      } else if (filterType === 'pd') {
+        result = result.filter(a => a.message?.toLowerCase().includes('phóng điện') || a.source === 'partial_discharge' || /\bpd\b/i.test(a.message || ''));
       }
     }
     if (filterLevel) {
       result = result.filter(a => a.level?.toLowerCase() === filterLevel.toLowerCase());
+    }
+    if (filterSource) {
+      result = result.filter(a => a.source === filterSource);
     }
 
     // Thứ tự ưu tiên mức độ: alarm > warning > info
@@ -398,7 +409,72 @@ export default function AlertsHistoryPage() {
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [alerts, filterDevice, filterType, filterLevel, sortBy, sortDir]);
+  }, [alerts, filterDevice, filterType, filterLevel, filterSource, sortBy, sortDir]);
+
+  const exportRows = useMemo(() => {
+    return sortedAlerts.map((a, idx) => ({
+      STT: idx + 1,
+      'Thời gian': fmtDateTime(a.triggeredAt),
+      'Trạm': a.stationName || a.stationId || '',
+      'Thiết bị': devices.find(d => d.id.toLowerCase() === (a.deviceId || '').toLowerCase())?.name || a.deviceId || '',
+      'Nguồn': a.source || '',
+      'Mức độ': alertLevelLabel(a.level || ''),
+      'Trạng thái': alertStatusLabel(a.status || ''),
+      'Điểm': a.pointId || '',
+      'Giá trị': a.value ?? '',
+      'Nội dung': a.message || '',
+    }));
+  }, [sortedAlerts, devices]);
+
+  const exportHeaders = useMemo(() => Object.keys(exportRows[0] || {}), [exportRows]);
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportCsv = () => {
+    const csv = [
+      exportHeaders.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
+      ...exportRows.map(row => exportHeaders.map(h => {
+        const v = (row as Record<string, unknown>)[h];
+        return `"${String(v ?? '').replace(/"/g, '""')}"`;
+      }).join(',')),
+    ].join('\n');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `alerts_${new Date().toISOString().slice(0, 10)}.csv`);
+  };
+
+  const exportXlsx = () => {
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = exportHeaders.map((header) => {
+      const values = exportRows.map(row => String((row as Record<string, unknown>)[header] ?? ''));
+      const maxLen = Math.max(header.length, ...values.map(v => v.length));
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Alerts');
+    XLSX.writeFile(wb, `alerts_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    doc.setFontSize(14);
+    doc.text('NHAT KY CANH BAO', 40, 36);
+    autoTable(doc, {
+      startY: 48,
+      head: [exportHeaders],
+      body: exportRows.map(row => exportHeaders.map(h => String((row as Record<string, unknown>)[h] ?? ''))),
+      styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
+      headStyles: { fillColor: [30, 41, 59] },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      margin: { top: 36, left: 36, right: 36, bottom: 36 },
+    });
+    doc.save(`alerts_${new Date().toISOString().slice(0, 10)}.pdf`);
+  };
 
   /** Đổi cột sắp xếp hoặc đảo chiều nếu đang sắp xếp theo cột đó. */
   const handleSort = (col: SortCol) => {
@@ -417,23 +493,11 @@ export default function AlertsHistoryPage() {
           <h2>NHẬT KÝ</h2>
         </div>
         <div className="page-toolbar-group">
-          <div className="page-toolbar-cell" style={{ height: 28 }}>
-            <span className="page-cell-label">LỌC NHANH:</span>
-            <ToolbarSelect
-              value={timeRange}
-              onChange={v => { setTimeRange(v); if (v === 'custom') setDateModalOpen(true); }}
-              options={[
-                { value: 'today', label: 'Hôm nay' },
-                { value: 'yesterday', label: 'Hôm qua' },
-                { value: '7d', label: '7 ngày' },
-                { value: '30d', label: '30 ngày' },
-                { value: 'all', label: 'Tất cả' },
-                { value: 'custom', label: 'Tùy chỉnh' },
-              ]}
-              width={110}
-            />
-            <button className="btn-industrial" style={{ height: 22, width: 22, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.8rem', border: 'none', background: 'transparent', opacity: 0.8 }} title="Chọn ngày" onClick={() => setDateModalOpen(true)}><Calendar size={14} strokeWidth={2} /></button>
-          </div>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          />
           <div className="page-toolbar-cell" style={{ height: 28 }}>
             <span className="page-cell-label">THIẾT BỊ:</span>
             <ToolbarSelect
@@ -448,8 +512,23 @@ export default function AlertsHistoryPage() {
             <ToolbarSelect
               value={filterType}
               onChange={setFilterType}
-              options={[{ value: '', label: 'Tất cả' }, { value: 'nguoi', label: 'Người' }, { value: 'chay', label: 'Cháy' }, { value: 'diem', label: 'Nhiệt' }]}
+              options={[{ value: '', label: 'Tất cả' }, { value: 'nguoi', label: 'Người' }, { value: 'chay', label: 'Cháy' }, { value: 'diem', label: 'Nhiệt' }, { value: 'pd', label: 'PD' }]}
               width={90}
+            />
+          </div>
+          <div className="page-toolbar-cell" style={{ height: 28 }}>
+            <span className="page-cell-label">HÀNH ĐỘNG:</span>
+            <ToolbarSelect
+              value={filterSource}
+              onChange={setFilterSource}
+              options={[
+                { value: '', label: 'Tất cả' },
+                { value: 'rule_engine', label: 'Quy tắc' },
+                { value: 'ai_detection', label: 'AI' },
+                { value: 'camera', label: 'Camera' },
+                { value: 'manual', label: 'Thủ công' },
+              ]}
+              width={100}
             />
           </div>
           <div className="page-toolbar-cell" style={{ height: 28 }}>
@@ -470,19 +549,47 @@ export default function AlertsHistoryPage() {
               width={90}
             />
           </div>
-          <button 
-            className="btn-industrial" 
-            title="Xuất CSV" 
-            onClick={exportCsv} 
-          >
-            ⬇ CSV
-          </button>
-          <button 
-            className="btn-industrial btn-primary" 
-            onClick={loadAlerts} 
-          >
-            ↺ MỚI
-          </button>
+          <div ref={downloadDropdownRef} style={{ position: 'relative', zIndex: 1000 }}>
+            <button
+              className="btn-industrial btn-primary"
+              title="Xuất dữ liệu"
+              onClick={() => setDownloadDropdownOpen(v => !v)}
+              style={{ height: 28, padding: '0 10px', fontSize: '.72rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              <Download size={14} />
+              <span>XUẤT</span>
+              <ChevronDown size={13} />
+            </button>
+            {downloadDropdownOpen && createPortal(
+              <div
+                ref={downloadMenuRef}
+                className="export-menu"
+                style={{
+                  position: 'fixed',
+                  top: downloadMenuPos.top,
+                  left: downloadMenuPos.left,
+                  width: downloadMenuPos.width,
+                  minWidth: 170,
+                  background: 'var(--admin-panel)',
+                  border: '1px solid var(--admin-border)',
+                  boxShadow: '0 14px 30px rgba(0,0,0,.45)',
+                  zIndex: 99999,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportXlsx(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileSpreadsheet size={14} /> Xuất XLSX
+                </button>
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportCsv(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileText size={14} /> Xuất CSV
+                </button>
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportPdf(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileText size={14} /> Xuất PDF
+                </button>
+              </div>,
+              document.body
+            )}
+          </div>
         </div>
       </div>
 
@@ -644,7 +751,6 @@ export default function AlertsHistoryPage() {
                 onClose={() => setSelectedId('')} 
                 onAck={() => handleAckClick({ stopPropagation: () => {} } as any, detailData.id)}
                 onCloseAlert={() => handleCloseAlert({ stopPropagation: () => {} } as any, detailData.id)}
-                onRefresh={() => loadDetail(detailData.id, true)}
                 onSendCentral={() => handleSendCentral(detailData.id)}
                 devices={devices}
               />
@@ -652,49 +758,6 @@ export default function AlertsHistoryPage() {
           </div>
         </div>
       </div>
-
-      {/* Custom Date Picker Modal */}
-      {dateModalOpen && (
-        <div className="modal-overlay active" onClick={() => setDateModalOpen(false)}>
-          <div className="modal-content" style={{ width: 340 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 style={{ margin: 0, fontSize: '.9rem', fontWeight: 800, letterSpacing: '.5px' }}>CHỌN KHOẢNG THỜI GIAN</h3>
-              <button className="modal-close-btn" onClick={() => setDateModalOpen(false)}></button>
-            </div>
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="form-group">
-                <label style={{ fontSize: '.7rem', fontWeight: 'bold', color: 'var(--admin-text-muted)' }}>TỪ NGÀY:</label>
-                <input 
-                  type="date" 
-                  className="form-input" 
-                  style={{ width: '100%', height: 32, fontSize: '.8rem', fontFamily: 'monospace' }} 
-                  value={tempStartDate} 
-                  onChange={e => setTempStartDate(e.target.value)} 
-                />
-              </div>
-              <div className="form-group">
-                <label style={{ fontSize: '.7rem', fontWeight: 'bold', color: 'var(--admin-text-muted)' }}>ĐẾN NGÀY:</label>
-                <input 
-                  type="date" 
-                  className="form-input" 
-                  style={{ width: '100%', height: 32, fontSize: '.8rem', fontFamily: 'monospace' }} 
-                  value={tempEndDate} 
-                  onChange={e => setTempEndDate(e.target.value)} 
-                />
-              </div>
-            </div>
-            <div className="modal-footer" style={{ display: 'flex', gap: 8 }}>
-              <button className="btn-industrial" style={{ flex: 1 }} onClick={() => setDateModalOpen(false)}>HỦY</button>
-              <button className="btn-industrial btn-primary" style={{ flex: 1 }} onClick={() => {
-                setStartDate(tempStartDate);
-                setEndDate(tempEndDate);
-                setTimeRange('custom');
-                setDateModalOpen(false);
-              }}>ÁP DỤNG</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ACK Modal */}
       {ackModalOpen && (
@@ -725,7 +788,7 @@ export default function AlertsHistoryPage() {
  * Panel chi tiết một cảnh báo: hiển thị ảnh/video bằng chứng,
  * thông tin cảnh báo và timeline lịch sử xử lý.
  */
-function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, onSendCentral, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onRefresh?: () => void, onSendCentral: () => void, devices?: any[] }) {
+function AlertDetailView({ data, onClose, onAck, onCloseAlert, onSendCentral, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onSendCentral: () => void, devices?: any[] }) {
   const isAlarm = data.level === 'alarm';
   const accentColor = isAlarm ? '#EF4444' : '#F59E0B';
   const levelText = isAlarm ? 'BÁO ĐỘNG' : 'CẢNH BÁO';
@@ -793,12 +856,7 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, onSend
         <span style={{ fontWeight: 900, fontSize: '0.85rem', color: 'var(--admin-text)', letterSpacing: '1px', textTransform: 'uppercase' }}>{levelText} CHI TIẾT</span>
         <span style={{ fontFamily: 'var(--admin-font-mono)', fontSize: '0.65rem', opacity: 0.5, flex: 1, textAlign: 'right', paddingRight: 12 }}>ID: {data.id.slice(0, 8)}</span>
         
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onRefresh} title="Cập nhật">
-            <RefreshCw size={12} />
-          </button>
-          <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onClose}>✕</button>
-        </div>
+        <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onClose}>✕</button>
       </div>
 
       <div className="ah-detail-scroll">

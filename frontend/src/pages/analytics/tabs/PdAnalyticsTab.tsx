@@ -6,8 +6,20 @@ import { authService } from '@/services/AuthService';
 import { stationApi, Device } from '@/services/StationApiService';
 import { createRealtimeHub } from '@/services/realtime.service';
 import { RotateCw, Zap } from 'lucide-react';
+import ToolbarSelect from '@/components/ui/ToolbarSelect';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-export default function PdAnalyticsTab() {
+interface ExportFns { xlsx: () => void; csv: () => void; pdf: () => void; }
+
+interface PdAnalyticsTabProps {
+  fromDate: string;
+  toDate: string;
+  registerExport?: (fns: ExportFns | null) => void;
+}
+
+export default function PdAnalyticsTab({ fromDate, toDate, registerExport }: PdAnalyticsTabProps) {
   const [cameras, setCameras] = useState<Device[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,7 +82,13 @@ export default function PdAnalyticsTab() {
 
   const loadHistory = useCallback(async (camId: string, currentBoundaries: any[]) => {
     try {
-      const params = new URLSearchParams({ deviceId: camId, type: 'partial_discharge', limit: '40' });
+      const params = new URLSearchParams({
+        deviceId: camId,
+        type: 'partial_discharge',
+        limit: '200',
+      });
+      if (fromDate) params.set('from', `${fromDate}T00:00:00`);
+      if (toDate) params.set('to', `${toDate}T23:59:59`);
       const data = await stationApi.getDetections(params.toString());
       // Map to consistent format
       setEventHistory(data.reverse().map((d: any) => {
@@ -85,7 +103,7 @@ export default function PdAnalyticsTab() {
     } catch {
       setEventHistory([]);
     }
-  }, [getEventLevel]);
+  }, [getEventLevel, fromDate, toDate]);
 
   useEffect(() => {
     if (!selectedCamera) return;
@@ -224,6 +242,36 @@ export default function PdAnalyticsTab() {
     return () => chartInst.current?.destroy();
   }, [eventHistory]);
 
+  useEffect(() => {
+    if (!registerExport || cameras.length === 0) return;
+    const headers = ['Thoi gian', 'Muc (dB)', 'Cap do'];
+    const fname = `Phan_tich_phong_dien_${new Date().toISOString().slice(0, 10)}`;
+    const getRows = () => eventHistory.map(h => ({ 'Thoi gian': h.time, 'Muc (dB)': String(Number(h.db ?? 0).toFixed(1)), 'Cap do': h.level ?? '' }));
+    const xlsx = () => {
+      const rows = getRows();
+      const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Thoi gian': '', 'Muc (dB)': '', 'Cap do': '' }]);
+      ws['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Phong dien');
+      XLSX.writeFile(wb, `${fname}.xlsx`);
+    };
+    const csv = () => {
+      const rows = getRows();
+      const text = [headers.join(','), ...rows.map(r => headers.map(h => `"${(r[h as keyof typeof r] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' }));
+      a.download = `${fname}.csv`; a.click();
+    };
+    const pdf = () => {
+      const rows = getRows();
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      doc.setFontSize(11); doc.text('DU LIEU PHONG DIEN CUC BO', 40, 28);
+      autoTable(doc, { startY: 42, head: [headers], body: rows.map(r => headers.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 28, left: 30, right: 30 } });
+      doc.save(`${fname}.pdf`);
+    };
+    registerExport({ xlsx, csv, pdf });
+    return () => registerExport(null);
+  }, [cameras, eventHistory, registerExport]);
+
   if (loading) return (
     <div style={{ display: 'flex', flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', gap: 10, background: 'var(--admin-card-bg)', borderRadius: 0, border: '1px solid var(--admin-border)' }}>
       <RotateCw size={18} className="animate-spin" color="var(--admin-accent)" />
@@ -233,18 +281,20 @@ export default function PdAnalyticsTab() {
   );
 
   return (
-    <div style={{ display: 'flex', height: '100%', gap: 12, overflow: 'hidden' }}>
-      
+    <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'stretch', gap: 12, height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* SIDEBAR */}
-      <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0, height: '100%' }}>
+      <div style={{ width: 340, minWidth: 340, display: 'flex', flexDirection: 'column', gap: 12, flexShrink: 0, minHeight: 0 }}>
         {/* Stream Card */}
         <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 0, overflow: 'hidden', flexShrink: 0 }}>
           <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--admin-layer-1)' }}>
             <span style={{ fontSize: '.6rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>LUỒNG PD TRỰC TIẾP</span>
             {cameras.length > 0 && (
-              <select value={selectedCamera?.id || ''} onChange={(e) => setSelectedCamera(cameras.find(c => c.id === e.target.value) || null)} style={{ background: 'transparent', border: 'none', color: 'var(--admin-accent)', fontSize: '.65rem', cursor: 'pointer', fontWeight: 700, outline: 'none' }}>
-                {cameras.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <ToolbarSelect
+                value={selectedCamera?.id || ''}
+                onChange={(id) => setSelectedCamera(cameras.find(c => c.id === id) || null)}
+                options={cameras.map(c => ({ value: c.id, label: c.name }))}
+                width={160}
+              />
             )}
           </div>
           <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative', overflow: 'hidden' }}>
@@ -351,7 +401,7 @@ export default function PdAnalyticsTab() {
                 </div>
               </div>
               <div style={{ background: 'rgba(0,0,0,0.1)', padding: '8px', borderRadius: 4, border: '1px solid var(--admin-border)' }}>
-                <div style={{ fontSize: '9px', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>Số lần vượt</div>
+                <div style={{ fontSize: '9px', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>Số cảnh báo</div>
                 <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--admin-warning)' }}>
                   {eventHistory.length}
                 </div>
@@ -362,13 +412,13 @@ export default function PdAnalyticsTab() {
       </div>
 
       {/* MAIN AREA */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, minWidth: 0 }}>
         
         {/* Chart Card */}
         <div style={{ flex: 1, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 0, padding: '20px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
           <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div style={{ fontSize: '.62rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px', textAlign: 'center' }}>
-              PHÂN TÍCH TẦN SUẤT VÀ CƯỜNG ĐỘ PHÓNG ĐIỆN VƯỢT NGƯỠNG
+              PHÂN TÍCH TẦN SUẤT VÀ CƯỜNG ĐỘ PHÓNG ĐIỆN
             </div>
           </div>
           <div style={{ flex: 1, position: 'relative' }}>
@@ -379,15 +429,15 @@ export default function PdAnalyticsTab() {
         {/* Status Card */}
         <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 0, padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>CHẾ ĐỘ PHÂN TÍCH</div>
+            <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>LỊCH SỬ CẢNH BÁO</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-              <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--admin-text)' }}>GHI LẠI SỰ KIỆN VƯỢT NGƯỠNG</span>
+              <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--admin-text)' }}>GHI LẠI CÁC LẦN CẢNH BÁO</span>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--admin-accent)', animation: 'pulse 2s infinite' }} />
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>TRẠNG THÁI GHI</div>
-            <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--admin-accent)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>Chỉ ghi khi có phóng điện</div>
+            <div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--admin-accent)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>Chỉ ghi khi có cảnh báo</div>
           </div>
         </div>
       </div>

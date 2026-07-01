@@ -1,8 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { stationApi, MaintenanceTask, Device } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore } from '@/store';
-import { Edit2 } from 'lucide-react';
+import { Edit2, Download, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { authService } from '@/services/AuthService';
+import DateRangePicker from '@/components/ui/DateRangePicker';
+import ToolbarSelect from '@/components/ui/ToolbarSelect';
+import { createPortal } from 'react-dom';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const DEFAULT_CHECKLIST: Record<string, string[]> = {
   inspection: ['Kiểm tra tổng quan', 'Đo nhiệt độ', 'Kiểm tra cách điện', 'Ghi nhật ký'],
@@ -52,6 +58,9 @@ export default function MaintenancePage() {
   const [stationId, setStationId] = useState('');
   const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
   const [filter, setFilter] = useState('all');
+  const [filterType, setFilterType] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const canManageMaintenance = useMemo(() => {
     // Trạm con không được phép tự tạo/sửa/xóa lịch bảo trì (chỉ đồng bộ từ trạm tổng)
@@ -150,8 +159,22 @@ export default function MaintenancePage() {
     } catch (e: any) { alert(`Lỗi: ${e.message}`); }
   };
 
-  // Lọc danh sách theo tab trạng thái đang chọn
-  const filteredTasks = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
+  const fmtTitle = (title: string) => {
+    const m = title.match(/\[([^\]]+)\]/);
+    return m ? m[1] : title;
+  };
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(t => {
+      if (filter !== 'all' && t.status !== filter) return false;
+      if (filterType && t.type !== filterType) return false;
+      if (startDate) {
+        const d = t.scheduledDate?.substring(0, 10) ?? '';
+        if (d < startDate || d > (endDate || startDate)) return false;
+      }
+      return true;
+    });
+  }, [tasks, filter, filterType, startDate, endDate]);
 
   /** Đếm số công việc theo từng trạng thái để hiển thị badge trên tab lọc. */
   const counts = useMemo(() => {
@@ -159,6 +182,58 @@ export default function MaintenancePage() {
     tasks.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
     return c;
   }, [tasks]);
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node) &&
+          exportBtnRef.current && !exportBtnRef.current.contains(e.target as Node))
+        setExportOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [exportOpen]);
+
+  const openExportMenu = () => {
+    const r = exportBtnRef.current?.getBoundingClientRect();
+    if (r) setMenuPos({ top: r.bottom + 4, left: r.left });
+    setExportOpen(o => !o);
+  };
+
+  const EXPORT_HEADERS = ['Tiêu đề', 'Thiết bị', 'Loại', 'Ngày dự kiến', 'Giao cho', 'Trạng thái'];
+  const exportRows = filteredTasks.map(t => ({
+    'Tiêu đề': fmtTitle(t.title),
+    'Thiết bị': t.deviceName || '—',
+    'Loại': TYPE_LABELS[t.type] || t.type,
+    'Ngày dự kiến': t.scheduledDate?.substring(0, 10) || '',
+    'Giao cho': t.assignedTo || '—',
+    'Trạng thái': STATUS_LABELS[t.status] || t.status,
+  }));
+  const fname = `Lich_bao_tri_thiet_bi_${new Date().toISOString().slice(0, 10)}`;
+
+  const doExportXlsx = () => {
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = [{ wch: 40 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bao tri');
+    XLSX.writeFile(wb, `${fname}.xlsx`);
+  };
+  const doExportCsv = () => {
+    const text = [EXPORT_HEADERS.join(','), ...exportRows.map(r => EXPORT_HEADERS.map(h => `"${String(r[h as keyof typeof r] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `${fname}.csv`; a.click();
+  };
+  const doExportPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    doc.setFontSize(12); doc.text('LICH BAO TRI THIET BI', 40, 30);
+    autoTable(doc, { startY: 44, head: [EXPORT_HEADERS], body: exportRows.map(r => EXPORT_HEADERS.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 8 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 30, left: 30, right: 30 } });
+    doc.save(`${fname}.pdf`);
+  };
 
   return (
     <div className="admin-page-container">
@@ -170,29 +245,73 @@ export default function MaintenancePage() {
         </div>
 
         <div className="page-toolbar-group">
-          {/* Filter tabs */}
-          <div className="page-toolbar-cell" style={{ gap: 0, padding: '0 4px', height: 28 }}>
-            <span className="page-cell-label" style={{ marginRight: 6 }}>LỌC:</span>
-            {FILTERS.map(({ f, lbl }) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                style={{
-                  background: filter === f ? 'var(--admin-accent)' : 'transparent',
-                  border: 'none',
-                  borderRadius: 3,
-                  color: filter === f ? 'var(--admin-text-on-accent)' : 'var(--admin-text-muted)',
-                  fontWeight: 700,
-                  fontSize: '.65rem',
-                  padding: '2px 8px',
-                  cursor: 'pointer',
-                  height: 20,
-                  whiteSpace: 'nowrap',
-                }}
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          />
+
+          <div className="page-toolbar-cell" style={{ height: 28 }}>
+            <span className="page-cell-label">LOẠI:</span>
+            <ToolbarSelect
+              value={filterType}
+              onChange={setFilterType}
+              options={[
+                { value: '', label: 'Tất cả' },
+                { value: 'inspection', label: 'Kiểm tra' },
+                { value: 'repair', label: 'Sửa chữa' },
+                { value: 'cleaning', label: 'Vệ sinh' },
+                { value: 'calibration', label: 'Hiệu chỉnh' },
+                { value: 'other', label: 'Khác' },
+              ]}
+              width={110}
+            />
+          </div>
+
+          <div className="page-toolbar-cell" style={{ height: 28 }}>
+            <span className="page-cell-label">TRẠNG THÁI:</span>
+            <ToolbarSelect
+              value={filter}
+              onChange={setFilter}
+              options={FILTERS.map(({ f, lbl }) => ({
+                value: f,
+                label: counts[f] ? `${lbl} (${counts[f]})` : lbl,
+              }))}
+              width={130}
+            />
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button
+              ref={exportBtnRef}
+              className="btn-industrial btn-primary"
+              style={{ height: 28, padding: '0 10px', fontSize: '.72rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              onClick={openExportMenu}
+              disabled={filteredTasks.length === 0}
+            >
+              <Download size={13} /> XUẤT <ChevronDown size={12} />
+            </button>
+            {exportOpen && createPortal(
+              <div
+                ref={exportMenuRef}
+                style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, minWidth: 160, zIndex: 99999, background: 'var(--admin-panel)', border: '1px solid var(--admin-border)', boxShadow: '0 14px 30px rgba(0,0,0,.45)' }}
               >
-                {lbl}{counts[f] ? ` (${counts[f]})` : ''}
-              </button>
-            ))}
+                {[
+                  { label: 'Xuất XLSX', icon: <FileSpreadsheet size={14} />, fn: doExportXlsx },
+                  { label: 'Xuất CSV',  icon: <FileText size={14} />,        fn: doExportCsv  },
+                  { label: 'Xuất PDF',  icon: <FileText size={14} />,        fn: doExportPdf  },
+                ].map(({ label, icon, fn }) => (
+                  <button key={label} type="button" onClick={() => { setExportOpen(false); fn(); }}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,.06)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>,
+              document.body
+            )}
           </div>
 
           {canManageMaintenance && (
@@ -204,28 +323,20 @@ export default function MaintenancePage() {
               + TẠO LỊCH MỚI
             </button>
           )}
-
-          <button
-            className="btn-industrial"
-            style={{ height: 32, padding: '0 10px', fontSize: '.75rem', fontWeight: 700 }}
-            onClick={() => loadData(stationId)}
-          >
-            ↺ LÀM MỚI
-          </button>
         </div>
       </div>
 
       {/* Table */}
-      <div className="admin-card" style={{ padding: 0, overflow: 'hidden', marginTop: 12 }}>
-        <table className="data-table">
+      <div className="admin-card" style={{ padding: 0, overflow: 'hidden', flex: 1 }}>
+        <table className="data-table" style={{ tableLayout: 'fixed' }}>
           <thead>
             <tr>
-              <th>TIÊU ĐỀ</th>
-              <th>THIẾT BỊ</th>
-              <th>LOẠI</th>
-              <th>NGÀY DỰ KIẾN</th>
-              <th>GIAO CHO</th>
-              <th>TRẠNG THÁI</th>
+              <th style={{ width: '35%' }}>TIÊU ĐỀ</th>
+              <th style={{ width: '18%' }}>THIẾT BỊ</th>
+              <th style={{ width: '10%' }}>LOẠI</th>
+              <th style={{ width: '12%' }}>NGÀY DỰ KIẾN</th>
+              <th style={{ width: '13%' }}>GIAO CHO</th>
+              <th style={{ width: '12%' }}>TRẠNG THÁI</th>
               {canManageMaintenance && <th style={{ width: 60 }}>SỬA</th>}
             </tr>
           </thead>
@@ -239,11 +350,11 @@ export default function MaintenancePage() {
             ) : (
               filteredTasks.map(t => (
                 <tr key={t.id}>
-                  <td style={{ fontWeight: 600 }}>{t.title}</td>
-                  <td>{t.deviceName || '—'}</td>
+                  <td style={{ fontWeight: 600, maxWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.title}>{fmtTitle(t.title)}</td>
+                  <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.deviceName || '—'}</td>
                   <td>{TYPE_LABELS[t.type] || t.type}</td>
                   <td>{t.scheduledDate?.substring(0, 10)}</td>
-                  <td>{t.assignedTo || '—'}</td>
+                  <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.assignedTo || '—'}</td>
                   <td>
                     <span className="tag" style={{ color: STATUS_COLORS[t.status], background: `${STATUS_COLORS[t.status]}18`, border: `1px solid ${STATUS_COLORS[t.status]}40` }}>
                       {STATUS_LABELS[t.status]}

@@ -1951,10 +1951,34 @@ html, body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--admin-layer-1);
   vertical-align: middle;
+  line-height: 1.35;
 }
 
 .data-table tr:hover td {
   background: var(--admin-hover);
+}
+
+.device-table-cell {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+.device-table-cell--ip {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+
+.device-table-cell--status,
+.device-table-cell--date,
+.device-table-cell--actions {
+  justify-content: center;
+}
+
+.device-table-cell--actions {
+  width: 100%;
 }
 
 .tag {
@@ -4194,18 +4218,20 @@ input:checked+.slider-industrial:before {
   background: var(--admin-panel);
   border: none;
   border-right: 2px solid var(--admin-border);
-  padding: 0 40px 0 25px;
+  padding: 0 40px 0 18px;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   box-sizing: border-box;
   flex-shrink: 0;
   position: relative;
+  top: 2px;
   /* Ensure it looks like part of the structure */
   border-radius: 0;
   box-shadow: none;
-  height: 100%;
+  height: calc(100% - 2px);
   margin-left: 0;
+  overflow: hidden;
 }
 
 .page-title-cell::before {
@@ -4226,8 +4252,11 @@ input:checked+.slider-industrial:before {
   color: var(--admin-text);
   display: flex;
   align-items: center;
+  height: 100%;
   gap: 10px;
   white-space: nowrap;
+  line-height: 1;
+  transform: translateY(0);
   text-shadow: none;
 }
 
@@ -4239,7 +4268,7 @@ input:checked+.slider-industrial:before {
   flex-shrink: 1;
   min-width: 0;
   margin-left: auto; /* Push to the right */
-  padding-left: 60px; /* Force extra space */
+  padding-left: 0;
 }
 .page-toolbar-cell {
   background: rgba(255, 255, 255, 0.03);
@@ -4294,15 +4323,20 @@ input:checked+.slider-industrial:before {
     gap: 3px;
   }
   .page-title-cell {
-    padding: 0 20px 0 12px;
+    padding: 0 20px 0 10px;
     height: 38px;
     gap: 8px;
     border-radius: 0;
     border-left-width: 6px;
+    top: 1px;
+    height: calc(100% - 1px);
+    align-items: stretch;
   }
   .page-title-cell h2 {
     font-size: 1rem;
     letter-spacing: 1px;
+    transform: translateY(0);
+    height: 100%;
   }
   .page-toolbar-group {
     gap: 3px;
@@ -4539,23 +4573,31 @@ input:checked+.slider-industrial:before {
 
 /* Removed logoBreath animation to keep it static */
 
+.header-title-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
 .header-title-main {
   font-weight: 900;
-  font-size: 1.2rem;
+  font-size: 0.82rem;
   color: var(--admin-text);
   letter-spacing: 0px;
   text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  gap: 16px;
 }
 
 .header-title-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   color: var(--admin-accent);
   font-weight: 900;
   font-size: 1.15rem;
   letter-spacing: 1px;
-  padding: 5px 20px;
+  padding: 6px 18px 5px;
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
   border-left: 5px solid var(--admin-accent);

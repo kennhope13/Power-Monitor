@@ -9,7 +9,7 @@ interface CameraLiveViewerProps {
 }
 
 export default function CameraLiveViewer({ cameraSrc = '', headerAddon, hasAlert = false }: CameraLiveViewerProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const navigate = useNavigate();
@@ -49,7 +49,7 @@ export default function CameraLiveViewer({ cameraSrc = '', headerAddon, hasAlert
         pointerEvents: isHovered || isCollapsed ? 'auto' : 'none',
       }}>
         {/* Trái: CAMERA label + select chọn camera */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, minWidth: 0, flex: 1 }}>
           <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#fff', flexShrink: 0 }}>CAMERA</span>
           {headerAddon}
         </div>

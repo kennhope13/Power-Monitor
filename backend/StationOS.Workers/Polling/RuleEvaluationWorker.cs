@@ -39,9 +39,9 @@ public class RuleEvaluationWorker : BackgroundService
 
     private const int CheckIntervalMs = 5000; // 5 giây / lần check
 
-    // In-memory state: confirmCount và cooldownUntil per ruleId
-    private readonly Dictionary<Guid, int>      _confirmCounts  = new();
-    private readonly Dictionary<Guid, DateTime> _cooldownUntil  = new();
+    // In-memory state: confirmCount và cooldownUntil per stateKey (ruleId + deviceId)
+    private readonly Dictionary<string, int>      _confirmCounts  = new();
+    private readonly Dictionary<string, DateTime> _cooldownUntil  = new();
 
     // Global confirm threshold từ Settings (camera_filter_time_s / 5s)
     private int _globalConfirmReadings = 2; // mặc định ~10 giây
@@ -166,7 +166,7 @@ public class RuleEvaluationWorker : BackgroundService
                 Actions = $"[{{\"type\":\"alert\",\"level\":\"{level}\"}}]"
             };
 
-            await HandleAlertActionAsync(services, db, virtualRule, b.Name, ">=", 
+            await HandleAlertActionAsync(services, db, virtualRule, reading, b.Name, ">=", 
                                          alarmTriggered ? alarmLimit : warnLimit, 
                                          (alarmTriggered ? alarmLimit : warnLimit) - 2, 
                                          5, 1, currentValue, 
@@ -199,39 +199,72 @@ public class RuleEvaluationWorker : BackgroundService
         // dùng giá trị global từ setting camera_filter_time_s
         var confirmReadings = confirmReadingsFromRule > 1 ? confirmReadingsFromRule : _globalConfirmReadings;
 
-        if (!latestReadings.TryGetValue(pointId, out var reading)) return;
-        if (reading.Value == null) return;
+        // Tìm tất cả các readings tương ứng với pointId này
+        var targetReadings = new List<SensorReading>();
+        if (rule.DeviceId.HasValue && rule.DeviceId.Value != Guid.Empty)
+        {
+            var key = $"{rule.DeviceId.Value}_{pointId}".ToLower();
+            if (latestReadings.TryGetValue(key, out var r))
+            {
+                targetReadings.Add(r);
+            }
+            else if ((latestReadings.TryGetValue(pointId, out r) || latestReadings.TryGetValue(pointId.ToLower(), out r)) && 
+                     (r.DeviceId == rule.DeviceId.Value || r.DeviceId == Guid.Empty))
+            {
+                targetReadings.Add(r);
+            }
+        }
+        else
+        {
+            // Rule toàn cục: quét tất cả readings có PointId trùng khớp
+            var suffix = $"_{pointId}".ToLower();
+            foreach (var kvp in latestReadings)
+            {
+                if (kvp.Key.Equals(pointId, StringComparison.OrdinalIgnoreCase) || kvp.Key.EndsWith(suffix))
+                {
+                    targetReadings.Add(kvp.Value);
+                }
+            }
+        }
 
-        var currentValue = reading.Value.Value;
+        foreach (var reading in targetReadings)
+        {
+            if (reading.Value == null) continue;
 
-        // Dual threshold: alarm > pre_alarm. Xác định level thực tế bị vượt.
-        bool alarmTriggered   = RuleEvaluator.Evaluate(currentValue, op, threshold);
-        bool warningTriggered = warningValue.HasValue &&
-                                RuleEvaluator.Evaluate(currentValue, op, warningValue.Value) &&
-                                !alarmTriggered;
+            var currentValue = reading.Value.Value;
 
-        string? levelOverride = alarmTriggered ? "alarm" : (warningTriggered ? "warning" : null);
-        double  activeThreshold = (warningTriggered && warningValue.HasValue) ? warningValue.Value : threshold;
-        bool    triggered       = alarmTriggered || warningTriggered;
+            // Dual threshold: alarm > pre_alarm. Xác định level thực tế bị vượt.
+            bool alarmTriggered   = RuleEvaluator.Evaluate(currentValue, op, threshold);
+            bool warningTriggered = warningValue.HasValue &&
+                                    RuleEvaluator.Evaluate(currentValue, op, warningValue.Value) &&
+                                    !alarmTriggered;
 
-        if (hasAlert)
-            await HandleAlertActionAsync(services, db, rule, pointId, op, activeThreshold, clearValue,
-                                         cooldownMin, confirmReadings, currentValue, triggered, levelOverride, ct);
+            string? levelOverride = alarmTriggered ? "alarm" : (warningTriggered ? "warning" : null);
+            double  activeThreshold = (warningTriggered && warningValue.HasValue) ? warningValue.Value : threshold;
+            bool    triggered       = alarmTriggered || warningTriggered;
 
-        if (hasMaint && triggered)
-            await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
+            if (hasAlert)
+                await HandleAlertActionAsync(services, db, rule, reading, pointId, op, activeThreshold, clearValue,
+                                             cooldownMin, confirmReadings, currentValue, triggered, levelOverride, ct);
+
+            if (hasMaint && triggered)
+                await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
+        }
     }
 
     // ── Xử lý action type=alert ────────────────────────────────────────────
     private async Task HandleAlertActionAsync(
-        IServiceProvider services, AppDbContext db, Rule rule,
+        IServiceProvider services, AppDbContext db, Rule rule, SensorReading reading,
         string pointId, string op, double threshold, double clearValue,
         int cooldownMin, int confirmReadings,
         double currentValue, bool triggered, string? levelOverride, CancellationToken ct)
     {
-        // ── Lấy alert đang open cho rule này ──────────────────
+        var deviceId = reading.DeviceId;
+        var stateKey = $"{rule.Id}_{deviceId}".ToLower();
+
+        // ── Lấy alert đang open cho rule này và thiết bị này ──────────────────
         var openAlert = await db.Alerts
-            .Where(a => a.RuleId == rule.Id && a.Status == "open")
+            .Where(a => a.RuleId == rule.Id && a.DeviceId == deviceId && a.Status == "open")
             .FirstOrDefaultAsync(ct);
 
         // ── Auto-close nếu giá trị xuống dưới clearValue ──────
@@ -249,38 +282,38 @@ public class RuleEvaluationWorker : BackgroundService
                     Note    = $"Tự động đóng: {pointId} = {currentValue:F1} (dưới ngưỡng phục hồi {clearValue:F1})",
                 });
                 await db.SaveChangesAsync(ct);
-                _cooldownUntil[rule.Id] = DateTime.UtcNow.AddMinutes(cooldownMin);
-                _confirmCounts[rule.Id] = 0;
-                _logger.LogInformation("[Rules] Auto-close alert {id}: {pt}={val}", openAlert.Id, pointId, currentValue);
+                _cooldownUntil[stateKey] = DateTime.UtcNow.AddMinutes(cooldownMin);
+                _confirmCounts[stateKey] = 0;
+                _logger.LogInformation("[Rules] Auto-close alert {id} for device {devId}: {pt}={val}", openAlert.Id, deviceId, pointId, currentValue);
             }
             return;
         }
 
-        if (!triggered) { _confirmCounts[rule.Id] = 0; return; }
+        if (!triggered) { _confirmCounts[stateKey] = 0; return; }
         if (openAlert != null) return;
 
-        if (_cooldownUntil.TryGetValue(rule.Id, out var until) && DateTime.UtcNow < until)
+        if (_cooldownUntil.TryGetValue(stateKey, out var until) && DateTime.UtcNow < until)
         {
-            _logger.LogDebug("[Rules] Rule {id} đang trong cooldown tới {until}", rule.Id, until);
+            _logger.LogDebug("[Rules] Rule {id} for device {devId} đang trong cooldown tới {until}", rule.Id, deviceId, until);
             return;
         }
 
-        _confirmCounts.TryGetValue(rule.Id, out var count);
+        _confirmCounts.TryGetValue(stateKey, out var count);
         count++;
-        _confirmCounts[rule.Id] = count;
+        _confirmCounts[stateKey] = count;
         if (count < confirmReadings)
         {
-            _logger.LogDebug("[Rules] Rule {id}: {count}/{need} readings", rule.Id, count, confirmReadings);
+            _logger.LogDebug("[Rules] Rule {id} for device {devId}: {count}/{need} readings", rule.Id, deviceId, count, confirmReadings);
             return;
         }
 
-        _confirmCounts[rule.Id] = 0;
+        _confirmCounts[stateKey] = 0;
 
         var level = levelOverride ?? RuleEvaluator.ParseAlertLevel(rule.Actions);
         var alert = new Alert
         {
             StationId   = rule.StationId,
-            DeviceId    = rule.DeviceId,
+            DeviceId    = deviceId,
             RuleId      = rule.Id,
             Source      = "rule_engine",
             Level       = level,
@@ -294,7 +327,7 @@ public class RuleEvaluationWorker : BackgroundService
         db.RuleTriggerLogs.Add(new RuleTriggerLog
         {
             RuleId            = rule.Id,
-            DeviceId          = rule.DeviceId,
+            DeviceId          = deviceId,
             StationId         = rule.StationId,
             ConditionSnapshot = rule.Condition,
             ValueAtTrigger    = currentValue,

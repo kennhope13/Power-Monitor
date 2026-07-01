@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // ReportGeneratorService — Tạo PDF dùng QuestPDF
 // Supports: daily | monthly | event
 // ============================================================
@@ -179,6 +179,10 @@ public class ReportGeneratorService
                                 ["temp_3"]         = "Nhiệt độ Pha 3",
                                 ["phong_dien"]     = "Phóng điện PD",
                                 ["pd"]             = "Phóng điện PD",
+                                ["nhiet_do_pha_2_1"] = "Nhiệt độ Pha 1 (Bộ 2)",
+                                ["nhiet_do_pha_2_2"] = "Nhiệt độ Pha 2 (Bộ 2)",
+                                ["nhiet_do_pha_2_3"] = "Nhiệt độ Pha 3 (Bộ 2)",
+                                ["phong_dien_2"]     = "Phóng điện PD 2",
                             };
 
                             bool alt = false;

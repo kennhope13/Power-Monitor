@@ -1,15 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { RotateCw } from 'lucide-react';
 import Chart from 'chart.js/auto';
 import { getCSSColor } from '@/utils/theme-colors';
 import { stationApi } from '@/services/StationApiService';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const SC = { good: '#10B981', warning: '#F59E0B', danger: '#EF4444' } as const;
-type Range = '7d' | '30d' | '90d';
-const RANGES: { label: string; value: Range; days: number; interval: number }[] = [
-  { label: '7 ngày', value: '7d', days: 7, interval: 60 },
-  { label: '30 ngày', value: '30d', days: 30, interval: 240 },
-  { label: '90 ngày', value: '90d', days: 90, interval: 720 },
-];
 
 interface HistoryPoint {
   time: number; // timestamp ms
@@ -20,10 +19,9 @@ interface TempChartProps {
   t1: HistoryPoint[];
   t2: HistoryPoint[];
   t3: HistoryPoint[];
-  range: Range;
 }
 
-function TempChart({ t1, t2, t3, range }: TempChartProps) {
+function TempChart({ t1, t2, t3 }: TempChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const inst = useRef<Chart | null>(null);
 
@@ -63,17 +61,16 @@ function TempChart({ t1, t2, t3, range }: TempChartProps) {
     });
 
     return () => inst.current?.destroy();
-  }, [t1, t2, t3, range]);
+  }, [t1, t2, t3]);
 
   return <canvas ref={ref} style={{ width: '100%', height: '100%' }} />;
 }
 
 interface PdChartProps {
   pd: HistoryPoint[];
-  range: Range;
 }
 
-function PdChart({ pd, range }: PdChartProps) {
+function PdChart({ pd }: PdChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const inst = useRef<Chart | null>(null);
 
@@ -109,7 +106,7 @@ function PdChart({ pd, range }: PdChartProps) {
     });
 
     return () => inst.current?.destroy();
-  }, [pd, range]);
+  }, [pd]);
 
   return <canvas ref={ref} style={{ width: '100%', height: '100%' }} />;
 }
@@ -126,15 +123,26 @@ interface CabinetSummary {
   pdLevel: 'low' | 'medium' | 'high';
   healthScore: number;
   healthStatus: 'good' | 'warning' | 'danger';
+  alarmCount: number;
+  warningCount: number;
 }
 
-export default function CabinetAnalyticsTab() {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [range, setRange] = useState<Range>('7d');
+interface ExportFns { xlsx: () => void; csv: () => void; pdf: () => void; }
+
+interface CabinetAnalyticsTabProps {
+  fromDate: string;
+  toDate: string;
+  registerExport?: (fns: ExportFns | null) => void;
+}
+
+export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }: CabinetAnalyticsTabProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cabParam = searchParams.get('cabinet');
+  const [selectedId, setSelectedId] = useState<string | null>(cabParam);
   
   const [devices, setDevices] = useState<any[]>([]);
   const [latestPoints, setLatestPoints] = useState<any[]>([]);
-  const [healthScores, setHealthScores] = useState<Record<string, { score: number; risk: string }>>({});
+  const [healthScores, setHealthScores] = useState<Record<string, { score: number; risk: string; alarmCount?: number; warningCount?: number }>>({});
   
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -143,6 +151,70 @@ export default function CabinetAnalyticsTab() {
   const [t2Hist, setT2Hist] = useState<HistoryPoint[]>([]);
   const [t3Hist, setT3Hist] = useState<HistoryPoint[]>([]);
   const [pdHist, setPdHist] = useState<HistoryPoint[]>([]);
+
+  const buildExportRows = () => {
+    const fmt = (ms: number) => new Date(ms).toLocaleString('sv').replace('T', ' ');
+    const map1 = new Map(t1Hist.map(p => [p.time, p.value]));
+    const map2 = new Map(t2Hist.map(p => [p.time, p.value]));
+    const map3 = new Map(t3Hist.map(p => [p.time, p.value]));
+    const mapPd = new Map(pdHist.map(p => [p.time, p.value]));
+    const times = [...new Set([...map1.keys(), ...map2.keys(), ...map3.keys(), ...mapPd.keys()])].sort();
+    return times.map(ts => ({
+      'Thoi gian': fmt(ts),
+      'T1 (oC)': map1.has(ts) ? Number(map1.get(ts)).toFixed(1) : '',
+      'T2 (oC)': map2.has(ts) ? Number(map2.get(ts)).toFixed(1) : '',
+      'T3 (oC)': map3.has(ts) ? Number(map3.get(ts)).toFixed(1) : '',
+      'PD (xung)': mapPd.has(ts) ? String(mapPd.get(ts)) : '',
+    }));
+  };
+
+  const CAB_HEADERS = ['Thoi gian', 'T1 (oC)', 'T2 (oC)', 'T3 (oC)', 'PD (xung)'];
+
+  useEffect(() => {
+    if (!registerExport || !selectedId) { registerExport?.(null); return; }
+    const fname = `Phan_tich_tu_dien_${new Date().toISOString().slice(0, 10)}`;
+    const xlsx = () => {
+      const rows = buildExportRows();
+      const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+      ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Tu dien');
+      XLSX.writeFile(wb, `${fname}.xlsx`);
+    };
+    const csv = () => {
+      const rows = buildExportRows();
+      const text = [CAB_HEADERS.join(','), ...rows.map(r => CAB_HEADERS.map(h => `"${(r[h as keyof typeof r] ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' }));
+      a.download = `${fname}.csv`; a.click();
+    };
+    const pdf = () => {
+      const rows = buildExportRows();
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      doc.setFontSize(11); doc.text('PHAN TICH TU DIEN', 40, 28);
+      autoTable(doc, { startY: 42, head: [CAB_HEADERS], body: rows.map(r => CAB_HEADERS.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 8 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 28, left: 30, right: 30 } });
+      doc.save(`${fname}.pdf`);
+    };
+    registerExport({ xlsx, csv, pdf });
+    return () => registerExport(null);
+  }, [selectedId, t1Hist, t2Hist, t3Hist, pdHist, registerExport]);
+
+  // Sync selectedId with URL parameter if it changes
+  useEffect(() => {
+    if (cabParam) {
+      setSelectedId(cabParam);
+    }
+  }, [cabParam]);
+
+  // Sync URL parameter if selectedId changes
+  const handleSelectId = (id: string | null) => {
+    setSelectedId(id);
+    if (id) {
+      setSearchParams({ cabinet: id });
+    } else {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('cabinet');
+      setSearchParams(nextParams);
+    }
+  };
 
   // Tự động tải danh sách thiết bị tủ điện từ Backend
   useEffect(() => {
@@ -164,17 +236,22 @@ export default function CabinetAnalyticsTab() {
         setDevices(cabinetDevs);
         setLatestPoints(points);
         
-        const scoreMap: Record<string, { score: number; risk: string }> = {};
+        const scoreMap: Record<string, { score: number; risk: string; alarmCount?: number; warningCount?: number }> = {};
         scores.forEach(s => {
           scoreMap[s.deviceId.toLowerCase()] = {
             score: s.score,
-            risk: s.risk || (s.score >= 80 ? 'good' : s.score >= 50 ? 'warning' : 'danger')
+            risk: s.risk || (s.score >= 80 ? 'good' : s.score >= 50 ? 'warning' : 'danger'),
+            alarmCount: s.alarmCount,
+            warningCount: s.warningCount,
           };
         });
         setHealthScores(scoreMap);
 
         if (cabinetDevs.length > 0 && !selectedId) {
-          setSelectedId(cabinetDevs[0]?.id || null);
+          const firstCab = cabinetDevs[0];
+          if (firstCab) {
+            setSelectedId(firstCab.id);
+          }
         }
       } catch (err) {
         console.error('[Analytics] Lỗi nạp thiết bị:', err);
@@ -196,17 +273,21 @@ export default function CabinetAnalyticsTab() {
         const stationId = await stationApi.getFirstStationId();
         if (!stationId) return;
 
-        const rangeCfg = RANGES.find(r => r.value === range)!;
-        const toDate = new Date();
-        const fromDate = new Date();
-        fromDate.setDate(toDate.getDate() - rangeCfg.days);
+        const now = new Date();
+        const to = toDate ? new Date(`${toDate}T23:59:59`) : now;
+        const from = fromDate ? new Date(`${fromDate}T00:00:00`) : new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const diffDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86400000) + 1);
+        const interval = diffDays <= 7 ? 60 : diffDays <= 30 ? 240 : 720;
+
+        const pointIdsToFetch = ['nhiet_do_pha_1', 'nhiet_do_pha_2', 'nhiet_do_pha_3', 'temp_1', 'temp_2', 'temp_3', 'phong_dien', 'pd'];
 
         const hist = await stationApi.getHistoryBulk(
           stationId,
-          fromDate.toISOString(),
-          toDate.toISOString(),
-          rangeCfg.interval,
-          ['nhiet_do_pha_1', 'nhiet_do_pha_2', 'nhiet_do_pha_3', 'temp_1', 'temp_2', 'temp_3', 'phong_dien', 'pd']
+          from.toISOString(),
+          to.toISOString(),
+          interval,
+          pointIdsToFetch,
+          selectedId
         );
 
         // Phân tách các điểm đo
@@ -245,13 +326,12 @@ export default function CabinetAnalyticsTab() {
     };
 
     fetchHistory();
-  }, [selectedId, range]);
+  }, [selectedId, fromDate, toDate]);
 
-  // Derive thông tin hiển thị của tủ điện
   const cabinetList = useMemo<CabinetSummary[]>(() => {
-    return devices.map(cab => {
+    const list: CabinetSummary[] = [];
+    devices.forEach(cab => {
       const hInfo = healthScores[cab.id.toLowerCase()] || { score: 100, risk: 'good' };
-      
       const t1Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_1' || s.pointId === 'temp_1'))?.value;
       const t2Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_2' || s.pointId === 'temp_2'))?.value;
       const t3Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_3' || s.pointId === 'temp_3'))?.value;
@@ -264,9 +344,12 @@ export default function CabinetAnalyticsTab() {
 
       const healthStatus = hInfo.risk as 'good' | 'warning' | 'danger';
       const tempMax = t1 !== null && t2 !== null && t3 !== null ? Math.max(t1, t2, t3) : null;
-      const pdLevel = pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low';
+      
+      const pdLevel = pdVal < 0
+        ? (pdVal > -20 ? 'high' : pdVal > -27 ? 'medium' : 'low')
+        : (pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low');
 
-      return {
+      list.push({
         id: cab.id,
         name: cab.name || 'Tủ điện',
         status: cab.status || 'unknown',
@@ -277,9 +360,12 @@ export default function CabinetAnalyticsTab() {
         pdCount: Math.round(pdVal),
         pdLevel,
         healthScore: hInfo.score,
-        healthStatus
-      };
+        healthStatus,
+        alarmCount: hInfo.alarmCount ?? 0,
+        warningCount: hInfo.warningCount ?? 0,
+      });
     });
+    return list;
   }, [devices, latestPoints, healthScores]);
 
   const selected = selectedId ? cabinetList.find(c => c.id === selectedId) ?? null : null;
@@ -300,163 +386,217 @@ export default function CabinetAnalyticsTab() {
     );
   }
 
+  const tColor = (t: number | null) =>
+    t === null ? '#6B7280' : t > 80 ? '#EF4444' : t > 60 ? '#F59E0B' : '#10B981';
+
   return (
-    <div className={`ah-layout ${selectedId ? 'has-detail' : ''}`} style={{ height: '100%' }}>
-      {/* CỘT DANH SÁCH TỦ */}
-      <div className="ah-list-col" style={{ width: selected ? '35%' : '100%', minWidth: selected ? 280 : 'auto', maxWidth: selected ? 420 : 'none', flex: selected ? 'none' : 1, transition: 'width 0.22s ease' }}>
-        <div className="admin-card" style={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 80px', gap: 0, padding: '6px 12px', borderBottom: '1px solid var(--admin-border)', background: 'var(--admin-layer-1)', flexShrink: 0 }}>
-            {['TỦ ĐIỆN', 'SỨC KHỎE', 'T1 MAX', 'PD/24H'].map((h, idx) => (
-              <div key={h} style={{ fontSize: '.56rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.5px', fontFamily: 'Consolas,monospace', textAlign: idx > 0 ? 'center' : 'left' }}>{h}</div>
-            ))}
-          </div>
+    <>
+    <div style={{ display: 'flex', height: '100%', gap: 12, overflow: 'hidden' }}>
 
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {cabinetList.map(cab => {
-              const isOffline = cab.status === 'offline';
-              const dotColor = isOffline ? '#9CA3AF' : SC[cab.healthStatus];
-              const isActive = cab.id === selectedId;
-              const tempColor = isOffline || cab.t1 === null ? '#9CA3AF' : (cab.t1 > 80 ? '#EF4444' : cab.t1 > 60 ? '#F59E0B' : 'var(--admin-text)');
+      {/* ── SIDEBAR ── */}
+      <div style={{ width: 300, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden' }}>
 
-              return (
-                <div key={cab.id} onClick={() => setSelectedId(cab.id)}
-                  style={{
-                    display: 'grid', gridTemplateColumns: '1fr 80px 80px 80px', gap: 0,
-                    padding: '10px 12px', cursor: 'pointer',
-                    borderBottom: '1px solid var(--admin-border-light)',
-                    borderLeft: `3px solid ${isActive ? dotColor : 'transparent'}`,
-                    background: isActive ? `${dotColor}0e` : 'transparent',
-                    transition: 'background .1s',
-                    alignItems: 'center',
-                    opacity: isOffline ? 0.65 : 1
-                  }}
-                  onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--admin-hover)'; }}
-                  onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
-                    <span style={{ fontSize: '.8rem', fontWeight: 700, color: isActive ? dotColor : (isOffline ? '#9CA3AF' : 'var(--admin-text)') }}>
-                      {cab.name} {isOffline && <span style={{ fontSize: '.58rem', fontWeight: 800, color: '#EF4444', marginLeft: 3, letterSpacing: '.3px' }}>(OFFLINE)</span>}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '.78rem', fontWeight: 800, color: isOffline ? '#9CA3AF' : dotColor, fontFamily: 'Consolas,monospace', textAlign: 'center' }}>
-                    {isOffline ? 'Offline' : `${cab.healthScore}%`}
-                  </div>
-                  <div style={{ fontSize: '.78rem', fontWeight: 800, color: tempColor, fontFamily: 'Consolas,monospace', textAlign: 'center' }}>
-                    {isOffline || cab.t1 === null ? '--' : `${cab.t1}°C`}
-                  </div>
-                  <div style={{ fontSize: '.78rem', fontWeight: 700, color: isOffline ? '#9CA3AF' : (cab.pdLevel === 'high' ? '#EF4444' : cab.pdLevel === 'medium' ? '#F59E0B' : '#10B981'), fontFamily: 'Consolas,monospace', textAlign: 'center' }}>
-                    {isOffline ? 'offline' : cab.pdCount}
-                  </div>
+        {/* Header */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--admin-border)', background: 'var(--admin-layer-1)', flexShrink: 0 }}>
+          <span style={{ fontSize: '.6rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>DANH SÁCH TỦ ĐIỆN</span>
+        </div>
+
+        {/* Column headers */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 52px 52px 52px', gap: 0, padding: '5px 12px', background: 'var(--admin-layer-2)', borderBottom: '1px solid var(--admin-border)', flexShrink: 0 }}>
+          {['TỦ ĐIỆN', 'SK', 'T MAX', 'PD'].map((h, i) => (
+            <span key={h} style={{ fontSize: '.52rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.4px', textAlign: i > 0 ? 'right' : 'left' }}>{h}</span>
+          ))}
+        </div>
+
+        {/* Cabinet rows */}
+        <div className="cabinet-sidebar-scroll" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          {cabinetList.map(cab => {
+            const isOffline = cab.status === 'offline';
+            const color = isOffline ? '#6B7280' : SC[cab.healthStatus];
+            const isActive = cab.id === selectedId;
+            const pdColor = cab.pdLevel === 'high' ? '#EF4444' : cab.pdLevel === 'medium' ? '#F59E0B' : '#10B981';
+
+            return (
+              <div key={cab.id}
+                onClick={() => handleSelectId(isActive ? null : cab.id)}
+                style={{
+                  display: 'grid', gridTemplateColumns: '1fr 52px 52px 52px', gap: 0,
+                  padding: '9px 12px', cursor: 'pointer',
+                  borderBottom: '1px solid var(--admin-border-light)',
+                  borderLeft: `3px solid ${isActive ? color : 'transparent'}`,
+                  background: isActive ? `${color}10` : 'transparent',
+                  opacity: isOffline ? 0.65 : 1,
+                  transition: 'background .12s',
+                  alignItems: 'center',
+                }}
+                onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--admin-hover)'; }}
+                onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                  <span style={{ fontSize: '.75rem', fontWeight: 700, color: isActive ? color : 'var(--admin-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cab.name}</span>
                 </div>
-              );
-            })}
-          </div>
+                <span
+                  style={{ fontSize: '.72rem', fontWeight: 800, color: isOffline ? '#6B7280' : color, fontFamily: 'Consolas,monospace', textAlign: 'right', cursor: 'help' }}
+                  title={isOffline ? 'Thiết bị ngoại tuyến' : (cab.alarmCount > 0 || cab.warningCount > 0)
+                    ? `${cab.alarmCount} alarm đang mở × 25đ = -${cab.alarmCount * 25}\n${cab.warningCount} warning × 10đ = -${cab.warningCount * 10}\nTổng trừ: ${cab.alarmCount * 25 + cab.warningCount * 10}đ`
+                    : `Sức khỏe tốt — không có cảnh báo nào`}
+                >
+                  {isOffline ? '--' : `${cab.healthScore}%`}
+                </span>
+                <span style={{ fontSize: '.72rem', fontWeight: 800, color: tColor(cab.tempMax), fontFamily: 'Consolas,monospace', textAlign: 'right' }}>
+                  {cab.tempMax !== null && !isOffline ? `${cab.tempMax}°` : '--'}
+                </span>
+                <span style={{ fontSize: '.72rem', fontWeight: 800, color: isOffline ? '#6B7280' : pdColor, fontFamily: 'Consolas,monospace', textAlign: 'right' }}>
+                  {isOffline ? '--' : cab.pdCount}
+                </span>
+              </div>
+            );
+          })}
+        </div>
 
-          {!selected && (
-            <div style={{ padding: '8px 12px', borderTop: '1px solid var(--admin-border-light)', fontSize: '.62rem', color: 'var(--admin-text-muted)', fontFamily: 'Consolas,monospace', flexShrink: 0, textAlign: 'center' }}>
-              Nhấn vào một tủ để xem phân tích chi tiết
-            </div>
-          )}
+        {/* Footer */}
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.56rem', fontFamily: 'Consolas,monospace' }}>
+            <span style={{ color: 'var(--admin-text-muted)', fontWeight: 600 }}>TỔNG TỦ:</span>
+            <span style={{ color: 'var(--admin-text)', fontWeight: 800 }}>{cabinetList.length}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.56rem', fontFamily: 'Consolas,monospace', marginTop: 3 }}>
+            <span style={{ color: 'var(--admin-text-muted)', fontWeight: 600 }}>OFFLINE:</span>
+            <span style={{ color: cabinetList.filter(c => c.status === 'offline').length > 0 ? '#EF4444' : '#10B981', fontWeight: 800 }}>
+              {cabinetList.filter(c => c.status === 'offline').length}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* CỘT CHI TIẾT TỦ ĐIỆN & BIỂU ĐỒ HOÀN TOÀN THẬT */}
-      <div className={`ah-detail-panel ${selected ? 'open' : ''}`} style={{ flex: selected ? 1 : 0, width: selected ? 'auto' : 0, transition: 'flex 0.22s ease, opacity 0.18s ease' }}>
-        <div className="ah-detail-inner" style={{ height: '100%', width: '100%' }}>
-          {selected && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', overflowY: 'auto', paddingRight: 2 }}>
-              {selected.status === 'offline' && (
-                <div style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)', borderLeft: '4px solid #EF4444', borderRadius: 4, padding: '12px 14px', flexShrink: 0 }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: '1.1rem', marginTop: -2 }}>⚠️</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '.76rem', fontWeight: 800, color: '#EF4444', fontFamily: 'Consolas,monospace', letterSpacing: '.3px' }}>
-                        MẤT KẾT NỐI VẬT LÝ VỚI PLC (192.168.10.100)
-                      </div>
-                      <div style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', marginTop: 4, lineHeight: 1.4 }}>
-                        Không thể ping tới địa chỉ IP cấu hình. Vui lòng thực hiện các bước chẩn đoán sau để xử lý sự cố mạng:
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, fontSize: '.65rem', color: 'var(--admin-text-muted)', fontFamily: 'Consolas,monospace' }}>
-                        <div>• [Kiểm tra] IP Máy chủ: <span style={{ fontWeight: 800, color: '#10B981' }}>192.168.10.102</span> (Giao diện mạng hoạt động)</div>
-                        <div>• [Lỗi kết nối] IP Thiết bị PLC: <span style={{ fontWeight: 800, color: '#EF4444' }}>192.168.10.100</span> (Destination Host Unreachable / No route to host)</div>
-                        <div>• [Khắc phục] Kiểm tra cáp mạng RJ45 nối từ Server ProLiant Gen9 tới Switch PLC.</div>
-                        <div>• [Khắc phục] Đảm bảo PLC S7-1200 đã được bật nguồn (đèn RUN sáng màu xanh).</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+      {/* ── MAIN AREA ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, height: '100%', overflow: 'hidden' }}>
 
-              <div style={{ background: 'var(--admin-card-bg)', border: `1px solid ${selected.status === 'offline' ? '#9CA3AF' : SC[selected.healthStatus]}40`, borderLeft: `3px solid ${selected.status === 'offline' ? '#9CA3AF' : SC[selected.healthStatus]}`, borderRadius: 4, padding: '10px 14px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '.82rem', fontWeight: 800, color: 'var(--admin-text)', fontFamily: 'Consolas,monospace' }}>
-                      {selected.name} {selected.status === 'offline' && <span style={{ fontSize: '.68rem', color: '#EF4444', fontWeight: 800, marginLeft: 6 }}>[MẤT KẾT NỐI]</span>}
-                    </div>
-                    <div style={{ fontSize: '.68rem', color: 'var(--admin-text-muted)', marginTop: 3 }}>
-                      {selected.status === 'offline' 
-                        ? 'Đường truyền Ethernet gián đoạn. Hệ thống tự động kích hoạt chế độ chẩn đoán dự phòng cho giao diện.' 
-                        : `Nhiệt độ tối đa tiếp điểm hiện tại là ${selected.tempMax}°C. Hoạt động phóng điện PD ở mức ${selected.pdCount} xung.`}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: '.62rem', fontWeight: 900, padding: '3px 8px', background: `${selected.status === 'offline' ? '#9CA3AF' : SC[selected.healthStatus]}18`, color: selected.status === 'offline' ? '#9CA3AF' : SC[selected.healthStatus], border: `1px solid ${selected.status === 'offline' ? '#9CA3AF' : SC[selected.healthStatus]}40`, borderRadius: 3, flexShrink: 0, marginLeft: 12 }}>
-                    {selected.status === 'offline' ? 'OFFLINE' : `SK ${selected.healthScore}%`}
+        {selected ? (
+          <>
+            {/* Charts area */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, overflow: 'hidden' }}>
+
+              {/* Temp chart */}
+              <div style={{ flex: 3, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', padding: '16px 20px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ marginBottom: 10, textAlign: 'center' }}>
+                  <span style={{ fontSize: '.62rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>
+                    BIỂU ĐỒ NHIỆT ĐỘ TIẾP ĐIỂM (T1 / T2 / T3)
                   </span>
                 </div>
+                <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+                  {historyLoading ? (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '.72rem', gap: 8 }}>
+                      <RotateCw size={16} className="cabinet-spin" /> Đang nạp lịch sử...
+                    </div>
+                  ) : t1Hist.length === 0 ? (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '.72rem' }}>
+                      Chưa có dữ liệu nhiệt độ trong khoảng thời gian này
+                    </div>
+                  ) : (
+                    <TempChart t1={t1Hist} t2={t2Hist} t3={t3Hist} />
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginTop: 10, justifyContent: 'center', borderTop: '1px solid var(--admin-border-light)', paddingTop: 10 }}>
+                  {[{ color: '#3B82F6', label: 'T1' }, { color: '#10B981', label: 'T2' }, { color: '#F59E0B', label: 'T3' }].map(l => (
+                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 20, height: 2, background: l.color }} />
+                      <span style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--admin-text-muted)', letterSpacing: '.5px' }}>{l.label}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 20, height: 0, borderBottom: '2px dashed #F59E0B55' }} />
+                    <span style={{ fontSize: '.6rem', fontWeight: 700, color: 'var(--admin-text-muted)', letterSpacing: '.5px' }}>60°C CẢNH BÁO</span>
+                  </div>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                <span style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.5px', fontFamily: 'Consolas,monospace' }}>KHOẢNG THỜI GIAN:</span>
-                {RANGES.map(r => (
-                  <button key={r.value} onClick={() => setRange(r.value)}
-                    style={{ height: 24, padding: '0 10px', fontSize: '.7rem', fontWeight: 700, border: '1px solid var(--admin-border)', borderRadius: 3, background: range === r.value ? 'var(--admin-accent)' : 'transparent', color: range === r.value ? '#fff' : 'var(--admin-text-muted)', cursor: 'pointer' }}>
-                    {r.label}
+              {/* PD chart */}
+              <div style={{ flex: 2, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', padding: '16px 20px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ marginBottom: 10, textAlign: 'center' }}>
+                  <span style={{ fontSize: '.62rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>
+                    HOẠT ĐỘNG PHÓNG ĐIỆN PD (LỊCH SỬ)
+                  </span>
+                </div>
+                <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+                  {historyLoading ? (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '.72rem', gap: 8 }}>
+                      <RotateCw size={16} className="cabinet-spin" /> Đang nạp...
+                    </div>
+                  ) : pdHist.length === 0 ? (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '.72rem' }}>
+                      Chưa có dữ liệu phóng điện trong khoảng thời gian này
+                    </div>
+                  ) : (
+                    <PdChart pd={pdHist} />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Status bar */}
+            <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', padding: '10px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>TỦ ĐANG XEM</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                    <span style={{ fontSize: '.95rem', fontWeight: 800, color: 'var(--admin-text)', fontFamily: 'Consolas,monospace' }}>{selected.name}</span>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: selected.status === 'offline' ? '#6B7280' : SC[selected.healthStatus] }} />
+                    {selected.status === 'offline' && <span style={{ fontSize: '.62rem', fontWeight: 800, color: '#EF4444' }}>MẤT KẾT NỐI</span>}
+                  </div>
+                </div>
+                {selected.healthScore < 100 && (selected.alarmCount > 0 || selected.warningCount > 0) && (
+                  <button
+                    className="btn-industrial"
+                    style={{ height: 26, padding: '0 10px', fontSize: '.65rem', fontWeight: 700, color: '#F59E0B', borderColor: '#F59E0B50' }}
+                    title={`${selected.alarmCount} alarm × 25đ + ${selected.warningCount} warning × 10đ = SK mất ${selected.alarmCount * 25 + selected.warningCount * 10}đ`}
+                    onClick={async () => {
+                      if (!confirm(`Đóng tất cả ${selected.alarmCount + selected.warningCount} cảnh báo đang mở của "${selected.name}"?\nSức khỏe sẽ được tính lại.`)) return;
+                      try {
+                        const { apiFetch } = await import('@/services/api/BaseApiService');
+                        await (apiFetch as any)(`/alerts/close-device/${selected.id}`, { method: 'POST' });
+                        window.location.reload();
+                      } catch { alert('Lỗi khi đóng cảnh báo.'); }
+                    }}
+                  >
+                    ⚠ {selected.alarmCount + selected.warningCount} CẢNH BÁO — ĐÓng tất cả
                   </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 20 }}>
+                {[
+                  { label: 'T1', val: selected.t1 !== null ? `${selected.t1}°C` : '--', color: tColor(selected.t1) },
+                  { label: 'T2', val: selected.t2 !== null ? `${selected.t2}°C` : '--', color: tColor(selected.t2) },
+                  { label: 'T3', val: selected.t3 !== null ? `${selected.t3}°C` : '--', color: tColor(selected.t3) },
+                  { label: 'SỨC KHỎE', val: selected.status === 'offline' ? '--' : `${selected.healthScore}%`, color: selected.status === 'offline' ? '#6B7280' : SC[selected.healthStatus] },
+                  { label: 'PD/24H', val: selected.status === 'offline' ? '--' : String(selected.pdCount), color: selected.pdLevel === 'high' ? '#EF4444' : selected.pdLevel === 'medium' ? '#F59E0B' : '#10B981' },
+                ].map(m => (
+                  <div key={m.label} style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '.52rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.4px' }}>{m.label}</div>
+                    <div style={{ fontSize: '.85rem', fontWeight: 800, color: m.color, fontFamily: 'Consolas,monospace', marginTop: 2 }}>{m.val}</div>
+                  </div>
                 ))}
               </div>
-
-              {historyLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: 'var(--admin-text-muted)', fontSize: '0.72rem' }}>
-                  ⏳ Đang nạp lịch sử time-series...
-                </div>
-              ) : (
-                <>
-                  <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 4, padding: '10px 14px', flexShrink: 0 }}>
-                    <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.6px', fontFamily: 'Consolas,monospace', marginBottom: 8 }}>
-                      BIỂU ĐỒ NHIỆT ĐỘ CÁC PHA (T1 / T2 / T3)
-                    </div>
-                    <div style={{ height: 180 }}>
-                      {t1Hist.length === 0 ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--admin-text-muted)', fontSize: '0.72rem' }}>
-                          Chưa có dữ liệu đo nhiệt trong khoảng thời gian này
-                        </div>
-                      ) : (
-                        <TempChart t1={t1Hist} t2={t2Hist} t3={t3Hist} range={range} />
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 4, padding: '10px 14px', flexShrink: 0 }}>
-                    <div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.6px', fontFamily: 'Consolas,monospace', marginBottom: 8 }}>
-                      HOẠT ĐỘNG PHÓNG ĐIỆN PD (LỊCH SỬ)
-                    </div>
-                    <div style={{ height: 150 }}>
-                      {pdHist.length === 0 ? (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--admin-text-muted)', fontSize: '0.72rem' }}>
-                          Chưa có dữ liệu phóng điện PD trong khoảng thời gian này
-                        </div>
-                      ) : (
-                        <PdChart pd={pdHist} range={range} />
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: 'var(--admin-text-muted)', background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
+            <span style={{ fontSize: '.72rem', fontFamily: 'Consolas,monospace', fontWeight: 700 }}>← Nhấn vào một tủ để xem biểu đồ chi tiết</span>
+          </div>
+        )}
       </div>
     </div>
+
+    <style dangerouslySetInnerHTML={{ __html: `
+      .cabinet-spin { animation: cabinet-spin-kf 1.2s linear infinite; }
+      @keyframes cabinet-spin-kf { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      .cabinet-sidebar-scroll::-webkit-scrollbar { width: 8px; }
+      .cabinet-sidebar-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,.3); }
+      .cabinet-sidebar-scroll::-webkit-scrollbar-thumb { background: #10B981; border-radius: 3px; border: 2px solid #000; }
+      .cabinet-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #34D399; }
+      .cabinet-sidebar-scroll { scrollbar-width: auto; scrollbar-color: #10B981 rgba(0,0,0,.3); }
+    ` }} />
+    </>
   );
 }

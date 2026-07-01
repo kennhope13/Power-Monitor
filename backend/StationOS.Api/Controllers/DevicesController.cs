@@ -7,9 +7,12 @@
 // ============================================================
 
 using System.Text.Json;
+using System.IO.Compression;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.VisualBasic.FileIO;
 using Microsoft.Extensions.DependencyInjection;
 using StationOS.Data;
 using StationOS.Data.Entities;
@@ -358,6 +361,104 @@ public class DevicesController : ControllerBase
         {
             _deviceLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Import danh sách tủ điện từ CSV hoặc Excel.
+    /// File cần có các cột: Name, Tagname, Type, DB address, Value, Note.
+    /// Mỗi block tủ mới bắt đầu bằng một dòng chỉ có Name, ví dụ: MC471.
+    /// </summary>
+    [HttpPost("cabinet-import")]
+    [HttpPost("devices/import-cabinet-template")]
+    [Consumes("multipart/form-data")]
+    [Authorize(Roles = "admin,manager")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> ImportCabinetTemplate([FromForm] ImportCabinetTemplateRequest req)
+    {
+        if (req.File == null || req.File.Length == 0)
+            return BadRequest(new { message = "Không có file để import" });
+
+        var ext = Path.GetExtension(req.File.FileName).ToLowerInvariant();
+        if (ext is not ".csv" and not ".xlsx" and not ".xlsm")
+            return BadRequest(new { message = "Chỉ hỗ trợ file CSV hoặc Excel (.xlsx/.xlsm)" });
+
+        var station = await _db.Stations.FindAsync(req.StationId);
+        if (station == null)
+            return NotFound(new { message = "Không tìm thấy trạm" });
+
+        var fallbackName = CabinetImportHelpers.NormalizeImportDisplayName(string.IsNullOrWhiteSpace(req.CabinetName)
+            ? Path.GetFileNameWithoutExtension(req.File.FileName)
+            : req.CabinetName.Trim());
+        var rows = await CabinetImportHelpers.ReadCabinetImportRowsAsync(req.File);
+        var groups = CabinetImportHelpers.BuildCabinetImportGroups(rows, fallbackName);
+        if (!groups.Any())
+            return BadRequest(new { message = "Không tìm thấy dữ liệu tủ hợp lệ trong file" });
+
+        var created = new List<object>();
+        var updated = new List<object>();
+        var existingCabinets = await _db.Devices
+            .Where(d => d.StationId == req.StationId && (d.Type == "cabinet" || d.Type == "plc_s7"))
+            .ToListAsync();
+
+        foreach (var group in groups)
+        {
+            if (group.Points.Count == 0)
+                continue;
+
+            var normalizedName = CabinetImportHelpers.NormalizeImportDisplayName(!string.IsNullOrWhiteSpace(req.CabinetName)
+                ? req.CabinetName.Trim()
+                : (string.IsNullOrWhiteSpace(group.Name) ? fallbackName : group.Name.Trim()));
+            var cabinetCode = CabinetImportHelpers.NormalizeCabinetCode(normalizedName);
+            var config = CabinetImportHelpers.BuildCabinetConfig(req, normalizedName, cabinetCode, group.Points);
+
+            var device = existingCabinets.FirstOrDefault(d =>
+            {
+                if (string.Equals(d.Name, normalizedName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (string.IsNullOrWhiteSpace(d.Config))
+                    return false;
+
+                var decryptedConfig = _crypto.DecryptPasswordInConfigJson(d.Config);
+                return decryptedConfig.Contains($"\"cabinet_code\":\"{cabinetCode}\"", StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (device == null)
+            {
+                device = new Device
+                {
+                    StationId = req.StationId,
+                    Name = normalizedName,
+                    Type = "plc_s7",
+                    Protocol = "snap7",
+                    Config = JsonSerializer.Serialize(config),
+                    Status = "online"
+                };
+                _db.Devices.Add(device);
+                existingCabinets.Add(device);
+                created.Add(new { device.Name, deviceId = device.Id, points = group.Points.Count });
+            }
+            else
+            {
+                device.Name = normalizedName;
+                device.Type = "plc_s7";
+                device.Protocol = "snap7";
+                device.Config = JsonSerializer.Serialize(config);
+                device.Status = "online";
+                updated.Add(new { device.Name, deviceId = device.Id, points = group.Points.Count });
+            }
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            success = true,
+            message = $"Đã import {created.Count} tủ mới và cập nhật {updated.Count} tủ.",
+            created,
+            updated,
+            totalGroups = groups.Count
+        });
     }
 
     private static Dictionary<string, object?> TryParseConfig(string? json)
@@ -904,14 +1005,46 @@ public record CreateDeviceRequest(
     string? Config      // JSONB: { ip, username, password, rtsp_path, go2rtc_id, ... }
 );
 
-public record UpdateDeviceRequest(
-    string? Name,
-    string? Config,
-    string? Status
+    public record UpdateDeviceRequest(
+        string? Name,
+        string? Config,
+        string? Status
 );
 
 public record DiscoverRequest(string Ip, string Username, string Password);
 public record AutoConfigureRequest(Guid StationId, string Ip, string Username, string Password, string? NamePrefix);
+public sealed class ImportCabinetTemplateRequest
+{
+    public Guid StationId { get; set; }
+    public string Ip { get; set; } = string.Empty;
+    public string? CabinetName { get; set; }
+    public int Rack { get; set; } = 0;
+    public int Slot { get; set; } = 1;
+    public int? Db { get; set; }
+    public IFormFile? File { get; set; }
+}
+
+public sealed class CabinetImportGroup
+{
+    public string Name { get; set; } = string.Empty;
+    public List<CabinetImportPoint> Points { get; set; } = new();
+}
+
+public sealed class CabinetImportPoint
+{
+    public string PointId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string TagName { get; set; } = string.Empty;
+    public string Type { get; set; } = "Int";
+    public string DbAddress { get; set; } = string.Empty;
+    public string ValueRange { get; set; } = string.Empty;
+    public string Note { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    public int? Offset { get; set; }
+    public int? Bit { get; set; }
+    public int? DbNumber { get; set; }
+    public int SizeBytes => CabinetImportHelpers.GetPointSizeBytes(Type);
+}
 
 public record RoiPointRequest(
     string Name,
@@ -925,3 +1058,485 @@ public record RoiPointRequest(
     float? PreAlarmThreshold = 50.0f,
     float? AlarmThreshold = 70.0f
 );
+
+static class CabinetImportHelpers
+{
+    public static object BuildCabinetConfig(ImportCabinetTemplateRequest req, string name, string cabinetCode, List<CabinetImportPoint> points)
+    {
+        int? pointDb = null;
+        foreach (var p in points)
+        {
+            if (p.DbNumber.HasValue)
+            {
+                pointDb = p.DbNumber.Value;
+                break;
+            }
+        }
+        var db = req.Db ?? pointDb ?? 32;
+        var length = Math.Max(24, points
+            .Select(p => (p.Offset ?? 0) + p.SizeBytes)
+            .DefaultIfEmpty(24)
+            .Max());
+
+        return new
+        {
+            ip = req.Ip,
+            rack = req.Rack,
+            slot = req.Slot,
+            db,
+            offset = 0,
+            length,
+            enableHealthScore = true,
+            cabinet_code = cabinetCode,
+            points = points.Select(p => new
+            {
+                pointId = p.PointId,
+                name = p.Name,
+                tagName = p.TagName,
+                type = p.Type,
+                dbAddress = p.DbAddress,
+                valueRange = p.ValueRange,
+                note = p.Note,
+                unit = p.Unit,
+                offset = p.Offset,
+                bit = p.Bit,
+            }).ToList()
+        };
+    }
+
+    public static async Task<List<string[]>> ReadCabinetImportRowsAsync(IFormFile file)
+    {
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        await using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        ms.Position = 0;
+
+        return ext switch
+        {
+            ".csv" => ReadCsvRows(ms),
+            ".xlsx" or ".xlsm" => ReadXlsxRows(ms),
+            _ => []
+        };
+    }
+
+    private static List<string[]> ReadCsvRows(Stream stream)
+    {
+        var rows = new List<string[]>();
+        using var parser = new TextFieldParser(stream)
+        {
+            TextFieldType = FieldType.Delimited,
+            HasFieldsEnclosedInQuotes = true,
+            TrimWhiteSpace = false
+        };
+        parser.SetDelimiters(",", ";", "\t");
+
+        while (!parser.EndOfData)
+        {
+            try
+            {
+                rows.Add(parser.ReadFields() ?? []);
+            }
+            catch
+            {
+                continue;
+            }
+        }
+
+        return rows;
+    }
+
+    private static List<string[]> ReadXlsxRows(Stream stream)
+    {
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
+        var sharedStrings = ReadXlsxSharedStrings(archive);
+        var sheetPaths = ReadXlsxSheetPaths(archive);
+        var rows = new List<string[]>();
+
+        foreach (var sheetPath in sheetPaths)
+        {
+            var entry = archive.GetEntry(sheetPath);
+            if (entry == null) continue;
+            using var sheetStream = entry.Open();
+            var sheetRows = ReadXlsxSheetRows(sheetStream, sharedStrings);
+            rows.AddRange(sheetRows);
+        }
+
+        return rows;
+    }
+
+    private static List<string> ReadXlsxSharedStrings(ZipArchive archive)
+    {
+        var entry = archive.GetEntry("xl/sharedStrings.xml");
+        if (entry == null) return [];
+
+        using var stream = entry.Open();
+        var doc = XDocument.Load(stream);
+        XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        return doc.Descendants(ns + "si")
+            .Select(si => string.Concat(si.Descendants(ns + "t").Select(t => t.Value)))
+            .ToList();
+    }
+
+    private static List<string> ReadXlsxSheetPaths(ZipArchive archive)
+    {
+        var workbookEntry = archive.GetEntry("xl/workbook.xml");
+        var relsEntry = archive.GetEntry("xl/_rels/workbook.xml.rels");
+        if (workbookEntry == null || relsEntry == null) return ["xl/worksheets/sheet1.xml"];
+
+        using var workbookStream = workbookEntry.Open();
+        using var relsStream = relsEntry.Open();
+        var workbook = XDocument.Load(workbookStream);
+        var rels = XDocument.Load(relsStream);
+
+        XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        XNamespace relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        var relMap = rels.Root?.Elements()
+            .Select(x => new
+        {
+            Id = x.Attribute("Id")?.Value,
+            Target = x.Attribute("Target")?.Value
+        })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id) && !string.IsNullOrWhiteSpace(x.Target))
+            .ToDictionary(x => x.Id!, x => x.Target!.TrimStart('/'))
+            ?? new Dictionary<string, string>();
+
+        var sheets = workbook.Root?.Element(ns + "sheets")?.Elements(ns + "sheet")
+            .Select(s =>
+            {
+                var rid = s.Attribute(relNs + "id")?.Value;
+                return rid != null && relMap.TryGetValue(rid, out var target)
+                    ? $"xl/{target}"
+                    : null;
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Cast<string>()
+            .ToList();
+
+        return sheets != null && sheets.Count > 0 ? sheets : ["xl/worksheets/sheet1.xml"];
+    }
+
+    private static List<string[]> ReadXlsxSheetRows(Stream stream, List<string> sharedStrings)
+    {
+        var doc = XDocument.Load(stream);
+        XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var rows = new List<string[]>();
+
+        foreach (var rowEl in doc.Descendants(ns + "row"))
+        {
+            var cells = new SortedDictionary<int, string>();
+            foreach (var cell in rowEl.Elements(ns + "c"))
+            {
+                var refAttr = cell.Attribute("r")?.Value;
+                if (string.IsNullOrWhiteSpace(refAttr)) continue;
+                var colIndex = ExcelColumnIndex(refAttr);
+                var value = ReadXlsxCellValue(cell, sharedStrings, ns);
+                cells[colIndex] = value;
+            }
+
+            var maxIndex = cells.Count == 0 ? 0 : cells.Keys.Max();
+            var row = new string[maxIndex + 1];
+            for (var i = 0; i <= maxIndex; i++)
+                row[i] = cells.TryGetValue(i, out var val) ? val : string.Empty;
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static string ReadXlsxCellValue(XElement cell, List<string> sharedStrings, XNamespace ns)
+    {
+        var type = cell.Attribute("t")?.Value;
+        if (type == "inlineStr")
+            return cell.Element(ns + "is")?.Value ?? string.Empty;
+
+        var rawValue = cell.Element(ns + "v")?.Value ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return string.Empty;
+
+        if (type == "s" && int.TryParse(rawValue, out var index) && index >= 0 && index < sharedStrings.Count)
+            return sharedStrings[index];
+
+        return rawValue;
+    }
+
+    private static int ExcelColumnIndex(string cellRef)
+    {
+        var letters = new string(cellRef.TakeWhile(char.IsLetter).ToArray());
+        var index = 0;
+        foreach (var ch in letters.ToUpperInvariant())
+            index = (index * 26) + (ch - 'A' + 1);
+        return Math.Max(0, index - 1);
+    }
+
+    public static List<CabinetImportGroup> BuildCabinetImportGroups(List<string[]> rows, string fallbackName)
+    {
+        var groups = new Dictionary<string, CabinetImportGroup>(StringComparer.OrdinalIgnoreCase);
+        var headerIndex = FindCabinetHeaderRow(rows);
+        if (headerIndex < 0)
+            throw new InvalidOperationException("Không tìm thấy dòng header có Name/Tagname/Type/DB address.");
+
+        var headers = rows[headerIndex];
+        var map = new CabinetColumnMap(headers);
+
+        CabinetImportGroup? current = null;
+        for (var i = headerIndex + 1; i < rows.Count; i++)
+        {
+            var raw = rows[i];
+            if (raw.All(string.IsNullOrWhiteSpace))
+                continue;
+
+            if (IsRepeatedHeaderRow(raw))
+                continue;
+
+            var row = CabinetImportRow.From(raw, map);
+            if (row.IsEmpty)
+                continue;
+
+            if (row.IsCabinetHeader)
+            {
+                var groupName = NormalizeCabinetName(row.Name ?? row.TagName ?? fallbackName);
+                if (!groups.TryGetValue(groupName, out current))
+                {
+                    current = new CabinetImportGroup { Name = groupName };
+                    groups[groupName] = current;
+                }
+                continue;
+            }
+
+            if (row.IsSectionLabel)
+                continue;
+
+            if (!row.HasPointData)
+                continue;
+
+            current ??= GetOrCreateFallbackGroup(groups, fallbackName);
+            var point = row.ToPoint();
+            if (point.DbNumber == null && !string.IsNullOrWhiteSpace(point.DbAddress))
+                point.DbNumber = TryParseDbNumber(point.DbAddress);
+            current.Points.Add(point);
+        }
+
+        return groups.Values.Where(g => g.Points.Count > 0).ToList();
+    }
+
+    private static CabinetImportGroup GetOrCreateFallbackGroup(Dictionary<string, CabinetImportGroup> groups, string fallbackName)
+    {
+        var name = NormalizeCabinetName(fallbackName);
+        if (!groups.TryGetValue(name, out var group))
+        {
+            group = new CabinetImportGroup { Name = name };
+            groups[name] = group;
+        }
+        return group;
+    }
+
+    private static bool IsRepeatedHeaderRow(string[] row)
+    {
+        var normalized = row.Select(NormalizeText).ToList();
+        return normalized.Contains("name") && normalized.Contains("tagname") && normalized.Contains("type") && normalized.Contains("dbaddress");
+    }
+
+    private static int FindCabinetHeaderRow(List<string[]> rows)
+    {
+        for (var i = 0; i < Math.Min(rows.Count, 20); i++)
+        {
+            var normalized = rows[i].Select(NormalizeText).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var score = 0;
+            if (normalized.Contains("name")) score++;
+            if (normalized.Contains("tagname")) score++;
+            if (normalized.Contains("type")) score++;
+            if (normalized.Contains("dbaddress")) score++;
+            if (normalized.Contains("value")) score++;
+            if (normalized.Contains("note")) score++;
+            if (score >= 3) return i;
+        }
+        return -1;
+    }
+
+    private static int? TryParseDbNumber(string? dbAddress)
+    {
+        if (string.IsNullOrWhiteSpace(dbAddress)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(dbAddress, @"DB(?<db>\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["db"].Value, out var db) ? db : null;
+    }
+
+    public static string NormalizeCabinetName(string name)
+    {
+        var cleaned = name.Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? "Cabinet" : cleaned;
+    }
+
+    public static string NormalizeImportDisplayName(string name)
+    {
+        var cleaned = NormalizeCabinetName(name);
+        if (cleaned.StartsWith("Sensor ", StringComparison.OrdinalIgnoreCase))
+            return cleaned;
+
+        var hasCabinetWord = cleaned.Contains("tủ", StringComparison.OrdinalIgnoreCase)
+            || cleaned.Contains("tu", StringComparison.OrdinalIgnoreCase)
+            || cleaned.Contains("cabinet", StringComparison.OrdinalIgnoreCase);
+
+        if (hasCabinetWord)
+            return $"Sensor {cleaned}";
+
+        if (cleaned.Any(char.IsDigit))
+            return $"Sensor Tủ {cleaned.Trim()}";
+
+        return $"Sensor {cleaned}";
+    }
+
+    public static string NormalizeCabinetCode(string name)
+    {
+        var code = System.Text.RegularExpressions.Regex.Replace(name.Trim(), @"[^A-Za-z0-9]+", "_");
+        return string.IsNullOrWhiteSpace(code) ? "cabinet" : code.Trim('_');
+    }
+
+    private static string NormalizeText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        return System.Text.RegularExpressions.Regex.Replace(text.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "");
+    }
+
+    public static int GetPointSizeBytes(string? type)
+    {
+        var kind = (type ?? string.Empty).Trim().ToUpperInvariant();
+        return kind switch
+        {
+            "DINT" or "DWORD" or "REAL" or "FLOAT" => 4,
+            "BOOL" or "BIT" => 1,
+            _ => 2,
+        };
+    }
+
+    private sealed class CabinetColumnMap
+    {
+        public int Name { get; }
+        public int TagName { get; }
+        public int Type { get; }
+        public int DbAddress { get; }
+        public int Value { get; }
+        public int Note { get; }
+
+        public CabinetColumnMap(string[] headers)
+        {
+            Name = Find(headers, "name");
+            TagName = Find(headers, "tagname", "tag");
+            Type = Find(headers, "type");
+            DbAddress = Find(headers, "dbaddress", "dbaddress", "db", "dbaddr");
+            Value = Find(headers, "value");
+            Note = Find(headers, "note", "remark");
+        }
+
+        private static int Find(string[] headers, params string[] keys)
+        {
+            for (var i = 0; i < headers.Length; i++)
+            {
+                var normalized = NormalizeText(headers[i]);
+                if (keys.Any(k => normalized == NormalizeText(k)))
+                    return i;
+            }
+            return -1;
+        }
+    }
+
+    private sealed class CabinetImportRow
+    {
+        public string? Name { get; init; }
+        public string? TagName { get; init; }
+        public string? Type { get; init; }
+        public string? DbAddress { get; init; }
+        public string? ValueRange { get; init; }
+        public string? Note { get; init; }
+
+        public bool IsEmpty => string.IsNullOrWhiteSpace(Name) && string.IsNullOrWhiteSpace(TagName) && string.IsNullOrWhiteSpace(Type) && string.IsNullOrWhiteSpace(DbAddress) && string.IsNullOrWhiteSpace(ValueRange) && string.IsNullOrWhiteSpace(Note);
+        public bool HasPointData => !string.IsNullOrWhiteSpace(TagName) || !string.IsNullOrWhiteSpace(Type) || !string.IsNullOrWhiteSpace(DbAddress) || !string.IsNullOrWhiteSpace(ValueRange) || !string.IsNullOrWhiteSpace(Note);
+        public bool IsCabinetHeader => IsCabinetHeaderName(Name) && string.IsNullOrWhiteSpace(TagName) && string.IsNullOrWhiteSpace(Type) && string.IsNullOrWhiteSpace(DbAddress) && string.IsNullOrWhiteSpace(ValueRange) && string.IsNullOrWhiteSpace(Note);
+        public bool IsSectionLabel => string.IsNullOrWhiteSpace(Type) && string.IsNullOrWhiteSpace(DbAddress) && string.IsNullOrWhiteSpace(ValueRange) && string.IsNullOrWhiteSpace(Note) && !string.IsNullOrWhiteSpace(TagName);
+
+        public static CabinetImportRow From(string[] row, CabinetColumnMap map)
+        {
+            string? Get(int index) => index >= 0 && index < row.Length ? row[index]?.Trim() : null;
+            return new CabinetImportRow
+            {
+                Name = Get(map.Name),
+                TagName = Get(map.TagName),
+                Type = Get(map.Type),
+                DbAddress = Get(map.DbAddress),
+                ValueRange = Get(map.Value),
+                Note = Get(map.Note),
+            };
+        }
+
+        public CabinetImportPoint ToPoint()
+        {
+            var type = NormalizePointType(Type, Name, TagName);
+            var dbAddress = DbAddress ?? string.Empty;
+            var pointId = NormalizeCabinetCode(Name ?? TagName ?? "point");
+            var offset = TryParseOffset(dbAddress);
+            var bit = TryParseBit(dbAddress);
+            var dbNumber = TryParseDbNumber(dbAddress);
+            return new CabinetImportPoint
+            {
+                PointId = pointId,
+                Name = Name ?? TagName ?? pointId,
+                TagName = TagName ?? Name ?? pointId,
+                Type = type,
+                DbAddress = dbAddress,
+                ValueRange = ValueRange ?? string.Empty,
+                Note = Note ?? string.Empty,
+                Unit = InferUnit(Name, TagName, Note),
+                Offset = offset,
+                Bit = bit,
+                DbNumber = dbNumber
+            };
+        }
+
+        private static bool IsCabinetHeaderName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            var cleaned = name.Trim();
+            if (!cleaned.Any(char.IsDigit)) return false;
+            return System.Text.RegularExpressions.Regex.IsMatch(cleaned, @"^(MC|CABINET|TU|TỦ)?[A-Z0-9_-]*\d+[A-Z0-9_-]*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        private static string NormalizePointType(string? type, string? name, string? tag)
+        {
+            var candidate = (type ?? string.Empty).Trim().ToUpperInvariant();
+            return candidate switch
+            {
+                "INT" or "UINT" or "DINT" or "REAL" or "FLOAT" or "BOOL" or "BIT" => candidate,
+                _ => InferTypeFromText(name, tag),
+            };
+        }
+
+        private static string InferTypeFromText(string? name, string? tag)
+        {
+            var text = $"{name} {tag}".ToLowerInvariant();
+            if (text.Contains("indi") || text.Contains("eppc")) return "UINT";
+            if (text.Contains("pd")) return "INT";
+            return "INT";
+        }
+
+        private static string InferUnit(string? name, string? tag, string? note)
+        {
+            var text = $"{name} {tag} {note}".ToLowerInvariant();
+            if (text.Contains("temp") || text.Contains("nhiệt") || text.Contains("temperature")) return "°C";
+            if (text.Contains("pd") || text.Contains("indi") || text.Contains("eppc")) return "";
+            return "";
+        }
+
+        private static int? TryParseOffset(string? dbAddress)
+        {
+            if (string.IsNullOrWhiteSpace(dbAddress)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(dbAddress.Trim().ToUpperInvariant(), @"(?<offset>\d+)(?:\.(?<bit>\d+))?$");
+            return match.Success && int.TryParse(match.Groups["offset"].Value, out var offset) ? offset : null;
+        }
+
+        private static int? TryParseBit(string? dbAddress)
+        {
+            if (string.IsNullOrWhiteSpace(dbAddress)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(dbAddress.Trim(), @"\.(?<bit>\d+)$");
+            return match.Success && int.TryParse(match.Groups["bit"].Value, out var bit) ? bit : null;
+        }
+    }
+}

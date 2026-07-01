@@ -48,6 +48,10 @@ export default function ToolbarSelect({ value, onChange, options, width = 160, s
           justifyContent: 'space-between',
           gap: 6,
           height: 24,
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          borderRadius: 0,
+          boxSizing: 'border-box',
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

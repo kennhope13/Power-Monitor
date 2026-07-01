@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { stationApi } from '@/services/StationApiService';
 import { showToast } from '@/utils/toast';
 import { 
-  CheckCircle, AlertCircle, RefreshCw, 
+  CheckCircle, AlertCircle, 
   ArrowUp, Info, Activity, Database, ShieldCheck
 } from 'lucide-react';
 
@@ -132,14 +132,6 @@ export default function CloudSyncTab() {
           {triggeringSync ? <RefreshCw size={12} className="spin" /> : <ArrowUp size={12} />}
           {triggeringSync ? 'ĐANG ĐỒNG BỘ...' : 'ĐỒNG BỘ NGAY'}
         </button>
-        <button 
-          className="btn-industrial" 
-          onClick={loadSyncStatus}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 16px', borderRadius: 0, fontSize: '.7rem' }}
-        >
-          <RefreshCw size={12} /> LÀM MỚI
-        </button>
-        
         {syncActionStatus && (
           <div style={{ 
             display: 'flex', alignItems: 'center', gap: 6, fontSize: '.75rem', 

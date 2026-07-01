@@ -475,6 +475,9 @@ export default function RealtimeMonitorPage() {
     const aiState = aiStatsMap[baseDeviceId] || {};
 
     const cfg = targetCam.config || {};
+    const isOutdoorThermal = (targetCam.type === 'camera_thermal' || targetCam.type === 'camera_dual')
+      && String((cfg as any).mountType || '').toLowerCase() === 'outdoor';
+    const showPredValue = !isOutdoorThermal;
     const focalOpt = cfg.focal_length_optical;
     const focalTh = cfg.focal_length_thermal;
     const isFocalEqual = focalOpt != null && focalTh != null && Number(focalOpt) === Number(focalTh);
@@ -618,7 +621,7 @@ export default function RealtimeMonitorPage() {
           </div>
           {/* Label badge — y hệt ThermalConfigTab */}
           <div style={{ position: 'absolute', ...labelStyle, background: 'rgba(8,8,8,.88)', border: `1px solid ${color}55`, borderRadius: 3, padding: '1px 6px', fontSize: 9, fontFamily: 'monospace', whiteSpace: 'nowrap', color: '#fff' }}>
-             <span style={{ color: '#ccc' }}>{(pid || nm).replace(/Điểm\s*/gi, 'D').replace(/P\s*/g, 'D')}</span>
+             <span style={{ color: '#ccc' }}>{(pid || nm).replace(/^(Điểm|Point|P|D)\s*/gi, '').replace(/\s+/g, '')}</span>
             {temp != null && <span style={{ fontWeight: 800, color, marginLeft: 4 }}>{temp.toFixed(1)}°C</span>}
           </div>
         </div>
@@ -724,9 +727,11 @@ export default function RealtimeMonitorPage() {
             <span style={{ fontWeight: 800, color: color, fontSize: `${fontSize - 3}px`, borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 4 }}>
               {liveDb != null ? `${liveDb.toFixed(1)} dB` : '-- dB'}
             </span>
-            <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.6)', fontSize: `${fontSize - 4}px`, borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 4 }}>
-              {liveHz != null ? `${(liveHz / 1000).toFixed(1)} kHz` : '-- kHz'}
-            </span>
+            {showPredValue && (
+              <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.6)', fontSize: `${fontSize - 4}px`, borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 4 }}>
+                {liveHz != null ? `${(liveHz / 1000).toFixed(1)} kHz` : '-- kHz'}
+              </span>
+            )}
           </div>
         </div>
       );

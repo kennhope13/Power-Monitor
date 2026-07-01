@@ -62,6 +62,7 @@ class StationApiService {
   testProtocolConnection = deviceService.testProtocolConnection.bind(deviceService);
   discoverHikvision = deviceService.discoverHikvision.bind(deviceService);
   autoConfigure = deviceService.autoConfigure.bind(deviceService);
+  importCabinetTemplate = deviceService.importCabinetTemplate.bind(deviceService);
   getRelated = deviceService.getRelated.bind(deviceService);
 
   // ── ROI Points ────────────────────────────────────────────

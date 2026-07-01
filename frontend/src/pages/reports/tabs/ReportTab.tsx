@@ -5,6 +5,7 @@ import { stationApi, AlertItem, ReportItem } from '@/services/StationApiService'
 import { fmtDateTime } from '@/utils/format';
 import { confirmDialog } from '@/utils/confirm';
 import { POINTS, ReportType } from '../types';
+import DateRangeToolbar from '@/components/ui/DateRangeToolbar';
 
 const resolveCssVar = (name: string, fallback: string) => {
   try {
@@ -19,6 +20,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
   const chartCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [type, setType] = useState<ReportType>('daily');
+  const [timePreset, setTimePreset] = useState<'all' | 'today' | 'yesterday' | '7d' | '30d' | 'custom'>('custom');
   const [from, setFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 1);
     return d.toISOString().split('T')[0] || '';
@@ -119,10 +121,12 @@ export default function ReportTab({ stationId }: { stationId: string }) {
       const d = new Date(); d.setDate(d.getDate() - 1);
       setFrom(d.toISOString().split('T')[0] || '');
       setTo(new Date().toISOString().split('T')[0] || '');
+      setTimePreset('custom');
     } else if (type === 'monthly') {
       const d = new Date(); d.setMonth(d.getMonth() - 1);
       setFrom(d.toISOString().split('T')[0] || '');
       setTo(new Date().toISOString().split('T')[0] || '');
+      setTimePreset('custom');
     }
   }, [type]);
 
@@ -493,15 +497,40 @@ export default function ReportTab({ stationId }: { stationId: string }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>Từ ngày</label>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={{ background: 'var(--admin-panel)', border: '1px solid var(--admin-border)', borderRadius: 0, color: 'var(--admin-text)', padding: '7px 10px', fontSize: '0.78rem', width: '100%', boxSizing: 'border-box' }} />
-        </div>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>Đến ngày</label>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} style={{ background: 'var(--admin-panel)', border: '1px solid var(--admin-border)', borderRadius: 0, color: 'var(--admin-text)', padding: '7px 10px', fontSize: '0.78rem', width: '100%', boxSizing: 'border-box' }} />
-        </div>
+        <DateRangeToolbar
+          label="LỌC NGÀY"
+          preset={timePreset}
+          from={from}
+          to={to}
+          onPresetChange={preset => {
+            setTimePreset(preset);
+            const now = new Date();
+            const start = new Date();
+            if (preset === 'today') {
+              const d = now.toISOString().split('T')[0] || '';
+              setFrom(d);
+              setTo(d);
+            } else if (preset === 'yesterday') {
+              start.setDate(now.getDate() - 1);
+              now.setDate(now.getDate() - 1);
+              setFrom(start.toISOString().split('T')[0] || '');
+              setTo(now.toISOString().split('T')[0] || '');
+            } else if (preset === '7d') {
+              start.setDate(now.getDate() - 7);
+              setFrom(start.toISOString().split('T')[0] || '');
+              setTo(now.toISOString().split('T')[0] || '');
+            } else if (preset === '30d') {
+              start.setDate(now.getDate() - 30);
+              setFrom(start.toISOString().split('T')[0] || '');
+              setTo(now.toISOString().split('T')[0] || '');
+            } else if (preset === 'all') {
+              setFrom('');
+              setTo('');
+            }
+          }}
+          onFromChange={setFrom}
+          onToChange={setTo}
+        />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>Nội dung</label>

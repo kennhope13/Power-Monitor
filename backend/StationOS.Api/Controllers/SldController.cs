@@ -80,19 +80,24 @@ public class SldController : ControllerBase
         {
           if (d.Type == "plc_s7")
           {
+            var hasUnifiedPin = sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == d.Id.ToString());
+
             // 1. Unified PLC icon (shows all data)
-            if (!sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == d.Id.ToString()))
+            if (!hasUnifiedPin)
             {
               unpinned.Add(new { d.Id, name = $"{d.Name} (Tất cả)", d.Type, d.Status, sensorTag = (string?)null });
             }
 
-            // 2. Specific sub-sensors
-            string[] plcTags = { "nhiet_do_pha_1", "nhiet_do_pha_2", "nhiet_do_pha_3", "phong_dien" };
-            foreach (var tag in plcTags)
+            // 2. Specific sub-sensors — chỉ hiện nếu chưa pin "Tất cả"
+            if (!hasUnifiedPin)
             {
-              if (!sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == tag))
+              string[] plcTags = { "nhiet_do_pha_1", "nhiet_do_pha_2", "nhiet_do_pha_3", "phong_dien" };
+              foreach (var tag in plcTags)
               {
-                unpinned.Add(new { d.Id, name = $"{d.Name} ({tag.Replace("nhiet_do_", "").Replace("_", " ")})", d.Type, d.Status, sensorTag = tag });
+                if (!sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == tag))
+                {
+                  unpinned.Add(new { d.Id, name = $"{d.Name} ({tag.Replace("nhiet_do_", "").Replace("_", " ")})", d.Type, d.Status, sensorTag = tag });
+                }
               }
             }
           }
