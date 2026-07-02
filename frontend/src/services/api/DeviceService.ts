@@ -144,7 +144,7 @@ export class DeviceService {
           messages.push(value.trim());
         }
       }
-      return messages.length > 0 ? messages[0] : null;
+      return messages.length > 0 ? (messages[0] || null) : null;
     };
 
     try {

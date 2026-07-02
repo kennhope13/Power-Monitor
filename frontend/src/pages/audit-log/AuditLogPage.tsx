@@ -329,7 +329,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             {entries.slice(0, 6).map(([key, value]) => (
               <div key={key} className="audit-object-preview__row">
                 <span>{translateKey(key)}</span>
-                <strong>{typeof value === 'object' ? (Array.isArray(value) ? `Danh sách ${value.length} mục` : `${Object.keys(value).length} trường`) : String(value)}</strong>
+                <strong>{typeof value === 'object' && value !== null ? (Array.isArray(value) ? `Danh sách ${value.length} mục` : `${Object.keys(value).length} trường`) : String(value)}</strong>
               </div>
             ))}
             {entries.length > 6 && (

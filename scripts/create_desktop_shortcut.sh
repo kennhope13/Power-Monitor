@@ -25,4 +25,12 @@ EOF
 
 chmod +x "$DESKTOP_FILE"
 
+# Copy to applications folder so it appears in the launcher (Super key)
+MENU_FILE="$HOME/.local/share/applications/Station Monitor.desktop"
+mkdir -p "$HOME/.local/share/applications"
+cp "$DESKTOP_FILE" "$MENU_FILE"
+chmod +x "$MENU_FILE"
+update-desktop-database "$HOME/.local/share/applications" || true
+
 echo "Desktop shortcut tạo tại: $DESKTOP_FILE"
+echo "Launcher shortcut tạo tại: $MENU_FILE"

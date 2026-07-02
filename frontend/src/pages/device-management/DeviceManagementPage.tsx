@@ -226,7 +226,7 @@ export default function DeviceManagementPage({
         const options = buildOptions(cabinetPoints);
         setPointOptions(options);
         if (!isEditingRule && options[0]?.value) {
-          setRuleFormData(prev => ({ ...prev, point: options[0].value }));
+          setRuleFormData(prev => ({ ...prev, point: options[0]?.value || '' }));
         }
         return;
       }
@@ -240,7 +240,7 @@ export default function DeviceManagementPage({
           const options = buildOptions(scopedPoints);
           setPointOptions(options);
           if (!isEditingRule && options[0]?.value) {
-            setRuleFormData(prev => ({ ...prev, point: options[0].value }));
+            setRuleFormData(prev => ({ ...prev, point: options[0]?.value || '' }));
           }
           return;
         }
@@ -249,7 +249,7 @@ export default function DeviceManagementPage({
       const fallback = isCabinetLikeDevice(dev.type, cfg) ? CABINET_FALLBACK_POINTS : dev.type.startsWith('camera') ? CAMERA_FALLBACK_POINTS : GENERIC_FALLBACK_POINTS;
       setPointOptions(fallback);
       if (!isEditingRule && fallback[0]?.value) {
-        setRuleFormData(prev => ({ ...prev, point: fallback[0].value }));
+        setRuleFormData(prev => ({ ...prev, point: fallback[0]?.value || '' }));
       }
     } catch (e) {
       console.error('Lỗi khi tải quy tắc:', e);

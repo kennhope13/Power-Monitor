@@ -3,7 +3,7 @@ import { stationApi } from '@/services/StationApiService';
 import { showToast } from '@/utils/toast';
 import { 
   CheckCircle, AlertCircle, 
-  ArrowUp, Info, Activity, Database, ShieldCheck
+  ArrowUp, Info, Activity, Database, ShieldCheck, RefreshCw
 } from 'lucide-react';
 
 interface SyncStatus {

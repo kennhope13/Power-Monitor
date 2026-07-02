@@ -129,9 +129,9 @@ export default function AppShell() {
   }, [isDrillDown, drillStation, isCentralMode, stations, location.search]);
 
   const parsedStationLabel = useMemo(() => {
-    const text = headerStationLabel.trim().toUpperCase();
+    const text = (headerStationLabel || '').trim().toUpperCase();
     const kvMatch = text.match(/\b(\d+\s*KV)\b/i);
-    const kvLabel = kvMatch ? kvMatch[1].replace(/\s+/g, '').toUpperCase() : '';
+    const kvLabel = kvMatch && kvMatch[1] ? kvMatch[1].replace(/\s+/g, '').toUpperCase() : '';
     const cleaned = text
       .replace(/^(TRẠM BIẾN ÁP|TRẠM)\s+/i, '')
       .replace(/\b\d+\s*KV\b/i, '')
