@@ -32,18 +32,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # 3. Setup Rust (stable)
-      - name: 🦀 Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      # 4. Cache Rust build artifacts
-      - name: 📦 Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: frontend/src-tauri
-
       # 5. Install npm dependencies
       - name: 📦 Install npm dependencies
         working-directory: frontend
@@ -52,10 +40,7 @@ jobs:
       # 6. Build thin client
       - name: 🏗️ Build thin client installer
         working-directory: frontend
-        run: npm run desktop:build:thin
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ''
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: npm run electron:build:win
 
       # 7. Upload installer artifact
       - name: 📤 Upload NSIS installer
@@ -63,8 +48,7 @@ jobs:
         with:
           name: station-monitor-thin-client-windows
           path: |
-            frontend/src-tauri/target/release/bundle/nsis/*.exe
-            frontend/src-tauri/target/release/bundle/msi/*.msi
+            frontend/dist-electron/*.exe
           retention-days: 30
 
       # 8. Tạo Release nếu push tag
@@ -87,8 +71,7 @@ jobs:
             - Kết nối mạng đến máy chủ trạm
 
           files: |
-            frontend/src-tauri/target/release/bundle/nsis/*.exe
-            frontend/src-tauri/target/release/bundle/msi/*.msi
+            frontend/dist-electron/*.exe
           draft: false
           prerelease: false
         env:
