@@ -18,6 +18,8 @@ jobs:
   build-windows:
     name: 🪟 Build Windows Installer
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       # 1. Checkout code
