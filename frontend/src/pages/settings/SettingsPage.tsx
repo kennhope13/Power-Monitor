@@ -1,20 +1,18 @@
 // ============================================================
-// SettingsPage.tsx — Cài đặt hệ thống (5 tab)
+// SettingsPage.tsx — Cài đặt hệ thống (4 tab)
 // Tab 0: Cài đặt chung    (GeneralTab)    — polling, health check, email, timezone
 // Tab 1: Thông báo        (NotificationTab) — SMTP + email test
-// Tab 2: Giao diện        (ThemeTab)       — theme light/dark
-// Tab 3: Cloud Sync       (CloudSyncTab)   — đồng bộ Supabase
-// Tab 4: Liên kết Camera  (LinkageTab)     — auto camera action khi có alert
+// Tab 2: Lưu trữ video    (VideoStorageTab) — cài đặt lưu video
+// Tab 3: Liên kết Camera  (LinkageTab)     — auto camera action khi có alert
 // ============================================================
 
 import { useState } from 'react';
 import GeneralTab from './tabs/GeneralTab';
 import NotificationTab from './tabs/NotificationTab';
-import CloudSyncTab from './tabs/CloudSyncTab';
 import VideoStorageTab from './tabs/VideoStorageTab';
 import './SettingsPage.css';
 
-const TABS = ['CHUNG', 'THÔNG BÁO', 'CLOUD SYNC', 'LƯU TRỮ VIDEO'];
+const TABS = ['CHUNG', 'THÔNG BÁO', 'LƯU TRỮ VIDEO'];
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(0);
@@ -41,8 +39,7 @@ export default function SettingsPage() {
       <div className="admin-card" style={{ flex: 1, overflow: 'auto', padding: '20px 24px', borderRadius: 4 }}>
         {activeTab === 0 && <GeneralTab />}
         {activeTab === 1 && <NotificationTab />}
-        {activeTab === 2 && <CloudSyncTab />}
-        {activeTab === 3 && <VideoStorageTab />}
+        {activeTab === 2 && <VideoStorageTab />}
       </div>
     </div>
   );

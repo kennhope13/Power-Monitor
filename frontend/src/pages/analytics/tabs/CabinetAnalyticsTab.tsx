@@ -5,8 +5,6 @@ import Chart from 'chart.js/auto';
 import { getCSSColor } from '@/utils/theme-colors';
 import { stationApi } from '@/services/StationApiService';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 const SC = { good: '#10B981', warning: '#F59E0B', danger: '#EF4444' } as const;
 
@@ -119,7 +117,7 @@ interface CabinetSummary {
   t2: number | null;
   t3: number | null;
   tempMax: number | null;
-  pdCount: number;
+  pdCount: number | null;
   pdLevel: 'low' | 'medium' | 'high';
   healthScore: number;
   healthStatus: 'good' | 'warning' | 'danger';
@@ -188,10 +186,16 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
     };
     const pdf = () => {
       const rows = buildExportRows();
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-      doc.setFontSize(11); doc.text('PHAN TICH TU DIEN', 40, 28);
-      autoTable(doc, { startY: 42, head: [CAB_HEADERS], body: rows.map(r => CAB_HEADERS.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 8 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 28, left: 30, right: 30 } });
-      doc.save(`${fname}.pdf`);
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Phân tích tủ điện</title>
+<style>body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px}h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}.sub{font-size:8pt;color:#555;margin-bottom:12px}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7.5pt;text-align:left;border:1px solid #334155}td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7.5pt}tr:nth-child(even) td{background:#f8fafc}@page{size:A4 landscape;margin:12mm}</style>
+</head><body>
+<h1>PHÂN TÍCH TỦ ĐIỆN</h1>
+<div class="sub">Xuất ngày ${new Date().toISOString().slice(0,10)} — ${rows.length} dòng</div>
+<table><thead><tr>${CAB_HEADERS.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(r=>`<tr>${CAB_HEADERS.map(h=>`<td>${r[h as keyof typeof r]??''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+      const win = window.open('', '_blank');
+      if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
     };
     registerExport({ xlsx, csv, pdf });
     return () => registerExport(null);
@@ -331,12 +335,13 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
   const cabinetList = useMemo<CabinetSummary[]>(() => {
     const list: CabinetSummary[] = [];
     devices.forEach(cab => {
-      const hInfo = healthScores[cab.id.toLowerCase()] || { score: 100, risk: 'good' };
-      const t1Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_1' || s.pointId === 'temp_1'))?.value;
-      const t2Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_2' || s.pointId === 'temp_2'))?.value;
-      const t3Raw = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'nhiet_do_pha_3' || s.pointId === 'temp_3'))?.value;
-      const pdVal = latestPoints.find(s => s.deviceId === cab.id && (s.pointId === 'phong_dien' || s.pointId === 'pd'))?.value ??
-                    latestPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? 0;
+      const deviceId = cab.id.toLowerCase();
+      const hInfo = healthScores[deviceId] || { score: 100, risk: 'good' };
+      const cabPoints = latestPoints.filter(s => (s.deviceId || '').toLowerCase() === deviceId);
+      const t1Raw = cabPoints.find(s => s.pointId === 'nhiet_do_pha_1' || s.pointId === 'temp_1')?.value;
+      const t2Raw = cabPoints.find(s => s.pointId === 'nhiet_do_pha_2' || s.pointId === 'temp_2')?.value;
+      const t3Raw = cabPoints.find(s => s.pointId === 'nhiet_do_pha_3' || s.pointId === 'temp_3')?.value;
+      const pdVal = cabPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? null;
 
       const t1 = t1Raw !== undefined && t1Raw !== null ? Math.round(t1Raw * 10) / 10 : null;
       const t2 = t2Raw !== undefined && t2Raw !== null ? Math.round(t2Raw * 10) / 10 : null;
@@ -345,9 +350,11 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
       const healthStatus = hInfo.risk as 'good' | 'warning' | 'danger';
       const tempMax = t1 !== null && t2 !== null && t3 !== null ? Math.max(t1, t2, t3) : null;
       
-      const pdLevel = pdVal < 0
-        ? (pdVal > -20 ? 'high' : pdVal > -27 ? 'medium' : 'low')
-        : (pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low');
+      const pdLevel = pdVal == null
+        ? 'low'
+        : pdVal < 0
+          ? (pdVal > -20 ? 'high' : pdVal > -27 ? 'medium' : 'low')
+          : (pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low');
 
       list.push({
         id: cab.id,
@@ -357,7 +364,7 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
         t2,
         t3,
         tempMax,
-        pdCount: Math.round(pdVal),
+        pdCount: pdVal == null ? null : Math.round(pdVal),
         pdLevel,
         healthScore: hInfo.score,
         healthStatus,
@@ -368,7 +375,8 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
     return list;
   }, [devices, latestPoints, healthScores]);
 
-  const selected = selectedId ? cabinetList.find(c => c.id === selectedId) ?? null : null;
+  const selectedKey = selectedId?.toLowerCase() ?? null;
+  const selected = selectedKey ? cabinetList.find(c => c.id.toLowerCase() === selectedKey) ?? null : null;
 
   if (loading) {
     return (
@@ -413,7 +421,7 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
           {cabinetList.map(cab => {
             const isOffline = cab.status === 'offline';
             const color = isOffline ? '#6B7280' : SC[cab.healthStatus];
-            const isActive = cab.id === selectedId;
+            const isActive = selectedKey === cab.id.toLowerCase();
             const pdColor = cab.pdLevel === 'high' ? '#EF4444' : cab.pdLevel === 'medium' ? '#F59E0B' : '#10B981';
 
             return (
@@ -448,7 +456,7 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
                   {cab.tempMax !== null && !isOffline ? `${cab.tempMax}°` : '--'}
                 </span>
                 <span style={{ fontSize: '.72rem', fontWeight: 800, color: isOffline ? '#6B7280' : pdColor, fontFamily: 'Consolas,monospace', textAlign: 'right' }}>
-                  {isOffline ? '--' : cab.pdCount}
+                  {isOffline || cab.pdCount === null ? '--' : cab.pdCount}
                 </span>
               </div>
             );
@@ -570,7 +578,7 @@ export default function CabinetAnalyticsTab({ fromDate, toDate, registerExport }
                   { label: 'T2', val: selected.t2 !== null ? `${selected.t2}°C` : '--', color: tColor(selected.t2) },
                   { label: 'T3', val: selected.t3 !== null ? `${selected.t3}°C` : '--', color: tColor(selected.t3) },
                   { label: 'SỨC KHỎE', val: selected.status === 'offline' ? '--' : `${selected.healthScore}%`, color: selected.status === 'offline' ? '#6B7280' : SC[selected.healthStatus] },
-                  { label: 'PD/24H', val: selected.status === 'offline' ? '--' : String(selected.pdCount), color: selected.pdLevel === 'high' ? '#EF4444' : selected.pdLevel === 'medium' ? '#F59E0B' : '#10B981' },
+                  { label: 'PD/24H', val: selected.status === 'offline' || selected.pdCount === null ? '--' : String(selected.pdCount), color: selected.pdCount === null ? '#6B7280' : selected.pdLevel === 'high' ? '#EF4444' : selected.pdLevel === 'medium' ? '#F59E0B' : '#10B981' },
                 ].map(m => (
                   <div key={m.label} style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '.52rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.4px' }}>{m.label}</div>

@@ -674,19 +674,6 @@ public static class DbInitializer
             AddPointIfNotExist(db, existingPoints, activeSld.Id, plc2.Id, plc2.Id.ToString(), plc2.Name, 589.0, 300.0, 1.0);
         }
 
-        // Seed camNormal
-        if (camNormal != null)
-        {
-            AddPointIfNotExist(db, existingPoints, activeSld.Id, camNormal.Id, camNormal.Id.ToString(), "HIKVISION – Quan sát bình thường", 677.4, 206.0, 1.0);
-            AddPointIfNotExist(db, existingPoints, activeSld.Id, camNormal.Id, "f970478e-ca68-4cbb-8310-4aebf18ec8c5", "HIKVISION – Ảnh nhiệt", 634.0, 205.0, 1.0);
-        }
-
-        // Seed camPd
-        if (camPd != null)
-        {
-            AddPointIfNotExist(db, existingPoints, activeSld.Id, camPd.Id, camPd.Id.ToString(), "HIKVISION - Phong dien", 683.8, 236.7, 1.0);
-        }
-
         await db.SaveChangesAsync();
     }
 

@@ -8,8 +8,6 @@ import { createRealtimeHub } from '@/services/realtime.service';
 import { RotateCw, Zap } from 'lucide-react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface ExportFns { xlsx: () => void; csv: () => void; pdf: () => void; }
 
@@ -263,10 +261,16 @@ export default function PdAnalyticsTab({ fromDate, toDate, registerExport }: PdA
     };
     const pdf = () => {
       const rows = getRows();
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      doc.setFontSize(11); doc.text('DU LIEU PHONG DIEN CUC BO', 40, 28);
-      autoTable(doc, { startY: 42, head: [headers], body: rows.map(r => headers.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 9 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 28, left: 30, right: 30 } });
-      doc.save(`${fname}.pdf`);
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Phóng điện cục bộ</title>
+<style>body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px}h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}.sub{font-size:8pt;color:#555;margin-bottom:12px}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7.5pt;text-align:left;border:1px solid #334155}td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7.5pt}tr:nth-child(even) td{background:#f8fafc}@page{size:A4 portrait;margin:12mm}</style>
+</head><body>
+<h1>DỮ LIỆU PHÓNG ĐIỆN CỤC BỘ</h1>
+<div class="sub">Xuất ngày ${new Date().toISOString().slice(0,10)} — ${rows.length} dòng</div>
+<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(r=>`<tr>${headers.map(h=>`<td>${r[h as keyof typeof r]??''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+      const win = window.open('', '_blank');
+      if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
     };
     registerExport({ xlsx, csv, pdf });
     return () => registerExport(null);

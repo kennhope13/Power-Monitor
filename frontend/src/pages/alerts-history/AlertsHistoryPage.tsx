@@ -21,8 +21,6 @@ import { showToast } from '@/utils/toast';
 import { GO2RTC_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import './AlertsHistoryPage.css';
 
 type SortCol = 'time' | 'level';
@@ -461,19 +459,25 @@ export default function AlertsHistoryPage() {
   };
 
   const exportPdf = () => {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    doc.setFontSize(14);
-    doc.text('NHAT KY CANH BAO', 40, 36);
-    autoTable(doc, {
-      startY: 48,
-      head: [exportHeaders],
-      body: exportRows.map(row => exportHeaders.map(h => String((row as Record<string, unknown>)[h] ?? ''))),
-      styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
-      headStyles: { fillColor: [30, 41, 59] },
-      alternateRowStyles: { fillColor: [245, 247, 250] },
-      margin: { top: 36, left: 36, right: 36, bottom: 36 },
-    });
-    doc.save(`alerts_${new Date().toISOString().slice(0, 10)}.pdf`);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nhật ký cảnh báo</title>
+<style>
+  body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px;color:#111}
+  h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}
+  .sub{font-size:8pt;color:#555;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7.5pt;text-align:left;border:1px solid #334155}
+  td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7.5pt;vertical-align:top}
+  tr:nth-child(even) td{background:#f8fafc}
+  @page{size:A4 landscape;margin:12mm}
+</style></head><body>
+<h1>NHẬT KÝ CẢNH BÁO</h1>
+<div class="sub">Xuất ngày ${dateStr} — Tổng: ${exportRows.length} bản ghi</div>
+<table><thead><tr>${exportHeaders.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${exportRows.map(row => `<tr>${exportHeaders.map(h => `<td>${(row as Record<string,unknown>)[h] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
   };
 
   /** Đổi cột sắp xếp hoặc đảo chiều nếu đang sắp xếp theo cột đó. */

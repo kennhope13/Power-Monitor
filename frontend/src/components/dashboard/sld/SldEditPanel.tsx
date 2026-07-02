@@ -141,10 +141,21 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
     finally { setUploading(false); }
   };
 
+  /** Nhãn xóa theo loại thiết bị */
+  const deleteLabel = (node: SldPoint) => {
+    const t = node.deviceType || '';
+    if (t.startsWith('camera')) return 'Xóa camera';
+    if (t === 'cabinet') return 'Xóa tủ điện';
+    if (t === 'plc_s7') return 'Xóa PLC';
+    if (t === 'sensor_temp') return 'Xóa cảm biến';
+    return 'Xóa thiết bị';
+  };
+
   /** Xóa node đang chọn khỏi sơ đồ sau khi người dùng xác nhận. */
   const handleDeleteNode = async () => {
     if (!selectedNode) return;
-    if (!await showConfirm(`Xóa node "${selectedNode.label || selectedNode.pointId}"?`)) return;
+    const nodeName = selectedNode.label || selectedNode.deviceName || 'điểm đã chọn';
+    if (!await showConfirm(`${deleteLabel(selectedNode)} "${nodeName}" khỏi sơ đồ?`)) return;
     try {
       await sldRef.current?.deleteNode(selectedNode.id);
       loadSldData();
@@ -243,7 +254,7 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={handleDeleteNode}
                 className="btn-industrial btn-sm btn-danger" style={{ flex: 1 }}>
-                Xóa node
+                {selectedNode ? deleteLabel(selectedNode) : 'Xóa thiết bị'}
               </button>
             </div>
           </>
@@ -296,10 +307,6 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
             )}
           </>
         )}
-      </div>
-
-      <div style={{ padding: '6px 12px', borderTop: '1px solid var(--admin-border-light)', background: 'var(--admin-hover)', fontSize: '.6rem', color: 'var(--admin-text-muted)', flexShrink: 0 }}>
-        {selectedNode ? 'Nhấn ✕ để bỏ chọn node' : 'Kéo node để di chuyển • Click node để chỉnh'}
       </div>
 
       {confirmMsg !== null && createPortal(

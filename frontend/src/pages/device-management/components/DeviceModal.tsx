@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { stationApi, Device } from '@/services/StationApiService';
 import { Eye, EyeOff, Camera, Thermometer, CheckCircle2, X } from 'lucide-react';
+import { showToast } from '@/utils/toast';
 
 type FormData = {
   name: string; type: string; ip: string;
@@ -57,11 +58,13 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
     setFetchedPassword('');
     if (editingDevice) {
       const cfg = editingDevice.config || {};
+      const isCabinetLike = editingDevice.type === 'cabinet'
+        || (editingDevice.type === 'plc_s7' && (Array.isArray(cfg.points) || Array.isArray(cfg.cabinet_points) || !!cfg.cabinet_code || !!cfg.poll_enabled));
       const wasPasswordSet = !!cfg.password && cfg.password !== '';
       setHadPassword(wasPasswordSet);
       setShowPassword(false);
       setFormData({
-        name: editingDevice.name, type: editingDevice.type, ip: cfg.ip || '',
+        name: editingDevice.name, type: isCabinetLike ? 'plc_s7' : editingDevice.type, ip: cfg.ip || '',
         rack: cfg.rack ?? 0, slot: cfg.slot ?? 1, db: cfg.db ?? 32, length: cfg.length ?? 10,
         pollIntervalS: cfg.poll_interval_s ?? 5,
         username: cfg.username || 'admin', password: wasPasswordSet ? '***' : '',
@@ -91,7 +94,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
       let protocol = 'modbus';
       const effectivePassword = (editingId && !formData.password.trim()) ? '***' : formData.password;
 
-      if (formData.type === 'plc_s7' || formData.type === 'cabinet') {
+      if (formData.type === 'plc_s7') {
         protocol = 'snap7';
         Object.assign(configObj, { rack: formData.rack, slot: formData.slot, db: formData.db, offset: 0, length: formData.length, poll_interval_s: formData.pollIntervalS, enableHealthScore: formData.enableHealthScore });
       } else if (formData.type === 'camera_dual') {
@@ -135,7 +138,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
       }
       onSaved();
       onClose();
-      alert(`${editingId ? 'Đã cập nhật' : 'Đã thêm'} thiết bị`);
+      showToast(editingId ? 'Cập nhật thiết bị thành công' : 'Thêm thiết bị thành công', 'success');
     } catch (e: any) {
       alert(`Lỗi: ${e.message}`);
     } finally {
@@ -159,9 +162,23 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
   return (
     <div className="modal-overlay active">
       <div className="modal-content" style={{ maxWidth: 560 }}>
-        <div className="modal-header">
-          <h3>{editingId ? `Sửa: ${formData.name}` : 'Thêm thiết bị mới'}</h3>
-          <button className="modal-close-btn" onClick={onClose}><X size={20} /></button>
+        <div className="modal-header" style={{ position: 'relative' }}>
+          <h3
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              textAlign: 'center',
+              color: 'var(--admin-accent)',
+              margin: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            {editingId ? `Sửa: ${formData.name}` : 'Thêm thiết bị mới'}
+          </h3>
+          <button className="modal-close-btn" onClick={onClose} style={{ marginLeft: 'auto', position: 'relative', zIndex: 1 }}>
+            <X size={20} />
+          </button>
         </div>
         <div className="modal-body">
           <div className="form-grid-2">
@@ -173,7 +190,6 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
               <label>Loại thiết bị *</label>
               <select className="form-select" value={formData.type} onChange={e => set({ type: e.target.value })}>
                 <option value="plc_s7">PLC S7-1200/1500</option>
-                <option value="cabinet">Tủ điện (3 Nhiệt, 1 PD)</option>
                 <option value="camera_cctv">Camera Thường (RTSP)</option>
                 <option value="camera_thermal">Camera Nhiệt (RTSP) — chỉ luồng nhiệt</option>
                 <option value="camera_dual">Camera Dual-Stream (quang học + nhiệt)</option>
@@ -201,7 +217,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
               </select>
             </div>
 
-            {(formData.type === 'plc_s7' || formData.type === 'cabinet') && (
+            {formData.type === 'plc_s7' && (
               <>
                 <div className="form-group" style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 8 }}>
                   <div><label>Rack</label><input type="number" className="form-input" value={formData.rack} onChange={e => set({ rack: Number(e.target.value) })} /></div>

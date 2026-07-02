@@ -302,10 +302,15 @@ public class DevicesController : ControllerBase
                 }
             }
 
+            if (req.Type == "cabinet" && !IsValidCabinetConfig(req.Config, out var cabinetError))
+                return BadRequest(new { message = cabinetError });
+
+            var normalizedType = req.Type == "cabinet" ? "plc_s7" : req.Type;
+
             // Tôn trọng loại thiết bị user chọn — không tự override.
             // Capabilities chỉ probe để LƯU vào DB (xem được ở UI), không sửa req.Type.
             string? capsJson = null;
-            if (req.Type.StartsWith("camera"))
+            if (normalizedType.StartsWith("camera"))
             {
                 var cfg = TryParseConfig(req.Config);
                 var ip       = cfg.GetValueOrDefault("ip") as string;
@@ -324,8 +329,8 @@ public class DevicesController : ControllerBase
             {
                 StationId    = req.StationId,
                 Name         = req.Name,
-                Type         = req.Type,
-                Protocol     = req.Protocol ?? (req.Type.StartsWith("camera") ? "isapi" : null),
+                Type         = normalizedType,
+                Protocol     = req.Protocol ?? (normalizedType.StartsWith("camera") ? "isapi" : null),
                 // Encrypt password trước khi save DB (idempotent — không re-encrypt nếu đã có prefix)
                 Config       = _crypto.EncryptPasswordInConfigJson(req.Config),
                 Capabilities = capsJson,
@@ -377,6 +382,8 @@ public class DevicesController : ControllerBase
     {
         if (req.File == null || req.File.Length == 0)
             return BadRequest(new { message = "Không có file để import" });
+        if (string.IsNullOrWhiteSpace(req.Ip))
+            return BadRequest(new { message = "Tủ cabinet phải có IP trước khi import" });
 
         var ext = Path.GetExtension(req.File.FileName).ToLowerInvariant();
         if (ext is not ".csv" and not ".xlsx" and not ".xlsm")
@@ -454,7 +461,7 @@ public class DevicesController : ControllerBase
         return Ok(new
         {
             success = true,
-            message = $"Đã import {created.Count} tủ mới và cập nhật {updated.Count} tủ.",
+            message = $"Thêm thành công {created.Count} tủ mới và cập nhật {updated.Count} tủ.",
             created,
             updated,
             totalGroups = groups.Count
@@ -469,6 +476,42 @@ public class DevicesController : ControllerBase
             return JsonSerializer.Deserialize<Dictionary<string, object?>>(json) ?? [];
         }
         catch { return []; }
+    }
+
+    private static bool IsValidCabinetConfig(string? json, out string message)
+    {
+        message = "Cấu hình tủ cabinet không hợp lệ.";
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            message = "Tủ cabinet phải có file import và danh sách điểm đo hợp lệ.";
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var ip = root.TryGetProperty("ip", out var ipEl) ? ipEl.GetString() : null;
+            if (string.IsNullOrWhiteSpace(ip))
+            {
+                message = "Tủ cabinet phải có IP trước khi lưu.";
+                return false;
+            }
+
+            if (!root.TryGetProperty("points", out var pointsEl) || pointsEl.ValueKind != JsonValueKind.Array || pointsEl.GetArrayLength() == 0)
+            {
+                message = "Tủ cabinet phải có file import và danh sách điểm đo hợp lệ.";
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            message = "Cấu hình tủ cabinet không hợp lệ.";
+            return false;
+        }
     }
 
     /// <summary>
@@ -554,7 +597,11 @@ public class DevicesController : ControllerBase
             // Nếu FE gửi config với password="***" → giữ password cũ (user không đổi)
             // Nếu password mới thật → encrypt rồi save
             var merged = MergeConfigKeepOldPasswordIfRedacted(device.Config, req.Config);
+            if (device.Type == "cabinet" && !IsValidCabinetConfig(merged, out var cabinetError))
+                return BadRequest(new { message = cabinetError });
             device.Config = _crypto.EncryptPasswordInConfigJson(merged);
+            if (device.Type == "cabinet")
+                device.Type = "plc_s7";
         }
         device.Status = req.Status ?? device.Status;
         await _db.SaveChangesAsync();
@@ -599,37 +646,43 @@ public class DevicesController : ControllerBase
         var device = await _db.Devices.FindAsync(id);
         if (device == null) return NotFound();
 
-        // 1. Nếu là camera → hủy đăng ký stream với go2rtc
-        if (device.Type.StartsWith("camera"))
-            await _deviceService.UnregisterCameraStreamAsync(device);
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Nếu là camera → hủy đăng ký stream với go2rtc
+            if (device.Type.StartsWith("camera"))
+                await _deviceService.UnregisterCameraStreamAsync(device);
 
-        // 2. Dọn dẹp thủ công tất cả dữ liệu liên quan để tránh lỗi hypertable hoặc constraint
-        var boundaries = _db.Boundaries.Where(x => x.DeviceId == id);
-        _db.Boundaries.RemoveRange(boundaries);
+            // 2. Dọn dữ liệu liên quan bằng bulk delete để tránh timeout khi thiết bị có nhiều sensor readings
+            await _db.Boundaries.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.Rules.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.SensorReadings.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.Alerts.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.SldPoints.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.MaintenanceTasks.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+            await _db.RuleTriggerLogs.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
 
-        var rules = _db.Rules.Where(x => x.DeviceId == id);
-        _db.Rules.RemoveRange(rules);
+            // Camera-specific data: nếu xóa camera thì dọn luôn các bảng gắn theo CameraId
+            if (device.Type.StartsWith("camera"))
+            {
+                await _db.RoiPoints.Where(x => x.DeviceId == id).ExecuteDeleteAsync();
+                await _db.DetectionEvents.Where(x => x.CameraId == id).ExecuteDeleteAsync();
+                await _db.ThermalFrames.Where(x => x.CameraId == id).ExecuteDeleteAsync();
+                await _db.MediaFiles.Where(x => x.CameraId == id).ExecuteDeleteAsync();
+            }
 
-        var sensorReadings = _db.SensorReadings.Where(x => x.DeviceId == id);
-        _db.SensorReadings.RemoveRange(sensorReadings);
+            // 3. Xóa thiết bị chính
+            _db.Devices.Remove(device);
+            await _db.SaveChangesAsync();
 
-        var alerts = _db.Alerts.Where(x => x.DeviceId == id);
-        _db.Alerts.RemoveRange(alerts);
-
-        var sldPoints = _db.SldPoints.Where(x => x.DeviceId == id);
-        _db.SldPoints.RemoveRange(sldPoints);
-
-        var maintenanceTasks = _db.MaintenanceTasks.Where(x => x.DeviceId == id);
-        _db.MaintenanceTasks.RemoveRange(maintenanceTasks);
-
-        var ruleTriggerLogs = _db.RuleTriggerLogs.Where(x => x.DeviceId == id);
-        _db.RuleTriggerLogs.RemoveRange(ruleTriggerLogs);
-
-        // 3. Xóa thiết bị chính
-        _db.Devices.Remove(device);
-        await _db.SaveChangesAsync();
-
-        return NoContent();
+            await tx.CommitAsync();
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return StatusCode(500, new { message = $"Không thể xóa thiết bị: {ex.Message}" });
+        }
     }
 
     /// <summary>
@@ -671,16 +724,6 @@ public class DevicesController : ControllerBase
     [HttpPost("devices/{deviceId}/roi-points")]
     public async Task<IActionResult> CreateRoiPoint(Guid deviceId, [FromBody] RoiPointRequest req)
     {
-        // Kiểm tra giới hạn số điểm nhiệt theo license
-        var licenseStatus = await _license.GetStatusAsync();
-        var maxRoiPoints = (licenseStatus != null && licenseStatus.IsValid) ? licenseStatus.MaxRoiPoints : 5;
-
-        var currentPointsCount = await _db.RoiPoints.CountAsync();
-        if (currentPointsCount >= maxRoiPoints)
-        {
-            return BadRequest(new { message = $"Tổng số lượng điểm nhiệt trong hệ thống đã đạt giới hạn tối đa ({maxRoiPoints} điểm). Vui lòng nâng cấp license key để tiếp tục." });
-        }
-
         string? assignedPointId = req.PointId;
         if (string.IsNullOrEmpty(assignedPointId))
         {
@@ -1016,7 +1059,7 @@ public record AutoConfigureRequest(Guid StationId, string Ip, string Username, s
 public sealed class ImportCabinetTemplateRequest
 {
     public Guid StationId { get; set; }
-    public string Ip { get; set; } = string.Empty;
+    public string? Ip { get; set; }
     public string? CabinetName { get; set; }
     public int Rack { get; set; } = 0;
     public int Slot { get; set; } = 1;
@@ -1080,7 +1123,7 @@ static class CabinetImportHelpers
 
         return new
         {
-            ip = req.Ip,
+            ip = req.Ip ?? string.Empty,
             rack = req.Rack,
             slot = req.Slot,
             db,
@@ -1088,6 +1131,7 @@ static class CabinetImportHelpers
             length,
             enableHealthScore = true,
             cabinet_code = cabinetCode,
+            poll_enabled = !string.IsNullOrWhiteSpace(req.Ip),
             points = points.Select(p => new
             {
                 pointId = p.PointId,

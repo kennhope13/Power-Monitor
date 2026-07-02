@@ -40,13 +40,14 @@ function ensureOverlay(): HTMLElement {
         border-bottom: 1px solid var(--admin-border);
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 10px;
       ">
         <span id="ccd-icon" style="font-size: 1.1rem; display: flex; align-items: center;"></span>
         <span id="ccd-title" style="font-size: 0.8rem; font-weight: 800; color: var(--admin-text); text-transform: uppercase; letter-spacing: 0.5px;"></span>
       </div>
       <div style="padding: 18px 20px;">
-        <p id="ccd-message" style="margin: 0 0 20px; font-size: 0.82rem; color: var(--admin-text); opacity: 0.85; line-height: 1.6;"></p>
+        <p id="ccd-message" style="margin: 0 0 20px; font-size: 0.82rem; color: var(--admin-text); opacity: 0.85; line-height: 1.6; text-align: center;"></p>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
           <button id="ccd-cancel" style="
             padding: 8px 18px;
@@ -90,13 +91,13 @@ function ensureOverlay(): HTMLElement {
  */
 export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
   const options: ConfirmOptions = typeof opts === 'string' ? { message: opts } : opts;
-  const {
-    title       = options.danger ? 'Xác nhận xóa' : 'Xác nhận',
-    message,
-    confirmText = options.danger ? 'Xóa' : 'Xác nhận',
-    cancelText  = 'Hủy',
-    danger      = false,
-  } = options;
+    const {
+      title       = options.danger ? 'Xác nhận xóa' : 'Xác nhận',
+      message,
+      confirmText = options.danger ? 'Xóa' : 'Xác nhận',
+      cancelText  = '',
+      danger      = false,
+    } = options;
 
   return new Promise(resolve => {
     const overlay = ensureOverlay();
@@ -104,7 +105,20 @@ export function confirmDialog(opts: ConfirmOptions | string): Promise<boolean> {
     (overlay.querySelector('#ccd-icon')     as HTMLElement).textContent = danger ? '⚠️' : 'ℹ️';
     (overlay.querySelector('#ccd-title')    as HTMLElement).textContent = title;
     (overlay.querySelector('#ccd-message')  as HTMLElement).textContent = message;
-    (overlay.querySelector('#ccd-cancel')   as HTMLElement).textContent = cancelText;
+    const cancelBtn = overlay.querySelector('#ccd-cancel') as HTMLElement;
+    cancelBtn.textContent = cancelText || 'X';
+    cancelBtn.title = cancelText ? cancelText : 'Đóng';
+    Object.assign(cancelBtn.style, cancelText
+      ? {
+          minWidth: '',
+          padding: '8px 18px',
+        }
+      : {
+          minWidth: '42px',
+          padding: '8px 12px',
+          textAlign: 'center',
+          fontWeight: '800',
+        });
 
     const confirmBtn = overlay.querySelector('#ccd-confirm') as HTMLElement;
     confirmBtn.textContent = confirmText;

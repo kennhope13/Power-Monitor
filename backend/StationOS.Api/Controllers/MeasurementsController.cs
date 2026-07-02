@@ -14,6 +14,7 @@ using StationOS.Data;
 using StationOS.Data.Entities;
 using System.Collections.Generic;
 using System.Linq;
+using Npgsql;
 
 namespace StationOS.Api.Controllers;
 
@@ -121,25 +122,33 @@ public class MeasurementsController : ControllerBase
         [FromQuery] int intervalMinutes = 5,
         [FromQuery] Guid? deviceId = null)
     {
-        // Validate interval whitelist
-        var allowedIntervals = new[] { 0, 1, 5, 10, 15, 30, 60 };
-        if (!allowedIntervals.Contains(intervalMinutes)) intervalMinutes = 5;
+        // Validate interval — cho phép các mức downsample hợp lệ
+        var allowedIntervals = new[] { 0, 1, 5, 10, 15, 30, 60, 120, 240, 480, 720 };
+        if (!allowedIntervals.Contains(intervalMinutes)) intervalMinutes = 60;
 
-        var query = _db.SensorReadings.AsQueryable();
-        if (stationId.HasValue && stationId.Value != Guid.Empty)
-            query = query.Where(r => r.StationId == stationId.Value);
         // Giới hạn range tối đa 90 ngày
         if ((to - from).TotalDays > 90) from = to.AddDays(-90);
 
-        var selectedPoints = pointIds?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        // Case-insensitive pointId filter
+        var selectedPoints = pointIds?
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Trim().ToLowerInvariant())
+            .ToHashSet();
+
         string deviceFilter = deviceId.HasValue ? $"AND \"DeviceId\" = '{deviceId.Value}'" : "";
         string stationFilter = (stationId.HasValue && stationId.Value != Guid.Empty)
             ? $"AND \"StationId\" = '{stationId.Value}'"
             : "";
 
-        var conn = _db.Database.GetDbConnection();
+        // Dùng connection riêng để tránh conflict với EF Core connection pool
+        var connStr = _db.Database.GetConnectionString();
+        await using var conn = new Npgsql.NpgsqlConnection(connStr);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
+
+        // UTC timestamps để tránh lệch múi giờ
+        var fromUtc = from.Kind == DateTimeKind.Utc ? from : from.ToUniversalTime();
+        var toUtc   = to.Kind   == DateTimeKind.Utc ? to   : to.ToUniversalTime();
 
         string sql;
         if (intervalMinutes <= 0)
@@ -148,8 +157,8 @@ public class MeasurementsController : ControllerBase
             sql = $"""
                 SELECT "PointId", "Time", "Value", "DeviceId"
                 FROM "SensorReadings"
-                WHERE "Time" >= '{from:yyyy-MM-ddTHH:mm:ss}'
-                  AND "Time" <= '{to:yyyy-MM-ddTHH:mm:ss}'
+                WHERE "Time" >= '{fromUtc:yyyy-MM-ddTHH:mm:ss}Z'
+                  AND "Time" <= '{toUtc:yyyy-MM-ddTHH:mm:ss}Z'
                   {stationFilter}
                   {deviceFilter}
                 ORDER BY "Time", "PointId"
@@ -165,12 +174,13 @@ public class MeasurementsController : ControllerBase
                        AVG("Value")::float8 AS "Value",
                        "DeviceId"
                 FROM "SensorReadings"
-                WHERE "Time" >= '{from:yyyy-MM-ddTHH:mm:ss}'
-                  AND "Time" <= '{to:yyyy-MM-ddTHH:mm:ss}'
+                WHERE "Time" >= '{fromUtc:yyyy-MM-ddTHH:mm:ss}Z'
+                  AND "Time" <= '{toUtc:yyyy-MM-ddTHH:mm:ss}Z'
                   {stationFilter}
                   {deviceFilter}
                 GROUP BY "PointId", "DeviceId", time_bucket('{intervalMinutes} minutes', "Time")
                 ORDER BY "Time", "PointId"
+                LIMIT 20000
                 """;
         }
 
@@ -181,7 +191,7 @@ public class MeasurementsController : ControllerBase
         while (await reader.ReadAsync())
         {
             var pid = reader.GetString(0);
-            if (selectedPoints != null && !selectedPoints.Contains(pid)) continue;
+            if (selectedPoints != null && !selectedPoints.Contains(pid.ToLowerInvariant())) continue;
             rows.Add(new
             {
                 PointId  = pid,
@@ -190,7 +200,6 @@ public class MeasurementsController : ControllerBase
                 DeviceId = reader.GetGuid(3)
             });
         }
-        await conn.CloseAsync();
         return Ok(rows);
     }
 
@@ -409,7 +418,7 @@ public class MeasurementsController : ControllerBase
                     {
                         StationId = stationId,
                         Name = $"Tủ điện {code} ({gatewayIp})",
-                        Type = "cabinet",
+                        Type = "plc_s7",
                         Protocol = "json",
                         Config = System.Text.Json.JsonSerializer.Serialize(new { gateway_ip = gatewayIp, cabinet_code = code }),
                         Status = "online"
@@ -442,7 +451,7 @@ public class MeasurementsController : ControllerBase
                 {
                     StationId = stationId,
                     Name = $"Tủ điện tự động ({ip})",
-                    Type = "cabinet",
+                    Type = "plc_s7",
                     Protocol = "json",
                     Config = System.Text.Json.JsonSerializer.Serialize(new { ip }),
                     Status = "online"

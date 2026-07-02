@@ -18,6 +18,7 @@ import SldEditPanel from '@/components/dashboard/sld/SldEditPanel';
 import DashboardToolbar from '@/components/dashboard/toolbar/DashboardToolbar';
 import CameraLiveViewer from '@/components/dashboard/camera/CameraLiveViewer';
 import AlertPanel from '@/components/dashboard/alerts/AlertPanel';
+import { confirmDialog } from '@/utils/confirm';
 
 /**
  * Trang tổng quan chính — hiển thị SLD, KPI, camera live và cảnh báo.
@@ -48,6 +49,7 @@ export default function DashboardPage() {
   const [sensorThresholds, setSensorThresholds] = useState<Record<string, { warn: number | null; alarm: number | null }>>({});
   const [unpinnedCount, setUnpinnedCount] = useState(0);
   const [pointNamesMap, setPointNamesMap] = useState<Record<string, string>>({});
+  const sldFallbackTriedRef = useRef<string | null>(null);
 
   // ── Global stores ─────────────────────────────────────────────
   const stations = useStationStore(s => s.stations);
@@ -97,10 +99,37 @@ export default function DashboardPage() {
       })
       .catch(() => setRules([]));
 
-    stationApi.getSld(stationId).then(data => {
-      setUnpinnedCount(data.unpinned?.length || 0);
-    }).catch(() => {});
-  }, [stationId, fetchSensors, fetchDevices, fetchAlerts]);
+    stationApi.getSld(stationId)
+      .then(async data => {
+        if (data.svgUrl) {
+          setUnpinnedCount(data.unpinned?.length || 0);
+          return;
+        }
+
+        // Nếu trạm hiện tại chưa có SLD active, tự dò trạm khác có sơ đồ
+        if (sldFallbackTriedRef.current === stationId) return;
+        sldFallbackTriedRef.current = stationId;
+
+        const stationList = stations.length > 0 ? stations : await fetchStations();
+        const otherStations = stationList.filter(s => s.id !== stationId);
+
+        for (const s of otherStations) {
+          try {
+            const candidate = await stationApi.getSld(s.id);
+            if (!candidate.svgUrl) continue;
+
+            setStationId(s.id);
+            setStationName(s.name);
+            localStorage.setItem('selected_station_id', s.id);
+            setUnpinnedCount(candidate.unpinned?.length || 0);
+            return;
+          } catch {
+            continue;
+          }
+        }
+      })
+      .catch(() => {});
+  }, [stationId, fetchSensors, fetchDevices, fetchAlerts, fetchStations, stations]);
 
 
   // ── Resolve stationId nếu chưa có ──────────────────────────────
@@ -198,8 +227,8 @@ export default function DashboardPage() {
           pts.forEach(p => {
             if (p.pointId) newMap[`${cam.id}_${p.pointId}`.toUpperCase()] = p.label || p.name || '';
             const cfg = {
-              warn: p.warningThreshold ?? p.preAlarmThreshold ?? null,
-              alarm: p.alarmThreshold ?? null,
+              warn: p.warningThreshold || p.preAlarmThreshold || null,
+              alarm: p.alarmThreshold || null,
             };
             setThresholdCfg(cam.id, cfg, [p.pointId, p.name, p.label, p.id]);
           });
@@ -209,8 +238,8 @@ export default function DashboardPage() {
               const t = JSON.parse(r.thresholds || '{}');
               if (t.fullName) descriptiveName = t.fullName;
               const cfg = {
-                warn: t.warning ?? t.preAlarm ?? null,
-                alarm: t.alarm ?? null,
+                warn: t.warning || t.preAlarm || null,
+                alarm: t.alarm || null,
               };
               setThresholdCfg(cam.id, cfg, [r.name, r.id, t.fullName]);
             } catch {}
@@ -289,7 +318,7 @@ export default function DashboardPage() {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
 
       const name = selectedNode.label || selectedNode.pointId || 'Node';
-      if (!window.confirm(`Xóa node "${name}"?`)) return;
+      if (!await confirmDialog({ title: 'Xóa node', message: `Xóa node "${name}"?`, confirmText: 'Xóa', danger: true })) return;
 
       try {
         await sldRef.current?.deleteNode(selectedNode.id);
@@ -316,21 +345,52 @@ export default function DashboardPage() {
   };
 
   const camOptionsGroups = useMemo(() => {
-    const groups: Record<string, { id: string, label: string }[]> = { 'Khác': [] };
-    devices.filter(d => DEV_CAM_TYPES.some(t => d.type?.includes(t))).forEach(cam => {
+    const groups: Record<string, { id: string, label: string, title: string }[]> = { 'Khác': [] };
+    const cameras = devices.filter(d => DEV_CAM_TYPES.some(t => d.type?.includes(t)))
+      .filter(cam => cam.type !== 'camera_pd' && !cam.name.toUpperCase().includes('PD') && !cam.name.toUpperCase().includes('PHÓNG ĐIỆN'));
+    const nameCounts = cameras.reduce<Record<string, number>>((acc, cam) => {
+      const key = cam.name.trim().toLowerCase();
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const shortId = (id?: string) => (id ? id.slice(-4).toUpperCase() : '');
+    const shortText = (text: string, max = 22) => {
+      const cleaned = text.replace(/\s+/g, ' ').trim();
+      return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+    };
+    cameras.forEach(cam => {
       // Bỏ qua hoàn toàn các camera chuyên đo phóng điện (PD)
-      if (cam.type === 'camera_pd' || cam.name.toUpperCase().includes('PD') || cam.name.toUpperCase().includes('PHÓNG ĐIỆN')) return;
-
       const cfg = (cam as any).config || {};
       const zone = cfg.zone?.trim() || 'Khác';
       if (!groups[zone]) groups[zone] = [];
+      const duplicateName = (nameCounts[cam.name.trim().toLowerCase()] || 0) > 1;
+      const kindLabel = cam.type === 'camera_dual'
+        ? null
+        : cam.type === 'camera_thermal'
+          ? 'Nhiệt'
+          : 'Quang';
 
       if (cam.type === 'camera_dual') {
-        if (cfg.go2rtc_optical) groups[zone].push({ id: cfg.go2rtc_optical, label: `${cam.name} (Quang)` });
-        if (cfg.go2rtc_thermal) groups[zone].push({ id: cfg.go2rtc_thermal, label: `${cam.name} (Nhiệt)` });
+        const fullBase = duplicateName ? `${cam.name} · ${zone}` : cam.name;
+        if (cfg.go2rtc_optical) {
+          const title = `${fullBase} (Quang)${duplicateName ? ` · ${shortId(cfg.go2rtc_optical)}` : ''}`;
+          groups[zone].push({ id: cfg.go2rtc_optical, label: shortText(title), title });
+        }
+        if (cfg.go2rtc_thermal) {
+          const title = `${fullBase} (Nhiệt)${duplicateName ? ` · ${shortId(cfg.go2rtc_thermal)}` : ''}`;
+          groups[zone].push({ id: cfg.go2rtc_thermal, label: shortText(title), title });
+        }
       } else {
         const streamId = cfg.go2rtc_id || cfg.go2rtc_thermal || cfg.go2rtc_optical;
-        if (streamId) groups[zone].push({ id: streamId, label: cam.name });
+        if (streamId) {
+          const baseLabel = duplicateName ? `${cam.name} · ${zone}` : cam.name;
+          const title = duplicateName || kindLabel ? `${baseLabel}${kindLabel ? ` (${kindLabel})` : ''}${duplicateName ? ` · ${shortId(streamId)}` : ''}` : cam.name;
+          groups[zone].push({
+            id: streamId,
+            label: shortText(title),
+            title,
+          });
+        }
       }
     });
     return groups;
@@ -381,6 +441,9 @@ export default function DashboardPage() {
           try {
             const dev = devices.find(d => d.id.toLowerCase() === deviceId.toLowerCase());
             const isCam = dev && DEV_CAM_TYPES.some(t => dev.type?.includes(t));
+            // Ngăn thêm trùng: nếu thiết bị đã có node trên sơ đồ thì bỏ qua
+            const existing = sldRef.current?.getPoints() ?? [];
+            if (existing.some(p => p.deviceId?.toLowerCase() === deviceId.toLowerCase())) return;
             const newNode = await stationApi.addSldPoint(stationId, {
               x, y, r: isCam ? 10 : 8,
               label: '',
@@ -430,7 +493,7 @@ export default function DashboardPage() {
         const pd = sensorVal(pdSensor);
         const isOffline = selectedCabinet.status === 'offline';
         const fmt = (v: number | undefined) => v !== undefined ? `${Math.round(v * 10) / 10}` : '---';
-        const fmtPd = (v: number | undefined) => v === undefined ? '---' : v <= -60 ? '---' : `${Math.round(v)}`;
+        const fmtPd = (v: number | undefined) => v === undefined ? '---' : `${Math.round(v)}`;
         const normalize = (id?: string) => (id || '').trim().toLowerCase();
         const evaluate = (v: number, op: string, t: number) => {
           if (op === '>') return v > t;
@@ -483,7 +546,7 @@ export default function DashboardPage() {
           return 'var(--admin-success)';
         };
         const pdColor = (pointId: string, v: number | undefined) => {
-          if (v === undefined || v <= -60) return 'var(--admin-text-muted)';
+          if (v === undefined) return 'var(--admin-text-muted)';
           const level = getCabinetThresholdLevel(pointId, v);
           if (level === 'alarm') return 'var(--admin-danger)';
           if (level === 'warning') return 'var(--admin-warning)';
@@ -518,11 +581,11 @@ export default function DashboardPage() {
             </div>
             {/* Pha A B C + PD */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4, padding: '8px 10px', borderBottom: extras.length > 0 ? '1px solid var(--admin-border-light)' : 'none' }}>
-              {[['PHA A', fmt(t1), '°C', tempColor('nhiet_do_pha_1', t1)], ['PHA B', fmt(t2), '°C', tempColor('nhiet_do_pha_2', t2)], ['PHA C', fmt(t3), '°C', tempColor('nhiet_do_pha_3', t3)], ['P.ĐIỆN', fmtPd(pd), pd !== undefined && pd > -60 ? 'dB' : '', pdColor('phong_dien', pd)]].map(([label, val, unit, color]) => (
+              {[['PHA A', fmt(t1), '°C', tempColor('nhiet_do_pha_1', t1)], ['PHA B', fmt(t2), '°C', tempColor('nhiet_do_pha_2', t2)], ['PHA C', fmt(t3), '°C', tempColor('nhiet_do_pha_3', t3)], ['P.ĐIỆN', fmtPd(pd), pd !== undefined ? 'dB' : '', pdColor('phong_dien', pd)]].map(([label, val, unit, color]) => (
                 <div key={label as string} style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 3px', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.44rem', color: 'var(--admin-text-muted)', fontWeight: 700, marginBottom: 2 }}>{label}</div>
                   <div style={{ fontSize: '0.65rem', fontWeight: 800, color: color as string, fontFamily: 'Consolas,monospace', lineHeight: 1 }}>
-                    {isOffline ? '--' : val as string}<span style={{ fontSize: '0.48rem', opacity: 0.7 }}>{!isOffline && (val as string) !== '--' && (val as string) !== '----' ? unit : ''}</span>
+                    {isOffline ? '--' : val as string}<span style={{ fontSize: '0.48rem', opacity: 0.7 }}>{!isOffline && (val as string) !== '--' ? unit : ''}</span>
                   </div>
                 </div>
               ))}
@@ -583,14 +646,14 @@ export default function DashboardPage() {
               hasAlert={activeCamHasAlert}
               headerAddon={
                 <select
-                  style={{ fontSize: '0.55rem', padding: '1px 4px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 0, maxWidth: 100, cursor: 'pointer', outline: 'none' }}
+                  style={{ fontSize: '0.55rem', padding: '1px 4px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 0, minWidth: 150, maxWidth: 220, cursor: 'pointer', outline: 'none' }}
                   value={activeCameraSrc}
                   onChange={e => handleCamChange(e.target.value)}
                 >
                   {Object.entries(camOptionsGroups).map(([zone, opts]) => (
                     opts.length > 0 ? (
                       <optgroup key={zone} label={zone}>
-                        {opts.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                        {opts.map(opt => <option key={opt.id} value={opt.id} title={opt.title}>{opt.label}</option>)}
                       </optgroup>
                     ) : null
                   ))}
@@ -601,23 +664,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-        <div
-          style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
-          display: 'flex', gap: 24, padding: '4px 10px', fontSize: 10, color: 'var(--admin-text-muted)',
-          background: 'var(--admin-overlay)', borderTop: '1px solid var(--admin-border-light)',
-          backdropFilter: 'blur(6px)', alignItems: 'center'
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, background: plcOnline ? 'var(--admin-success)' : 'var(--admin-danger)', borderRadius: 0, display: 'inline-block' }}></span>
-          PLC: {plcOnline ? 'Trực tuyến' : 'Ngoại tuyến'}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, background: 'var(--admin-success)', borderRadius: 0, display: 'inline-block' }}></span>
-          SignalR: Đã kết nối
-        </span>
-      </div>
     </div>
   );
 }

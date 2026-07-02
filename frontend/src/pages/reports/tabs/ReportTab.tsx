@@ -76,7 +76,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
             return pid === 'nhiet_do_pha_3' || pid === 'temp_3' || /^(?:p|d|điểm|diem)\s*3$/i.test(pid);
           })?.value;
 
-          let pdVal = devPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? 0;
+          let pdVal = devPoints.find(s => s.pointId === 'phong_dien' || s.pointId === 'pd')?.value ?? null;
 
           const t1 = t1Raw !== undefined && t1Raw !== null ? Math.round(t1Raw * 10) / 10 : null;
           const t2 = t2Raw !== undefined && t2Raw !== null ? Math.round(t2Raw * 10) / 10 : null;
@@ -84,7 +84,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
 
           const tempMax = t1 !== null && t2 !== null && t3 !== null ? Math.max(t1, t2, t3) : (t1 !== null ? t1 : t2 !== null ? t2 : t3 !== null ? t3 : null);
           const healthStatus = hInfo.risk || (hInfo.score >= 80 ? 'good' : hInfo.score >= 50 ? 'warning' : 'danger');
-          const pdLevel = pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low';
+          const pdLevel = pdVal == null ? 'low' : pdVal > 50 ? 'high' : pdVal > 20 ? 'medium' : 'low';
 
           return {
             id: dev.id,
@@ -94,7 +94,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
             t2,
             t3,
             tempMax,
-            pdCount: Math.round(pdVal),
+            pdCount: pdVal == null ? null : Math.round(pdVal),
             pdLevel,
             healthScore: hInfo.score,
             healthStatus,
@@ -342,7 +342,7 @@ export default function ReportTab({ stationId }: { stationId: string }) {
                 </div>
                 <div style="background:#f9fafb;padding:8px;border:1px solid #e5e7eb;">
                   <div style="font-size:9px;color:#6b7280;font-weight:700;text-transform:uppercase;">Phóng điện PD</div>
-                  <div style="font-size:18px;font-weight:800;color:${pdColor(cab.pdLevel)};">${cab.pdCount} xung</div>
+                  <div style="font-size:18px;font-weight:800;color:${cab.pdCount == null ? '#6b7280' : pdColor(cab.pdLevel)};">${cab.pdCount == null ? '--' : `${cab.pdCount} xung`}</div>
                 </div>
               </div>
 

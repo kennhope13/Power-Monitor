@@ -341,7 +341,7 @@ export default function CameraGrid({ sensors, alertsCount, rules = [], camOption
                   <div key={row.pid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: idx < pdRows.length - 1 ? '1px solid var(--admin-border-light)' : 'none' }}>
                     <div style={{ width: 6, height: 6, borderRadius: 0, background: color, flexShrink: 0 }} />
                     <span style={{ flex: 1, fontSize: '0.68rem', color: 'var(--admin-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: val !== undefined && val <= -60 ? 'var(--admin-text-muted)' : color, fontFamily: 'Consolas,monospace', flexShrink: 0 }}>{val === undefined ? '--' : val <= -60 ? '----' : `${val.toFixed(1)} ${unit}`}</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: color, fontFamily: 'Consolas,monospace', flexShrink: 0 }}>{val === undefined ? '--' : `${val.toFixed(1)} ${unit}`}</span>
                   </div>
                 );
               })

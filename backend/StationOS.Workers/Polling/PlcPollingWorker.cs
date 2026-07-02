@@ -174,6 +174,24 @@ public class PlcPollingWorker : BackgroundService
         var length   = GetInt(config, "length");
 
         var cabinetPoints = GetCabinetPointDefinitions(config);
+        var pollEnabled = true;
+        if (config.TryGetValue("poll_enabled", out var pollEnabledRaw))
+        {
+            pollEnabled = pollEnabledRaw switch
+            {
+                bool b => b,
+                System.Text.Json.JsonElement je when je.ValueKind == JsonValueKind.True => true,
+                System.Text.Json.JsonElement je when je.ValueKind == JsonValueKind.False => false,
+                string s when bool.TryParse(s.Trim('"'), out var parsed) => parsed,
+                _ => true
+            };
+        }
+        if (device.Type == "cabinet" && !pollEnabled)
+        {
+            _logger.LogInformation("[PLC] Cabinet {Name} ({Id}) disabled polling by config", device.Name, device.Id);
+            await UpdateDeviceStatusAsync(db, _notifier, device.Id, "offline");
+            return;
+        }
         if (cabinetPoints.Count > 0)
         {
             length = Math.Max(length, GetRequiredCabinetPayloadLength(cabinetPoints));

@@ -7,8 +7,6 @@ import DateRangePicker from '@/components/ui/DateRangePicker';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 const DEFAULT_CHECKLIST: Record<string, string[]> = {
   inspection: ['Kiểm tra tổng quan', 'Đo nhiệt độ', 'Kiểm tra cách điện', 'Ghi nhật ký'],
@@ -229,10 +227,24 @@ export default function MaintenancePage() {
     a.download = `${fname}.csv`; a.click();
   };
   const doExportPdf = () => {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    doc.setFontSize(12); doc.text('LICH BAO TRI THIET BI', 40, 30);
-    autoTable(doc, { startY: 44, head: [EXPORT_HEADERS], body: exportRows.map(r => EXPORT_HEADERS.map(h => r[h as keyof typeof r] ?? '')), styles: { fontSize: 8 }, headStyles: { fillColor: [30, 41, 59] }, margin: { top: 30, left: 30, right: 30 } });
-    doc.save(`${fname}.pdf`);
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Lịch bảo trì</title>
+<style>
+  body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px;color:#111}
+  h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}
+  .sub{font-size:8pt;color:#555;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7.5pt;text-align:left;border:1px solid #334155}
+  td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7.5pt;vertical-align:top}
+  tr:nth-child(even) td{background:#f8fafc}
+  @page{size:A4 landscape;margin:12mm}
+</style></head><body>
+<h1>LỊCH BẢO TRÌ THIẾT BỊ</h1>
+<div class="sub">Xuất ngày ${new Date().toISOString().slice(0,10)} — Tổng: ${exportRows.length} bản ghi</div>
+<table><thead><tr>${EXPORT_HEADERS.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${exportRows.map(r => `<tr>${EXPORT_HEADERS.map(h => `<td>${r[h as keyof typeof r] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
   };
 
   return (

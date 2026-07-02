@@ -6,8 +6,6 @@ import { stationApi } from '@/services/StationApiService';
 import { RotateCw } from 'lucide-react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface HistoryPoint {
   timestamp: string;
@@ -441,21 +439,16 @@ visibleTargets.forEach(t => {
     };
 
     const pdf = () => {
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-      doc.setFontSize(11); doc.text('DU LIEU NHIET DO', 40, 28);
-      autoTable(doc, {
-        startY: 42,
-        head: [hdrsPdf],
-        body: rows.map(r => hdrsPdf.map((h, i) => {
-          const key = i === 0 ? 'Thoi gian' : hdrsUtf[i]!;
-          return r[key] ?? '';
-        })),
-        styles: { fontSize: 7, cellPadding: 3 },
-        headStyles: { fillColor: [30, 41, 59], fontSize: 7 },
-        columnStyles: { 0: { cellWidth: 80 } },
-        margin: { top: 28, left: 20, right: 20 },
-      });
-      doc.save(`${fname}.pdf`);
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dữ liệu nhiệt độ</title>
+<style>body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px}h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}.sub{font-size:8pt;color:#555;margin-bottom:12px}table{width:100%;border-collapse:collapse}th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7pt;text-align:left;border:1px solid #334155}td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7pt}tr:nth-child(even) td{background:#f8fafc}@page{size:A4 landscape;margin:12mm}</style>
+</head><body>
+<h1>DỮ LIỆU NHIỆT ĐỘ</h1>
+<div class="sub">Xuất ngày ${new Date().toISOString().slice(0,10)} — ${rows.length} dòng</div>
+<table><thead><tr>${hdrsUtf.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(r=>`<tr>${hdrsUtf.map(h=>`<td>${r[h]??''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+      const win = window.open('', '_blank');
+      if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
     };
 
     registerExport({ xlsx, csv, pdf });

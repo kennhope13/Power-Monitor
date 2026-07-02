@@ -48,6 +48,7 @@ const SLD_H = 612;
  */
 const DARK_MATRIX = '-0.161 0 0 0 0.220  -0.651 0 0 0 0.741  -0.808 0 0 0 0.973  0 0 0 1 0';
 const LIGHT_MATRIX = '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0';
+const SLD_TOP_OFFSET = 80;
 
 function getTheme() { return document.documentElement.dataset.theme || 'dark'; }
 
@@ -101,7 +102,16 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       if (!stationId) return;
       try {
         const data = await stationApi.getSld(stationId);
-        setPoints(data.points || []);
+        // Bỏ node trùng deviceId — giữ cái đầu tiên (thêm sớm nhất)
+        const seen = new Set<string>();
+        const deduped = (data.points || []).filter(p => {
+          const key = p.deviceId?.toLowerCase();
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setPoints(deduped);
         setSvgUrl(data.svgUrl ?? null);
         // Phục hồi góc xoay đã lưu trong localStorage
         const localVr = localStorage.getItem(`sld_vr_${stationId}`);
@@ -179,6 +189,37 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       const rx = Math.cos(rad) * (sldX - cx) - Math.sin(rad) * (sldY - cy) + cx;
       const ry = Math.sin(rad) * (sldX - cx) + Math.cos(rad) * (sldY - cy) + cy;
       return { sx: rx * t.vs + t.vx, sy: ry * t.vs + t.vy };
+    };
+
+    /** Tìm node gần nhất tại vị trí chuột trên viewport để hover ổn định dù SVG bị rotate/scale. */
+    const hitTestPointAtScreenPos = (clientX: number, clientY: number) => {
+      if (!viewportRef.current) return null;
+      const r = viewportRef.current.getBoundingClientRect();
+      const x = clientX - r.left;
+      const y = clientY - r.top;
+
+      let bestId: string | null = null;
+      let bestDist = Infinity;
+
+      for (const p of pointsRef.current) {
+        const isCam = p.deviceType?.startsWith('camera');
+        const baseR = isCam ? Math.max(p.r ?? 8, 5) : (p.r ?? 8);
+        const hitR = Math.max(baseR * transformRef.current.vs * 2.2, 20);
+        const { sx, sy } = toScreenPos(p.x, p.y, transformRef.current);
+        const dist = Math.hypot(x - sx, y - sy);
+        if (dist <= hitR && dist < bestDist) {
+          bestId = p.id;
+          bestDist = dist;
+        }
+      }
+
+      return bestId;
+    };
+
+    const handleViewportMouseMove = (e: React.MouseEvent) => {
+      if (editMode || draggingPointId.current || isPanning.current) return;
+      const nextId = hitTestPointAtScreenPos(e.clientX, e.clientY);
+      setHoveredNodeId(prev => (prev === nextId ? prev : nextId));
     };
 
     useEffect(() => {
@@ -274,6 +315,8 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
      * Trả về màu điểm node theo loại thiết bị và trạng thái kết nối.
      * Camera → xanh accent, offline → đỏ, online → xanh success.
      */
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
     // Tính level trực tiếp từ sensor value + rule config — không qua DB alert.
     // Mỗi lần sensor hoặc rules thay đổi → recompute ngay lập tức.
     const dotLevelByPoint = useMemo(() => {
@@ -349,14 +392,15 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       const prefix = deviceId.toLowerCase() + '|';
       let worst: 'alarm' | 'warning' | undefined;
       dotLevelByPoint.forEach((level, key) => {
-        if (key.startsWith(prefix)) {
-          if (level === 'alarm') worst = 'alarm';
-          else if (level === 'warning' && worst !== 'alarm') worst = 'warning';
-        }
+        if (!key.startsWith(prefix)) return;
+        if (UUID_RE.test(key.slice(prefix.length))) return;
+        if (level === 'alarm') worst = 'alarm';
+        else if (level === 'warning' && worst !== 'alarm') worst = 'warning';
       });
-      // Ngưỡng từ tab thiết bị (camera ROI) — chỉ áp dụng cho đúng thiết bị
+      // Ngưỡng từ tab thiết bị (camera ROI) — chỉ áp dụng cho đúng thiết bị, bỏ zone UUID
       sensorMap.forEach(sensor => {
         if (!sensor.deviceId || sensor.deviceId.toLowerCase() !== deviceId) return;
+        if (UUID_RE.test(sensor.pointId)) return;
         const level = getThresholdLevel(sensor.deviceId, sensor.pointId, sensor.value);
         if (level === 'alarm') worst = 'alarm';
         else if (level === 'warning' && worst !== 'alarm') worst = 'warning';
@@ -365,11 +409,26 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
     };
 
     const getDotColor = (type?: string, _status?: string, deviceId?: string, _pointId?: string) => {
-      // Ưu tiên trạng thái thật từ rule/sensor trước, kể cả camera
+      if (type?.startsWith('camera')) {
+        // Camera: chỉ dùng ngưỡng ROI cấu hình trực tiếp, không qua rule system (P1-P20 seeded rules)
+        let worst: 'alarm' | 'warning' | undefined;
+        const did = deviceId?.toLowerCase();
+        if (did) {
+          sensorMap.forEach(sensor => {
+            if (!sensor.deviceId || sensor.deviceId.toLowerCase() !== did) return;
+            if (UUID_RE.test(sensor.pointId)) return;
+            const lv = getThresholdLevel(sensor.deviceId, sensor.pointId, sensor.value);
+            if (lv === 'alarm') worst = 'alarm';
+            else if (lv === 'warning' && worst !== 'alarm') worst = 'warning';
+          });
+        }
+        if (worst === 'alarm')   return 'var(--admin-danger)';
+        if (worst === 'warning') return 'var(--admin-warning)';
+        return 'var(--admin-accent)';
+      }
       const deviceLevel = getDeviceWorstLevel(deviceId);
       if (deviceLevel === 'alarm')   return 'var(--admin-danger)';
       if (deviceLevel === 'warning') return 'var(--admin-warning)';
-      if (type?.startsWith('camera')) return 'var(--admin-accent)';
       return 'var(--admin-success)';
     };
 
@@ -404,9 +463,32 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       const p = points.find(pt => pt.id === hoveredNodeId);
       if (!p) return null;
       
-      const deviceSensors = getDeviceSensors(p.deviceId);
+      const allDeviceSensors = getDeviceSensors(p.deviceId);
       const { sx, sy } = toScreenPos(p.x, p.y, transform);
-      
+
+      const TYPE_VI: Record<string, string> = {
+        camera_dual: 'Camera Kép', camera_thermal: 'Camera Nhiệt',
+        camera_cctv: 'Camera CCTV', camera_pd: 'Camera PD',
+        cabinet: 'Tủ điện', plc_s7: 'PLC S7', sensor_temp: 'Cảm biến nhiệt',
+      };
+      const typeLabel = TYPE_VI[p.deviceType ?? ''] || p.deviceType || 'Thiết bị';
+      const nameLabel = p.label || p.deviceName || '';
+
+      // Short-ID pattern: "D1", "D2", "P1", "P2" — 1-2 ký tự + chữ số
+      const SHORT_ID_RE = /^[A-Za-z]{1,2}\d*$/;
+      const dedupeCamera = (sensors: SensorPoint[]): SensorPoint[] => {
+        // Bỏ UUID (zone) và short-ID nếu đã có bản dài hơn với cùng value
+        const longNames = new Set(sensors.filter(s => !UUID_RE.test(s.pointId) && !SHORT_ID_RE.test(s.pointId)).map(s => s.pointId));
+        return sensors.filter(s => {
+          if (UUID_RE.test(s.pointId)) return false;
+          if (SHORT_ID_RE.test(s.pointId) && longNames.size > 0) return false;
+          return true;
+        });
+      };
+      const deviceSensors = p.deviceType?.startsWith('camera')
+        ? dedupeCamera(allDeviceSensors)
+        : allDeviceSensors;
+
       return (
         <div style={{
           position: 'fixed', top: sy + 15, left: sx + 15, zIndex: 100,
@@ -415,20 +497,24 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
           boxShadow: 'var(--admin-shadow)', pointerEvents: 'none',
           animation: 'tooltipFadeIn 0.15s ease-out', minWidth: 140
         }}>
-          <div style={{ fontSize: '.6rem', color: 'var(--admin-text-muted)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 2 }}>{p.deviceType || 'Thiết bị'}</div>
-          <div style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--admin-text)', marginBottom: 4 }}>{p.label || p.deviceName || 'Không có tên'}</div>
+          <div style={{ fontSize: '.6rem', color: 'var(--admin-text-muted)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 2 }}>{typeLabel}</div>
+          {nameLabel && <div style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--admin-text)', marginBottom: 4 }}>{nameLabel}</div>}
           <div style={{ height: 1, background: 'var(--admin-border-light)', margin: '4px 0' }} />
           {deviceSensors.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               {deviceSensors.map(s => {
                 const isOffline = s.quality === 2;
-                const level = isOffline ? undefined : getDotLevel(p.deviceId, s.pointId, s.value);
+                const isCamSensor = !!(p.deviceType?.startsWith('camera') || s.unit === '°C' || s.unit === '℃');
+                // Camera/nhiệt: dùng ngưỡng ROI trực tiếp (không qua rule system chung)
+                const level = isOffline ? undefined
+                  : isCamSensor
+                    ? getThresholdLevel(p.deviceId, s.pointId, s.value)
+                    : getDotLevel(p.deviceId, s.pointId, s.value);
                 const indiColor = s.value === 0 ? 'var(--admin-accent)' : s.value === 1 ? 'var(--admin-warning)' : 'var(--admin-danger)';
                 const indiLabel = s.value === 0 ? 'Bình thường' : s.value === 1 ? 'Cảnh báo' : 'Báo động';
-                const color = isOffline ? 'var(--admin-text-muted)' : s.pointId === 'pd_indi' ? indiColor : level === 'alarm' ? 'var(--admin-danger)' : level === 'warning' ? 'var(--admin-warning)' : 'var(--admin-accent)';
+                const color = isOffline ? 'var(--admin-text-muted)' : s.pointId === 'pd_indi' ? indiColor : level === 'alarm' ? 'var(--admin-danger)' : level === 'warning' ? 'var(--admin-warning)' : 'var(--admin-success)';
                 const valStr = isOffline ? '---'
                   : s.pointId === 'pd_indi' ? indiLabel
-                  : s.unit?.toUpperCase() === 'DB' && s.value <= -60 ? '----'
                   : `${Math.round(s.value * 10) / 10}${s.unit || ''}`;
                 return (
                   <div key={s.pointId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -448,8 +534,8 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
 
     return (
       <div id="sldViewport" ref={viewportRef}
-        onMouseDown={handleMouseDown} onWheel={handleWheel} onDragOver={handleDragOver} onDrop={handleDrop}
-        style={{ position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'grab', backgroundColor: 'var(--admin-bg)', willChange: 'transform' }}
+        onMouseDown={handleMouseDown} onMouseMove={handleViewportMouseMove} onMouseLeave={() => setHoveredNodeId(null)} onWheel={handleWheel} onDragOver={handleDragOver} onDrop={handleDrop}
+        style={{ position: 'absolute', top: SLD_TOP_OFFSET, left: 0, right: 0, bottom: 0, overflow: 'hidden', cursor: 'grab', backgroundColor: 'var(--admin-bg)', willChange: 'transform' }}
       >
         <svg id="sld-canvas" style={{ width: '100%', height: '100%', display: 'block', backgroundColor: 'var(--admin-bg)' }} xmlns="http://www.w3.org/2000/svg"
           shapeRendering="crispEdges" textRendering="geometricPrecision">
@@ -504,16 +590,20 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
                   : isPd ? '#a78bfa'
                   : isPlcAll ? '#34d399'
                   : dotColor;
-                const hitR = Math.max(r * 1.8, 8);
+                const hitR = Math.max(r * 2.5, 14);
                 return (
                   <g key={p.id} className="sld-point-g" data-point-id={p.id}
                     transform={`rotate(${-transform.vr}, ${p.x}, ${p.y})`}
                     style={{ cursor: editMode ? 'move' : 'pointer' }}
                     onMouseEnter={() => setHoveredNodeId(p.id)}
-                    onMouseLeave={() => setHoveredNodeId(null)}
                   >
-                    {/* Vùng hit trong suốt — dễ hover/click hơn */}
-                    <circle cx={p.x} cy={p.y} r={hitR} fill="transparent" />
+                    {/* Hit circle: onMouseMove dùng distance để tìm đúng node gần nhất, bất kể z-order */}
+                    <circle cx={p.x} cy={p.y} r={hitR} fill="rgba(0,0,0,0.001)"
+                      onMouseMove={editMode ? undefined : (e) => {
+                        const nextId = hitTestPointAtScreenPos(e.clientX, e.clientY);
+                        setHoveredNodeId(prev => prev === nextId ? prev : nextId);
+                      }}
+                    />
                     {isCam ? (
                       /* ── CAMERA icon (outline) ── */
                       <g>

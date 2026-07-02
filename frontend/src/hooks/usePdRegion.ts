@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { stationApi, Boundary } from '@/services/StationApiService';
 import { authService } from '@/services/AuthService';
 import { AI_ENGINE_URL, API_BASE_URL } from '@/utils/env';
+import { confirmDialog } from '@/utils/confirm';
 
 /**
  * Hook managing PD regions for a selected camera.
@@ -213,15 +214,14 @@ export const usePdRegion = (cameraId: string | null) => {
   /** Xóa vùng PD theo id sau khi xác nhận từ người dùng. */
   const remove = async (id: string) => {
     if (!cameraId) return;
-    if (window.confirm('Xóa vùng này?')) {
-      try {
-        await stationApi.deleteBoundary(id);
-        await load();
-        await notifyAiEngine();
-      } catch (e) {
-        console.error('Delete failed', e);
-        alert('Xóa thất bại');
-      }
+    if (!await confirmDialog({ title: 'Xóa vùng PD', message: 'Bạn có chắc chắn muốn xóa vùng này?', confirmText: 'Xóa', danger: true })) return;
+    try {
+      await stationApi.deleteBoundary(id);
+      await load();
+      await notifyAiEngine();
+    } catch (e) {
+      console.error('Delete failed', e);
+      alert('Xóa thất bại');
     }
   };
 

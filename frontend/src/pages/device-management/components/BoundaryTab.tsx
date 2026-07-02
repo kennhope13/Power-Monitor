@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraDevice, Boundary, stationApi } from '@/services/StationApiService';
 import { Plus, Trash2, Save, X } from 'lucide-react';
 import { API_BASE_URL } from '@/utils/env';
+import { confirmDialog } from '@/utils/confirm';
 
 type Props = { cameras: CameraDevice[]; initialCamera?: CameraDevice | null };
 
@@ -185,7 +186,7 @@ export default function BoundaryTab({ cameras, initialCamera }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Xóa vùng này?')) return;
+    if (!await confirmDialog({ title: 'Xóa vùng', message: 'Bạn có chắc chắn muốn xóa vùng này?', confirmText: 'Xóa', danger: true })) return;
     try {
       await stationApi.deleteBoundary(id);
       if (cam) loadBoundaries(cam.id);

@@ -124,7 +124,7 @@ export default function KpiCards({ plcOnline, devices = [], sensors = [], rules 
       const t2 = !t2Sensor || t2Sensor.quality === 2 ? null : Math.round(t2Sensor.value * 10) / 10;
       const t3 = !t3Sensor || t3Sensor.quality === 2 ? null : Math.round(t3Sensor.value * 10) / 10;
 
-      const pdVal = !pdSensor || pdSensor.quality === 2 ? null : pdSensor.value;
+        const pdVal = !pdSensor || pdSensor.quality === 2 ? null : pdSensor.value;
 
       const healthStatus = hInfo.risk as 'good' | 'warning' | 'danger';
       
@@ -259,7 +259,7 @@ export default function KpiCards({ plcOnline, devices = [], sensors = [], rules 
                     <div style={{ background: 'rgba(255,255,255,0.04)', padding: '2px 4px', borderRadius: 0, textAlign: 'center' }}>
                       <div style={{ fontSize: '0.42rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>P.ĐIỆN</div>
                       <div style={{ fontSize: '0.6rem', fontWeight: 800, color: getPdColor(cab.pdCount, isOffline), fontFamily: 'Consolas,monospace' }}>
-                        {isOffline || cab.pdCount === null ? '---' : cab.pdCount <= -60 ? '----' : `${cab.pdCount}dB`}
+                      {isOffline || cab.pdCount === null ? '---' : `${cab.pdCount}dB`}
                       </div>
                     </div>
                   </div>

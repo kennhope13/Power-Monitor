@@ -664,9 +664,8 @@ export default function RealtimeMonitorPage() {
                           (b.name ? readings[b.name.toLowerCase()] : undefined) ??
                           readings[b.name];
 
-      // Fallback to global PD camera decibel value if region value is 0 or missing
-      const globalDb = readings['phong_dien'] ?? readings['pd'];
-      const pdValue = (regionValue !== undefined && regionValue !== 0) ? regionValue : globalDb;
+      // Không mượn giá trị PD từ thiết bị khác nếu vùng này không có dữ liệu.
+      const pdValue = regionValue !== undefined && regionValue !== 0 ? regionValue : undefined;
       const hasDischarge = pdValue !== undefined;
 
       // Xác định các ngưỡng cảnh báo/báo động động cho vùng này
