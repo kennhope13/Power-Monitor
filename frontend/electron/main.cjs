@@ -108,11 +108,19 @@ function startAllServices(root) {
 // ─────────────────────────────────────────────
 function waitForServer(onReady) {
   const targetUrl = getTargetUrl();
+  const isWindows = process.platform === 'win32';
+  
   const check = () => {
     const client = targetUrl.startsWith('https://') ? https : http;
     const req = client.get(targetUrl, (res) => {
       res.destroy();
       
+      if (isWindows) {
+        log('[Station Monitor] Giao diện UI đã sẵn sàng (chế độ Thin Client).');
+        onReady();
+        return;
+      }
+
       // UI Server đã sẵn sàng, tiếp tục kiểm tra Backend API (port 5000)
       const backendReq = http.get('http://127.0.0.1:5000/health', (backendRes) => {
         backendRes.destroy();
@@ -341,20 +349,26 @@ async function createWindow() {
     log('LOAD LOADING ERROR:', err.message);
   }
 
+  const isWindows = process.platform === 'win32';
   const root = findProjectRoot();
   log('findProjectRoot:', root);
-  if (!root) {
+  
+  if (!root && !isWindows) {
     await mainWindow.loadURL(errorHTML('Không tìm thấy thư mục dự án Power-Monitor.'));
     return;
   }
 
-  // Khởi động services nếu chưa chạy
-  const isRunning = await checkIfServicesRunning();
-  if (!isRunning) {
-    log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
-    startAllServices(root);
+  if (!isWindows) {
+    // Khởi động services nếu chưa chạy (chỉ dành cho máy chủ Linux)
+    const isRunning = await checkIfServicesRunning();
+    if (!isRunning) {
+      log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
+      startAllServices(root);
+    } else {
+      log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
+    }
   } else {
-    log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
+    log('[Station Monitor] Chế độ Thin Client trên Windows, bỏ qua khởi động backend cục bộ.');
   }
 
   if (app.isPackaged) {
