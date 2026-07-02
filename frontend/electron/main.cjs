@@ -34,29 +34,24 @@ function getTargetUrl() {
 // Tìm thư mục gốc của project (có start-all.sh)
 // ─────────────────────────────────────────────
 function findProjectRoot() {
+  const isWindows = process.platform === 'win32';
   const candidates = [];
 
-  // 1. Khi chạy AppImage: APPIMAGE trỏ tới file .AppImage
-  //    AppImage nằm tại <project>/frontend/dist-electron/
-  if (process.env.APPIMAGE) {
-    candidates.push(
-      path.resolve(path.dirname(process.env.APPIMAGE), '..', '..')
-    );
+  if (isWindows && app.isPackaged) {
+    candidates.push(process.resourcesPath);
   }
 
-  // 2. Khi chạy electron . trong dev: __dirname = <project>/frontend/electron/
-  candidates.push(
-    path.resolve(__dirname, '..', '..', '..')
-  );
-
-  // 3. Fallback cứng
-  candidates.push(
-    path.join(os.homedir(), 'Desktop', 'Power-Monitor')
-  );
+  if (process.env.APPIMAGE) {
+    candidates.push(path.resolve(path.dirname(process.env.APPIMAGE), '..', '..'));
+  }
+  candidates.push(path.resolve(__dirname, '..', '..', '..'));
+  candidates.push(path.join(os.homedir(), 'Desktop', 'Power-Monitor'));
 
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'start-all.sh'))) {
-      return c;
+    if (isWindows) {
+      if (fs.existsSync(path.join(c, 'backend', 'StationOS.Api.exe'))) return c;
+    } else {
+      if (fs.existsSync(path.join(c, 'start-all.sh'))) return c;
     }
   }
   return null;
@@ -87,20 +82,46 @@ function checkIfServicesRunning() {
 function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
   const env = { ...process.env, STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0' };
-  const proc = process.platform === 'win32'
-    ? spawn('cmd.exe', ['/c', 'start-all.bat'], {
-        cwd: root,
-        env,
-        detached: true,
-        stdio: 'ignore',
-      })
-    : spawn('bash', ['start-all.sh'], {
-        cwd: root,
-        env,
-        detached: true,
-        stdio: 'ignore',
-      });
-  proc.unref();
+  
+  if (process.platform === 'win32') {
+    const pgDataDir = path.join(root, 'pg_portable', 'data');
+    const pgBinDir = path.join(root, 'pg_portable', 'bin');
+    
+    if (!fs.existsSync(pgDataDir)) {
+      log('Khởi tạo database mới tại:', pgDataDir);
+      try {
+        const requireProcess = require('child_process');
+        requireProcess.execSync(`"${path.join(pgBinDir, 'initdb.exe')}" -D "${pgDataDir}" -U postgres --auth=trust`, { stdio: 'ignore' });
+      } catch (e) {
+        log('Lỗi initdb:', e.message);
+      }
+    }
+    
+    const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(root, 'pg_portable', 'postgres.log'), 'start'], {
+      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: 'ignore'
+    });
+    psql.unref();
+
+    const backend = spawn(path.join(root, 'backend', 'StationOS.Api.exe'), [], {
+      cwd: path.join(root, 'backend'), env, detached: true, stdio: 'ignore'
+    });
+    backend.unref();
+
+    const go2rtc = spawn(path.join(root, 'go2rtc', 'go2rtc.exe'), [], {
+      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: 'ignore'
+    });
+    go2rtc.unref();
+    
+    log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
+  } else {
+    const proc = spawn('bash', ['start-all.sh'], {
+      cwd: root,
+      env,
+      detached: true,
+      stdio: 'ignore',
+    });
+    proc.unref();
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -108,19 +129,12 @@ function startAllServices(root) {
 // ─────────────────────────────────────────────
 function waitForServer(onReady) {
   const targetUrl = getTargetUrl();
-  const isWindows = process.platform === 'win32';
   
   const check = () => {
     const client = targetUrl.startsWith('https://') ? https : http;
     const req = client.get(targetUrl, (res) => {
       res.destroy();
       
-      if (isWindows) {
-        log('[Station Monitor] Giao diện UI đã sẵn sàng (chế độ Thin Client).');
-        onReady();
-        return;
-      }
-
       // UI Server đã sẵn sàng, tiếp tục kiểm tra Backend API (port 5000)
       const backendReq = http.get('http://127.0.0.1:5000/health', (backendRes) => {
         backendRes.destroy();
@@ -349,26 +363,21 @@ async function createWindow() {
     log('LOAD LOADING ERROR:', err.message);
   }
 
-  const isWindows = process.platform === 'win32';
   const root = findProjectRoot();
   log('findProjectRoot:', root);
   
-  if (!root && !isWindows) {
+  if (!root) {
     await mainWindow.loadURL(errorHTML('Không tìm thấy thư mục dự án Power-Monitor.'));
     return;
   }
 
-  if (!isWindows) {
-    // Khởi động services nếu chưa chạy (chỉ dành cho máy chủ Linux)
-    const isRunning = await checkIfServicesRunning();
-    if (!isRunning) {
-      log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
-      startAllServices(root);
-    } else {
-      log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
-    }
+  // Khởi động services nếu chưa chạy
+  const isRunning = await checkIfServicesRunning();
+  if (!isRunning) {
+    log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
+    startAllServices(root);
   } else {
-    log('[Station Monitor] Chế độ Thin Client trên Windows, bỏ qua khởi động backend cục bộ.');
+    log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
   }
 
   if (app.isPackaged) {

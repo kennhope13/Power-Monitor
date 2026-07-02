@@ -1,15 +1,12 @@
-name: 🏗️ Build Thin Client Installer
+name: 🏗️ Build Thick Client Installer
 
 on:
-  # Chạy thủ công từ GitHub Actions tab
   workflow_dispatch:
     inputs:
       version:
         description: 'Phiên bản (VD: 3.0.1)'
         required: false
         default: '3.0.1'
-
-  # Tự động build khi push tag v*
   push:
     tags:
       - 'v*'
@@ -22,55 +19,64 @@ jobs:
       contents: write
 
     steps:
-      # 1. Checkout code
       - name: 📥 Checkout source
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
       - name: ⚙️ Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
 
-      # 5. Install npm dependencies
+      - name: ⚙️ Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 📦 Build Backend (.NET)
+        run: dotnet publish backend/StationOS.Api/StationOS.Api.csproj -c Release -r win-x64 --self-contained true -o backend_published/win-x64
+
+      - name: 📦 Download PostgreSQL Portable
+        run: |
+          Invoke-WebRequest -Uri "https://get.enterprisedb.com/postgresql/postgresql-16.3-1-windows-x64-binaries.zip" -OutFile pg.zip
+          Expand-Archive pg.zip -DestinationPath .
+          Rename-Item pgsql pg_portable
+          rm pg.zip
+
+      - name: 📦 Download go2rtc
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/AlexxIT/go2rtc/releases/download/v1.9.2/go2rtc_win64.zip" -OutFile go2rtc.zip
+          Expand-Archive go2rtc.zip -DestinationPath go2rtc
+          rm go2rtc.zip
+
       - name: 📦 Install npm dependencies
         working-directory: frontend
-        run: npm ci
+        run: npm install
 
-      # 6. Build thin client
-      - name: 🏗️ Build thin client installer
+      - name: 🏗️ Build Thick Client installer
         working-directory: frontend
         run: npm run electron:build:win
 
-      # 7. Upload installer artifact
       - name: 📤 Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: station-monitor-thin-client-windows
+          name: station-monitor-thick-client-windows
           path: |
             frontend/dist-electron/*.exe
           retention-days: 30
 
-      # 8. Tạo Release nếu push tag
       - name: 🚀 Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: Station Monitor ${{ github.ref_name }}
+          name: Station Monitor Master Station ${{ github.ref_name }}
           body: |
-            ## 📦 Station Monitor Thin Client Installer
+            ## 📦 Station Monitor Master Station (Windows)
 
             ### Cài đặt
             1. Tải file `Station Monitor_*_x64-setup.exe`
             2. Double-click → Next → Install → Finish
             3. Click icon **Station Monitor** trên Desktop
-            4. Nhập địa chỉ IP máy chủ trạm điện → Kết nối
-
-            ### Yêu cầu
-            - Windows 10/11 (64-bit)
-            - Kết nối mạng đến máy chủ trạm
+            4. Phần mềm sẽ tự khởi tạo cơ sở dữ liệu và chạy dưới dạng máy chủ.
 
           files: |
             frontend/dist-electron/*.exe

@@ -11,6 +11,13 @@ files:
 asarUnpack:
   - electron/loading.html
 afterPack: ./scripts/afterPack.cjs
+extraResources:
+  - from: "../backend_published/win-x64"
+    to: "backend"
+  - from: "../pg_portable"
+    to: "pg_portable"
+  - from: "../go2rtc"
+    to: "go2rtc"
 linux:
   target:
     - AppImage
