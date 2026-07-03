@@ -81,7 +81,11 @@ function checkIfServicesRunning() {
 // ─────────────────────────────────────────────
 function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
-  const env = { ...process.env, STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0' };
+  const env = { 
+    ...process.env, 
+    STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0',
+    ASPNETCORE_URLS: 'http://127.0.0.1:5000'
+  };
   
   if (process.platform === 'win32') {
     const userData = app.getPath('userData');
@@ -103,8 +107,9 @@ function startAllServices(root) {
     });
     psql.unref();
 
+    const backendLog = fs.openSync(path.join(userData, 'backend.log'), 'a');
     const backend = spawn(path.join(root, 'backend', 'StationOS.Api.exe'), [], {
-      cwd: path.join(root, 'backend'), env, detached: true, stdio: 'ignore'
+      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', backendLog, backendLog]
     });
     backend.unref();
 
