@@ -112,7 +112,7 @@ function startAllServices(root) {
       log('Khởi tạo database mới tại:', pgDataDir);
       try {
         const requireProcess = require('child_process');
-        requireProcess.execSync(`"${path.join(pgBinDir, 'initdb.exe')}" -D "${pgDataDir}" -U postgres --auth=trust`, { stdio: 'ignore' });
+        requireProcess.execSync(`"${path.join(pgBinDir, 'initdb.exe')}" -D "${pgDataDir}" -U postgres -E UTF8 --locale=C --auth=trust`, { stdio: 'ignore' });
       } catch (e) {
         log('Lỗi initdb:', e.message);
       }
