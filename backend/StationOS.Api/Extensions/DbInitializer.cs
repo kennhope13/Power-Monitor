@@ -161,144 +161,30 @@ public static class DbInitializer
     // ── Seed trạm + thiết bị thật ────────────────────────────
     private static async Task SeedDefaultStationAsync(AppDbContext db)
     {
-        // 1. Nếu có trạm cũ TBA-001 (từ bản backup), thực hiện đổi tên thành Trạm 110kV Long An
+        // 1. Nếu có trạm cũ TBA-001 (từ bản backup), thực hiện đổi tên thành Trạm Mặc Định
         var oldStation = await db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-001");
         if (oldStation != null)
         {
-            oldStation.Name = "Trạm 110kV Long An";
-            oldStation.Code = "TBA-LA01";
-            oldStation.Location = """{"lat": 10.53, "lng": 106.41, "address": "Bến Lức, Long An"}""";
+            oldStation.Name = "Trạm Mặc Định";
+            oldStation.Code = "TBA-DEFAULT";
+            oldStation.Location = """{"lat": 21.0285, "lng": 105.8542, "address": "Hà Nội, Việt Nam"}""";
             await db.SaveChangesAsync();
-            Console.WriteLine("[DbInitializer] Đã chuyển đổi trạm TBA-001 thành TBA-LA01 (Trạm 110kV Long An)");
+            Console.WriteLine("[DbInitializer] Đã chuyển đổi trạm TBA-001 thành TBA-DEFAULT");
         }
 
-        // 2. Nếu không có trạm nào trong DB, seed đầy đủ từ đầu
+        // 2. Nếu không có trạm nào trong DB, tạo một trạm trống mặc định
         if (!await db.Stations.AnyAsync())
         {
-            // 1. Trạm Long An (Có thiết bị kết nối)
-            var laStation = new StationOS.Data.Entities.Station
+            var defaultStation = new StationOS.Data.Entities.Station
             {
-                Name = "Trạm 110kV Long An",
-                Code = "TBA-LA01",
-                Location = """{"lat": 10.53, "lng": 106.41, "address": "Bến Lức, Long An"}""",
+                Name = "Trạm Mặc Định",
+                Code = "TBA-DEFAULT",
+                Location = """{"lat": 21.0285, "lng": 105.8542, "address": "Hà Nội, Việt Nam"}""",
                 Status = "active"
             };
-            db.Stations.Add(laStation);
-            await db.SaveChangesAsync();
-
-            // Thiết bị cho trạm Long An
-            var plc1 = new StationOS.Data.Entities.Device
-            {
-                StationId = laStation.Id,
-                Name = "Tủ 471",
-                Type = "plc_s7",
-                Protocol = "snap7",
-                Config = """{"ip":"192.168.10.100","rack":0,"slot":1,"db":32,"offset":0,"length":28,"t1_offset":0,"t2_offset":2,"t3_offset":4,"pd_offset":14,"eppc_offset":12,"indi_offset":18,"enableHealthScore":true}""",
-                Status = "online"
-            };
-            var plc2 = new StationOS.Data.Entities.Device
-            {
-                StationId = laStation.Id,
-                Name = "Tủ 473",
-                Type = "plc_s7",
-                Protocol = "snap7",
-                Config = """{"ip":"192.168.10.100","rack":0,"slot":1,"db":32,"offset":0,"length":28,"t1_offset":6,"t2_offset":8,"t3_offset":10,"pd_offset":22,"eppc_offset":20,"indi_offset":26,"enableHealthScore":true}""",
-                Status = "online"
-            };
-            var camDual = new StationOS.Data.Entities.Device
-            {
-                StationId = laStation.Id,
-                Name = "HIKVISION – Dual Thermal & Optical",
-                Type = "camera_dual",
-                Protocol = "isapi",
-                Config = """{"ip":"192.168.10.152","username":"admin","password":"Demo@2024","rtsp_optical":"/Streaming/Channels/101","go2rtc_optical":"cam_192_168_10_152_optical","rtsp_thermal":"/Streaming/Channels/201","go2rtc_thermal":"cam_192_168_10_152_thermal","ffmpeg_transcode":true}""",
-                Status = "online"
-            };
-            var camPd = new StationOS.Data.Entities.Device
-            {
-                StationId = laStation.Id,
-                Name = "HIKVISION – Phóng điện",
-                Type = "camera_pd",
-                Protocol = "isapi",
-                Config = """{"ip":"192.168.10.153","username":"admin","password":"Demo@2024","rtsp_path":"/Streaming/Channels/101","go2rtc_id":"camera_192_168_10_153_pd"}""",
-                Status = "online"
-            };
-            db.Devices.AddRange(plc1, plc2, camDual, camPd);
+            db.Stations.Add(defaultStation);
             await db.SaveChangesAsync();
         }
-
-        // 3. Đảm bảo các trạm con khác tồn tại
-        if (!await db.Stations.AnyAsync(s => s.Code == "TBA-DT01"))
-        {
-            db.Stations.Add(new StationOS.Data.Entities.Station
-            {
-                Name = "Trạm 110kV Đồng Tháp",
-                Code = "TBA-DT01",
-                Location = """{"lat": 10.45, "lng": 105.63, "address": "Cao Lãnh, Đồng Tháp"}""",
-                Status = "active"
-            });
-        }
-
-        if (!await db.Stations.AnyAsync(s => s.Code == "TBA-VT01"))
-        {
-            var vtStation = new StationOS.Data.Entities.Station
-            {
-                Name = "Trạm 110kV Vũng Tàu",
-                Code = "TBA-VT01",
-                Location = """{"lat": 10.41, "lng": 107.13, "address": "Phú Mỹ, Bà Rịa - Vũng Tàu"}""",
-                Status = "active"
-            };
-            db.Stations.Add(vtStation);
-            await db.SaveChangesAsync();
-
-            var mockPlcVt = new StationOS.Data.Entities.Device
-            {
-                StationId = vtStation.Id,
-                Name = "Cổng Modbus Vũng Tàu",
-                Type = "modbus_tcp",
-                Protocol = "modbus_tcp",
-                Config = "{}",
-                Status = "offline"
-            };
-            db.Devices.Add(mockPlcVt);
-            await db.SaveChangesAsync();
-
-            var alertVt = new StationOS.Data.Entities.Alert
-            {
-                StationId = vtStation.Id,
-                DeviceId = mockPlcVt.Id,
-                Source = "system",
-                Level = "warning",
-                Status = "open",
-                Message = "Mất kết nối thiết bị đo tại trạm Vũng Tàu",
-                TriggeredAt = DateTime.UtcNow.AddHours(-1)
-            };
-            db.Alerts.Add(alertVt);
-        }
-
-        if (!await db.Stations.AnyAsync(s => s.Code == "TBA-TN01"))
-        {
-            db.Stations.Add(new StationOS.Data.Entities.Station
-            {
-                Name = "Trạm 110kV Tây Ninh",
-                Code = "TBA-TN01",
-                Location = """{"lat": 11.36, "lng": 106.11, "address": "Trảng Bàng, Tây Ninh"}""",
-                Status = "active"
-            });
-        }
-
-        if (!await db.Stations.AnyAsync(s => s.Code == "TBA-HCM01"))
-        {
-            db.Stations.Add(new StationOS.Data.Entities.Station
-            {
-                Name = "Trung tâm Giám sát Đa trạm (TP. HCM)",
-                Code = "TBA-HCM01",
-                Location = """{"lat": 10.7769, "lng": 106.7009, "address": "Quận 1, TP. Hồ Chí Minh"}""",
-                Status = "active"
-            });
-        }
-
-        await db.SaveChangesAsync();
     }
 
     // ── Seed rules nhiệt độ 3 pha ────────────────────────────────
