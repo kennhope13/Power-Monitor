@@ -13,9 +13,25 @@ app.commandLine.appendSwitch('disable-setuid-sandbox');
 const LOG_FILE = path.join(os.homedir(), 'Desktop', 'station-monitor.log');
 const _logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
 function log(...args) {
-  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  const msg = args.join(' ');
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
   _logStream.write(line);
+  
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      const safeMsg = msg.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '');
+      mainWindow.webContents.executeJavaScript(`
+        (function(){
+          var el = document.getElementById('logs');
+          if (el) {
+            el.textContent += "${safeMsg}\\n";
+            el.scrollTop = el.scrollHeight;
+          }
+        })();
+      `).catch(() => {});
+    } catch(e) {}
+  }
 }
 process.on('uncaughtException', (err) => log('[CRASH]', err.stack || err));
 process.on('unhandledRejection', (err) => log('[REJECT]', err?.stack || err));
@@ -103,19 +119,33 @@ function startAllServices(root) {
     }
     
     const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'], {
-      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: 'ignore'
+      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe']
     });
+    psql.stdout?.on('data', d => log('[PostgreSQL]', d.toString().trim()));
+    psql.stderr?.on('data', d => log('[PostgreSQL ERR]', d.toString().trim()));
     psql.unref();
 
     const backendLog = fs.openSync(path.join(userData, 'backend.log'), 'a');
     const backend = spawn(path.join(root, 'backend', 'StationOS.Api.exe'), [], {
-      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', backendLog, backendLog]
+      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe']
+    });
+    backend.stdout?.on('data', d => {
+      const s = d.toString();
+      fs.writeSync(backendLog, s);
+      log('[Backend]', s.trim());
+    });
+    backend.stderr?.on('data', d => {
+      const s = d.toString();
+      fs.writeSync(backendLog, s);
+      log('[Backend ERR]', s.trim());
     });
     backend.unref();
 
     const go2rtc = spawn(path.join(root, 'go2rtc', 'go2rtc.exe'), [], {
-      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: 'ignore'
+      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe']
     });
+    go2rtc.stdout?.on('data', d => log('[go2rtc]', d.toString().trim()));
+    go2rtc.stderr?.on('data', d => log('[go2rtc ERR]', d.toString().trim()));
     go2rtc.unref();
     
     log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
@@ -305,6 +335,7 @@ function loadingHTML(message) {
   <h1>Station Monitor</h1>
   <div class="spinner"></div>
   <p class="msg">${message}</p>
+  <pre id="logs" style="background:rgba(0,0,0,0.5);color:#10b981;padding:12px;width:90%;max-width:1000px;height:300px;overflow-y:auto;font-family:monospace;font-size:12px;border-radius:8px;border:1px solid #1e293b;margin-top:10px;white-space:pre-wrap;text-align:left;"></pre>
 </body>
 </html>`);
 }
