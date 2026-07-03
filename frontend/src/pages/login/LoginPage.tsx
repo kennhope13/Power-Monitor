@@ -201,7 +201,7 @@ export default function LoginPage() {
               letterSpacing: '0.5px'
             }}
           >
-            {showConfig ? 'Ẩn cấu hình máy chủ' : 'Cấu hình IP máy chủ'}
+            {showConfig ? 'Ẩn cấu hình IP trạm' : 'Cấu hình IP máy trạm'}
           </button>
         </div>
 
@@ -213,7 +213,7 @@ export default function LoginPage() {
             textAlign: 'left'
           }}>
             <div className="gm-input-group" style={{ marginBottom: '10px' }}>
-              <label htmlFor="serverIpInput">Địa chỉ IP máy chủ</label>
+              <label htmlFor="serverIpInput">Địa chỉ IP máy trạm (Master Station)</label>
               <input
                 type="text"
                 id="serverIpInput"
