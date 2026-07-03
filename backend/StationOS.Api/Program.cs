@@ -87,6 +87,10 @@ app.MapControllers();
 // SignalR endpoint
 app.MapHub<RealtimeHub>("/ws/realtime");
 
+// ── Database & Seeding Startup Tasks ──────────────────────
+// PHẢI chạy trước Hangfire vì Hangfire sẽ cố gắng connect để tạo bảng ngay khi UseHangfireDashboard/RecurringJob.AddOrUpdate được gọi
+await app.InitializeDatabaseAsync();
+
 // Hangfire dashboard bảo mật với HangfireAuthorizationFilter
 app.UseHangfireDashboard("/hangfire", new DashboardOptions
 {
@@ -98,8 +102,5 @@ RecurringJob.AddOrUpdate<ReportSchedulerWorker>(
     "daily-report",
     worker => worker.GenerateDailyAsync(),
     "5 0 * * *");  // 00:05 mỗi ngày
-
-// ── Database & Seeding Startup Tasks ──────────────────────
-await app.InitializeDatabaseAsync();
 
 app.Run();
