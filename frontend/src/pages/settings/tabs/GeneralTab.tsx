@@ -58,7 +58,7 @@ export default function GeneralTab() {
       .finally(() => setLoading(false));
 
     stationApi.getStations().then(stations => {
-      if (stations && stations.length > 0) {
+      if (stations && stations.length > 0 && stations[0]) {
         setStationId(stations[0].id);
         setStationName(stations[0].name);
       }
