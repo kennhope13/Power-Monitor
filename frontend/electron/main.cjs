@@ -84,7 +84,8 @@ function startAllServices(root) {
   const env = { ...process.env, STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0' };
   
   if (process.platform === 'win32') {
-    const pgDataDir = path.join(root, 'pg_portable', 'data');
+    const userData = app.getPath('userData');
+    const pgDataDir = path.join(userData, 'pg_data');
     const pgBinDir = path.join(root, 'pg_portable', 'bin');
     
     if (!fs.existsSync(pgDataDir)) {
@@ -97,7 +98,7 @@ function startAllServices(root) {
       }
     }
     
-    const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(root, 'pg_portable', 'postgres.log'), 'start'], {
+    const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'], {
       cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: 'ignore'
     });
     psql.unref();
