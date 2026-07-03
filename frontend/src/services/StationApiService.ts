@@ -47,6 +47,7 @@ class StationApiService {
   getStations = stationService.getStations.bind(stationService);
   getFirstStationId = stationService.getFirstStationId.bind(stationService);
   createStation = stationService.createStation.bind(stationService);
+  updateStation = stationService.updateStation.bind(stationService);
   deleteStation = stationService.deleteStation.bind(stationService);
 
   // ── Devices ───────────────────────────────────────────────

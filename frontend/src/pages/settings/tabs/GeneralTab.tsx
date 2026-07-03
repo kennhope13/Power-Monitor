@@ -26,6 +26,10 @@ export default function GeneralTab() {
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
 
+  // Thông tin trạm cục bộ
+  const [stationId, setStationId] = useState<string | null>(null);
+  const [stationName, setStationName] = useState('');
+
   // Trạng thái kiểm tra lỗi (Validation Errors)
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -52,6 +56,13 @@ export default function GeneralTab() {
       })
       .catch(() => showToast('Không thể tải cài đặt từ máy chủ', 'error'))
       .finally(() => setLoading(false));
+
+    stationApi.getStations().then(stations => {
+      if (stations && stations.length > 0) {
+        setStationId(stations[0].id);
+        setStationName(stations[0].name);
+      }
+    }).catch(() => console.error('Lỗi tải thông tin trạm'));
   };
 
   // Kiểm tra tính hợp lệ của tham số thời gian thực (Live Validation)
@@ -78,6 +89,9 @@ export default function GeneralTab() {
       }
     } else {
       switch (name) {
+        case 'stationName':
+          if (!value.trim()) return 'Tên trạm không được để trống';
+          break;
         case 'email':
           if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Định dạng Email không hợp lệ';
           break;
@@ -144,7 +158,7 @@ export default function GeneralTab() {
   const handleSave = async () => {
     // Chạy kiểm tra lỗi cho tất cả các trường
     const newErrors: Record<string, string> = {};
-    const checks = { plcPoll, dbSave, camRecord, healthCheck, email, phone };
+    const checks = { stationName, plcPoll, dbSave, camRecord, healthCheck, email, phone };
     Object.entries(checks).forEach(([key, val]) => {
       const err = validateField(key, val);
       if (err) newErrors[key] = err;
@@ -168,6 +182,7 @@ export default function GeneralTab() {
         stationApi.updateSetting('enable_alert_email', String(enableEmail)),
         stationApi.updateSetting('enable_alert_sms', String(enableSms)),
         stationApi.updateSetting('timezone', timezone),
+        ...(stationId && stationName.trim() ? [stationApi.updateStation(stationId, stationName)] : [])
       ]);
       setSaveStatus('Đã lưu thành công');
       showToast('Cập nhật thông số hệ thống thành công!', 'success');
@@ -283,7 +298,23 @@ export default function GeneralTab() {
         
         {/* Cột 1: Dữ liệu & Ghi hình */}
         <div className="setting-section" style={{ borderRadius: 0 }}>
-          <div className="section-header">DỮ LIỆU & GHI HÌNH</div>
+          <div className="section-header">THÔNG TIN & DỮ LIỆU</div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, marginBottom: 6, textTransform: 'uppercase' }}>
+              Tên Trạm / Dự án
+            </label>
+            <input 
+              type="text" 
+              className="form-input" 
+              style={{ width: '100%', boxSizing: 'border-box', borderRadius: 0, borderColor: errors.stationName ? 'var(--admin-danger)' : 'var(--admin-border)' }}
+              placeholder="Ví dụ: Trạm 110kV Long An" 
+              value={stationName} 
+              onChange={e => handleFieldChange('stationName', e.target.value, setStationName)} 
+            />
+            {errors.stationName && <div className="err-label">✕ {errors.stationName}</div>}
+            <div className="hint-text">Tên trạm hiển thị trên tiêu đề và báo cáo.</div>
+          </div>
           
           <div className="form-group" style={{ margin: 0 }}>
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, marginBottom: 6, textTransform: 'uppercase' }}>

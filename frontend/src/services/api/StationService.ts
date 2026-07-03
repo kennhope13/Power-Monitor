@@ -26,6 +26,11 @@ export class StationService {
     return apiMutate<Station>('POST', '/stations', { name, code, location });
   }
 
+  /** Cập nhật trạm. */
+  async updateStation(id: string, name: string, code?: string, location?: string, status?: string): Promise<Station> {
+    return apiMutate<Station>('PUT', `/stations/${id}`, { name, code, location, status });
+  }
+
   /** Xóa trạm. */
   async deleteStation(id: string): Promise<void> {
     return apiMutate<void>('DELETE', `/stations/${id}`);
