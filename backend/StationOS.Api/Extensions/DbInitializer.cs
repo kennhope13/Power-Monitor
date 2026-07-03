@@ -15,19 +15,32 @@ public static class DbInitializer
         var services = scope.ServiceProvider;
         var db = services.GetRequiredService<AppDbContext>();
 
-        // 1. Tạo extension TimescaleDB TRƯỚC khi migrate (cần thiết cho hypertable)
+        // Chờ PostgreSQL khởi động xong và Migration thành công (retry tối đa 15 giây)
+        for (int i = 0; i < 15; i++)
+        {
+            try
+            {
+                // Thử tạo DB và migrate. Sẽ throw exception nếu DB chưa bật.
+                db.Database.Migrate();
+                break; // Thành công thì thoát vòng lặp
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Startup] Lỗi kết nối / Migrate DB. Đợi Database sẵn sàng... ({i + 1}/15): {ex.Message}");
+                if (i == 14) throw; // Lần cuối cùng thì ném lỗi ra
+                await Task.Delay(1000);
+            }
+        }
+
+        // 1. Tạo extension TimescaleDB (cần thiết cho hypertable) - CHẠY SAU KHI ĐÃ CÓ DATABASE
         try
         {
             await db.Database.ExecuteSqlRawAsync(@"CREATE EXTENSION IF NOT EXISTS timescaledb;");
         }
         catch (Exception ex)
         {
-            // SQLite hoặc Postgres không có TimescaleDB → bỏ qua, dùng bảng thường
-            Console.WriteLine($"[Startup] TimescaleDB extension không khả dụng (OK nếu là SQLite): {ex.Message}");
+            Console.WriteLine($"[Startup] TimescaleDB extension không khả dụng: {ex.Message}");
         }
-
-        // 2. Chạy migration tạo schema
-        db.Database.Migrate();
 
         // 3. Biến SensorReadings thành hypertable (sau khi table đã được tạo)
         try
