@@ -80,6 +80,30 @@ function checkIfServicesRunning() {
 // ─────────────────────────────────────────────
 // Spawn start-all.sh (detached — thoát Electron không kill services)
 // ─────────────────────────────────────────────
+function spawnHiddenWin32(exePath, args, cwd, logPath) {
+  const escapedExe = exePath.replace(/'/g, "''");
+  const escapedCwd = cwd.replace(/'/g, "''");
+  const escapedLog = logPath ? logPath.replace(/'/g, "''") : null;
+  
+  const argListStr = args.length 
+    ? `-ArgumentList ${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')}` 
+    : '';
+    
+  const redirectStr = escapedLog 
+    ? `-RedirectStandardOutput '${escapedLog}' -RedirectStandardError '${escapedLog}'` 
+    : '';
+
+  const psCommand = `Start-Process -FilePath '${escapedExe}' ${argListStr} -WorkingDirectory '${escapedCwd}' ${redirectStr} -WindowStyle Hidden`;
+  
+  log('[spawnHiddenWin32] Running PS command:', psCommand);
+  
+  const proc = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
+    windowsHide: true,
+    stdio: 'ignore'
+  });
+  proc.unref();
+}
+
 function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
   const env = { 
@@ -102,22 +126,26 @@ function startAllServices(root) {
       }
     }
     
-    const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'], {
-      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: 'ignore', windowsHide: true
-    });
-    psql.unref();
+    spawnHiddenWin32(
+      path.join(pgBinDir, 'pg_ctl.exe'),
+      ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'],
+      path.join(root, 'pg_portable'),
+      null
+    );
 
-    const backendLog = fs.openSync(path.join(userData, 'backend.log'), 'a');
-    const backend = spawn(path.join(root, 'backend', 'StationOS.Api.exe'), [], {
-      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', backendLog, backendLog], windowsHide: true
-    });
-    backend.unref();
+    spawnHiddenWin32(
+      path.join(root, 'backend', 'StationOS.Api.exe'),
+      [],
+      path.join(root, 'backend'),
+      path.join(userData, 'backend.log')
+    );
 
-    const go2rtcLog = fs.openSync(path.join(userData, 'go2rtc.log'), 'a');
-    const go2rtc = spawn(path.join(root, 'go2rtc', 'go2rtc.exe'), [], {
-      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: ['ignore', go2rtcLog, go2rtcLog], windowsHide: true
-    });
-    go2rtc.unref();
+    spawnHiddenWin32(
+      path.join(root, 'go2rtc', 'go2rtc.exe'),
+      [],
+      path.join(root, 'go2rtc'),
+      path.join(userData, 'go2rtc.log')
+    );
     
     log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
   } else {
