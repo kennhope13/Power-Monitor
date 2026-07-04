@@ -19,6 +19,7 @@ const normalizeText = (value: string): string => value
   .trim()
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[đĐ]/g, 'D')
   .replace(/\s+/g, ' ')
   .toUpperCase();
 

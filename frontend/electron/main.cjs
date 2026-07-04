@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu } = require('electron');
-const { spawn }  = require('child_process');
+const { spawn, spawnSync }  = require('child_process');
 const path  = require('path');
 const fs    = require('fs');
 const os    = require('os');
@@ -96,8 +96,7 @@ function startAllServices(root) {
     if (!fs.existsSync(pgDataDir)) {
       log('Khởi tạo database mới tại:', pgDataDir);
       try {
-        const requireProcess = require('child_process');
-        requireProcess.execSync(`"${path.join(pgBinDir, 'initdb.exe')}" -D "${pgDataDir}" -U postgres -E UTF8 --locale=C --auth=trust`, { stdio: 'ignore', windowsHide: true });
+        spawnSync(path.join(pgBinDir, 'initdb.exe'), ['-D', pgDataDir, '-U', 'postgres', '-E', 'UTF8', '--locale=C', '--auth=trust'], { stdio: 'ignore', windowsHide: true });
       } catch (e) {
         log('Lỗi initdb:', e.message);
       }
