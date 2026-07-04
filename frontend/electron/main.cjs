@@ -24,9 +24,10 @@ process.on('unhandledRejection', (err) => log('[REJECT]', err?.stack || err));
 let mainWindow   = null;
 let localUiServer = null;
 let localUiPort = null;
+let forceLocalUi = false;
 
 function getTargetUrl() {
-  return app.isPackaged
+  return (app.isPackaged || forceLocalUi)
     ? `http://127.0.0.1:${localUiPort ?? 4173}`
     : 'http://localhost:5173';
 }
@@ -540,8 +541,33 @@ async function createWindow() {
     log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
   }
 
-  if (app.isPackaged) {
-    log('isPackaged → startLocalUiServer...');
+  // Kiểm tra xem Vite dev server (port 5173) có đang chạy không (chỉ khi chưa package)
+  let useVite = false;
+  if (!app.isPackaged) {
+    try {
+      useVite = await new Promise((resolve) => {
+        const req = http.get('http://127.0.0.1:5173', (res) => {
+          res.destroy();
+          resolve(true);
+        });
+        req.on('error', () => resolve(false));
+        req.setTimeout(500, () => {
+          req.destroy();
+          resolve(false);
+        });
+      });
+    } catch (e) {
+      useVite = false;
+    }
+  }
+
+  if (!useVite) {
+    log('[Station Monitor] Vite dev server không chạy. Chuyển sang dùng local UI server trên cổng 4173.');
+    forceLocalUi = true;
+  }
+
+  if (app.isPackaged || forceLocalUi) {
+    log('Khởi chạy local UI server (phục vụ từ dist)...');
     const distDir = path.join(app.getAppPath(), 'dist');
     log('distDir:', distDir, 'exists:', fs.existsSync(distDir));
     try {
@@ -551,6 +577,7 @@ async function createWindow() {
       log('startLocalUiServer ERROR:', err.message);
       if (err.code === 'EADDRINUSE') {
         log('[Station Monitor] Cổng 4173 đã được sử dụng. Tiếp tục tải giao diện...');
+        localUiPort = 4173;
       } else {
         await mainWindow.loadURL(errorHTML(`Không thể khởi động giao diện: ${err.message}`));
         return;
