@@ -16,21 +16,32 @@ public static class DbInitializer
         var services = scope.ServiceProvider;
         var db = services.GetRequiredService<AppDbContext>();
 
-        // Chờ PostgreSQL khởi động xong và Migration thành công (retry tối đa 15 giây)
-        for (int i = 0; i < 15; i++)
+        // Chờ PostgreSQL khởi động xong và Migration thành công (retry tối đa 30 giây — PG portable trên Windows cần thời gian)
+        for (int i = 0; i < 30; i++)
         {
             try
             {
-                // Thử tạo DB và migrate. Sẽ throw exception nếu DB chưa bật.
+                // Đảm bảo database tồn tại trước khi migrate
+                db.Database.EnsureCreated();
                 db.Database.Migrate();
                 break; // Thành công thì thoát vòng lặp
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Startup] Lỗi kết nối / Migrate DB. Đợi Database sẵn sàng... ({i + 1}/15): {ex.Message}");
-                if (i == 14) throw; // Lần cuối cùng thì ném lỗi ra
+                Console.WriteLine($"[Startup] Lỗi kết nối / Migrate DB. Đợi Database sẵn sàng... ({i + 1}/30): {ex.Message}");
+                if (i == 29) throw; // Lần cuối cùng thì ném lỗi ra
                 await Task.Delay(1000);
             }
+        }
+
+        // Force UTF8 client encoding (phòng khi Windows PG dùng WIN1252 mặc định)
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(@"SET client_encoding = 'UTF8';");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Startup] Không thể set client_encoding: {ex.Message}");
         }
 
         // 1. Tạo extension TimescaleDB (cần thiết cho hypertable) - CHẠY SAU KHI ĐÃ CÓ DATABASE

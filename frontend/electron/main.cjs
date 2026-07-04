@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Menu } = require('electron');
-const { spawn, spawnSync }  = require('child_process');
+const { spawn, spawnSync, execSync }  = require('child_process');
 const path  = require('path');
 const fs    = require('fs');
 const os    = require('os');
@@ -78,9 +78,76 @@ function checkIfServicesRunning() {
 }
 
 // ─────────────────────────────────────────────
+// Đợi PostgreSQL sẵn sàng nhận kết nối
+// ─────────────────────────────────────────────
+function waitForPostgres(pgBinDir, maxRetries = 30) {
+  return new Promise((resolve, reject) => {
+    let attempt = 0;
+    const check = () => {
+      attempt++;
+      try {
+        const result = spawnSync(
+          path.join(pgBinDir, 'pg_isready.exe'),
+          ['-h', '127.0.0.1', '-p', '5432', '-U', 'postgres'],
+          { timeout: 3000, windowsHide: true, encoding: 'utf8' }
+        );
+        if (result.status === 0) {
+          log(`[PostgreSQL] Sẵn sàng sau ${attempt} lần thử.`);
+          resolve();
+          return;
+        }
+      } catch (e) {
+        // pg_isready chưa có hoặc lỗi, bỏ qua
+      }
+      if (attempt >= maxRetries) {
+        reject(new Error(`PostgreSQL không sẵn sàng sau ${maxRetries} lần thử`));
+        return;
+      }
+      setTimeout(check, 1000);
+    };
+    check();
+  });
+}
+
+// ─────────────────────────────────────────────
+// Tạo database StationOS nếu chưa tồn tại
+// ─────────────────────────────────────────────
+function ensureDatabaseExists(pgBinDir) {
+  try {
+    // Thử tạo database, nếu đã tồn tại thì sẽ báo lỗi nhẹ (không crash)
+    const result = spawnSync(
+      path.join(pgBinDir, 'createdb.exe'),
+      ['-h', '127.0.0.1', '-p', '5432', '-U', 'postgres', '-E', 'UTF8', '--locale=C', 'StationOS'],
+      { timeout: 10000, windowsHide: true, encoding: 'utf8', env: { ...process.env, PGCLIENTENCODING: 'UTF8' } }
+    );
+    if (result.status === 0) {
+      log('[PostgreSQL] Đã tạo database StationOS thành công.');
+    } else if (result.stderr && result.stderr.includes('already exists')) {
+      log('[PostgreSQL] Database StationOS đã tồn tại.');
+    } else {
+      log('[PostgreSQL] createdb output:', result.stdout, result.stderr);
+    }
+  } catch (e) {
+    log('[PostgreSQL] Lỗi tạo database:', e.message);
+  }
+
+  // Set encoding UTF8 cho database (phòng khi database đang dùng WIN1252)
+  try {
+    spawnSync(
+      path.join(pgBinDir, 'psql.exe'),
+      ['-h', '127.0.0.1', '-p', '5432', '-U', 'postgres', '-d', 'StationOS', '-c', "ALTER DATABASE \"StationOS\" SET client_encoding = 'UTF8';"],
+      { timeout: 5000, windowsHide: true, encoding: 'utf8', env: { ...process.env, PGCLIENTENCODING: 'UTF8' } }
+    );
+    log('[PostgreSQL] Đã set client_encoding = UTF8 cho database StationOS.');
+  } catch (e) {
+    log('[PostgreSQL] Lỗi set encoding:', e.message);
+  }
+}
+
+// ─────────────────────────────────────────────
 // Spawn start-all.sh (detached — thoát Electron không kill services)
 // ─────────────────────────────────────────────
-function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath) {
+function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath, extraEnv) {
   const escapedExe = exePath.replace(/'/g, "''");
   const escapedCwd = cwd.replace(/'/g, "''");
   const escapedOut = stdoutPath ? stdoutPath.replace(/'/g, "''") : null;
@@ -98,7 +165,16 @@ function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath) {
     redirectStr += ` -RedirectStandardError '${escapedErr}'`;
   }
 
-  const psCommand = `Start-Process -FilePath '${escapedExe}' ${argListStr} -WorkingDirectory '${escapedCwd}' ${redirectStr} -WindowStyle Hidden`;
+  // Xây dựng environment block nếu có extraEnv
+  let envPrefix = '';
+  if (extraEnv) {
+    const envSetStatements = Object.entries(extraEnv)
+      .map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}'`)
+      .join('; ');
+    envPrefix = envSetStatements + '; ';
+  }
+
+  const psCommand = `${envPrefix}Start-Process -FilePath '${escapedExe}' ${argListStr} -WorkingDirectory '${escapedCwd}' ${redirectStr} -WindowStyle Hidden`;
   
   log('[spawnHiddenWin32] Running PS command:', psCommand);
   
@@ -109,7 +185,7 @@ function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath) {
   proc.unref();
 }
 
-function startAllServices(root) {
+async function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
   const env = { 
     ...process.env, 
@@ -122,15 +198,42 @@ function startAllServices(root) {
     const pgDataDir = path.join(userData, 'pg_data');
     const pgBinDir = path.join(root, 'pg_portable', 'bin');
     
+    // ── Bước 1: initdb nếu chưa có data directory ──
     if (!fs.existsSync(pgDataDir)) {
       log('Khởi tạo database mới tại:', pgDataDir);
       try {
-        spawnSync(path.join(pgBinDir, 'initdb.exe'), ['-D', pgDataDir, '-U', 'postgres', '-E', 'UTF8', '--locale=C', '--auth=trust'], { stdio: 'ignore', windowsHide: true });
+        spawnSync(path.join(pgBinDir, 'initdb.exe'), [
+          '-D', pgDataDir, 
+          '-U', 'postgres', 
+          '-E', 'UTF8', 
+          '--locale=C', 
+          '--auth=trust'
+        ], { 
+          stdio: 'ignore', 
+          windowsHide: true,
+          env: { ...process.env, PGCLIENTENCODING: 'UTF8' }
+        });
       } catch (e) {
         log('Lỗi initdb:', e.message);
       }
     }
+
+    // Đảm bảo postgresql.conf có client_encoding = 'UTF8'
+    try {
+      const pgConfPath = path.join(pgDataDir, 'postgresql.conf');
+      if (fs.existsSync(pgConfPath)) {
+        let pgConf = fs.readFileSync(pgConfPath, 'utf8');
+        if (!pgConf.includes("client_encoding = 'UTF8'")) {
+          pgConf += "\n# Force UTF8 encoding for Vietnamese text support\nclient_encoding = 'UTF8'\n";
+          fs.writeFileSync(pgConfPath, pgConf, 'utf8');
+          log('[PostgreSQL] Đã thêm client_encoding = UTF8 vào postgresql.conf');
+        }
+      }
+    } catch (e) {
+      log('[PostgreSQL] Lỗi cập nhật postgresql.conf:', e.message);
+    }
     
+    // ── Bước 2: Khởi động PostgreSQL ──
     spawnHiddenWin32(
       path.join(pgBinDir, 'pg_ctl.exe'),
       ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'],
@@ -139,14 +242,27 @@ function startAllServices(root) {
       null
     );
 
+    // ── Bước 3: Đợi PostgreSQL sẵn sàng ──
+    try {
+      await waitForPostgres(pgBinDir, 30);
+    } catch (e) {
+      log('[PostgreSQL] CẢNH BÁO:', e.message, '— thử tiếp tục anyway...');
+    }
+
+    // ── Bước 4: Tạo database StationOS nếu chưa có ──
+    ensureDatabaseExists(pgBinDir);
+
+    // ── Bước 5: Khởi động Backend (SAU KHI PostgreSQL sẵn sàng + DB đã tạo) ──
     spawnHiddenWin32(
       path.join(root, 'backend', 'StationOS.Api.exe'),
       [],
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
-      path.join(userData, 'backend_err.log')
+      path.join(userData, 'backend_err.log'),
+      { PGCLIENTENCODING: 'UTF8' }
     );
 
+    // ── Bước 6: Khởi động go2rtc ──
     spawnHiddenWin32(
       path.join(root, 'go2rtc', 'go2rtc.exe'),
       [],
@@ -419,7 +535,7 @@ async function createWindow() {
   const isRunning = await checkIfServicesRunning();
   if (!isRunning) {
     log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
-    startAllServices(root);
+    await startAllServices(root);
   } else {
     log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
   }
