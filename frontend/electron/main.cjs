@@ -260,7 +260,7 @@ async function startAllServices(root) {
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
       path.join(userData, 'backend_err.log'),
-      { PGCLIENTENCODING: 'UTF8' }
+      { PGCLIENTENCODING: 'UTF8', ASPNETCORE_URLS: 'http://127.0.0.1:5000' }
     );
 
     // ── Bước 6: Khởi động go2rtc ──
