@@ -80,18 +80,23 @@ function checkIfServicesRunning() {
 // ─────────────────────────────────────────────
 // Spawn start-all.sh (detached — thoát Electron không kill services)
 // ─────────────────────────────────────────────
-function spawnHiddenWin32(exePath, args, cwd, logPath) {
+function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath) {
   const escapedExe = exePath.replace(/'/g, "''");
   const escapedCwd = cwd.replace(/'/g, "''");
-  const escapedLog = logPath ? logPath.replace(/'/g, "''") : null;
+  const escapedOut = stdoutPath ? stdoutPath.replace(/'/g, "''") : null;
+  const escapedErr = stderrPath ? stderrPath.replace(/'/g, "''") : null;
   
   const argListStr = args.length 
     ? `-ArgumentList ${args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')}` 
     : '';
     
-  const redirectStr = escapedLog 
-    ? `-RedirectStandardOutput '${escapedLog}' -RedirectStandardError '${escapedLog}'` 
-    : '';
+  let redirectStr = '';
+  if (escapedOut) {
+    redirectStr += ` -RedirectStandardOutput '${escapedOut}'`;
+  }
+  if (escapedErr) {
+    redirectStr += ` -RedirectStandardError '${escapedErr}'`;
+  }
 
   const psCommand = `Start-Process -FilePath '${escapedExe}' ${argListStr} -WorkingDirectory '${escapedCwd}' ${redirectStr} -WindowStyle Hidden`;
   
@@ -130,6 +135,7 @@ function startAllServices(root) {
       path.join(pgBinDir, 'pg_ctl.exe'),
       ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'],
       path.join(root, 'pg_portable'),
+      null,
       null
     );
 
@@ -137,14 +143,16 @@ function startAllServices(root) {
       path.join(root, 'backend', 'StationOS.Api.exe'),
       [],
       path.join(root, 'backend'),
-      path.join(userData, 'backend.log')
+      path.join(userData, 'backend.log'),
+      path.join(userData, 'backend_err.log')
     );
 
     spawnHiddenWin32(
       path.join(root, 'go2rtc', 'go2rtc.exe'),
       [],
       path.join(root, 'go2rtc'),
-      path.join(userData, 'go2rtc.log')
+      path.join(userData, 'go2rtc.log'),
+      path.join(userData, 'go2rtc_err.log')
     );
     
     log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
