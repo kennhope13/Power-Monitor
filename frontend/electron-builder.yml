@@ -5,7 +5,8 @@ directories:
   output: dist-electron
 files:
   - dist/**/*
-  - electron/**/*
+  - electron/main.cjs
+  - electron/preload.cjs
   - electron/loading.html
   - package.json
 asarUnpack:

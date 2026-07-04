@@ -86,6 +86,18 @@ public class DevicesController : ControllerBase
         return extra.Split(',').Any(p => ip.StartsWith(p.Trim()));
     }
 
+    private async Task<IActionResult?> RequireActiveLicenseForCreateAsync()
+    {
+        var licenseStatus = await _license.GetStatusAsync();
+        if (licenseStatus?.IsValid == true)
+            return null;
+
+        return StatusCode(403, new
+        {
+            message = "Cần nhập và kích hoạt license trước khi thêm thiết bị mới."
+        });
+    }
+
     /// <summary>
     /// Lấy danh sách toàn bộ thiết bị (Hỗ trợ AI Engine tự nhận diện ID)
     /// </summary>
@@ -164,12 +176,16 @@ public class DevicesController : ControllerBase
     [HttpPost("devices/auto-configure")]
     public async Task<IActionResult> AutoConfigure([FromBody] AutoConfigureRequest req)
     {
+        var licenseGuard = await RequireActiveLicenseForCreateAsync();
+        if (licenseGuard != null)
+            return licenseGuard;
+
         await _deviceLock.WaitAsync();
         try
         {
             // Kiểm tra giới hạn camera theo license trước khi cấu hình tự động
             var licenseStatus = await _license.GetStatusAsync();
-            var maxCams = (licenseStatus != null && licenseStatus.IsValid) ? licenseStatus.MaxCameras : 5;
+            var maxCams = licenseStatus!.MaxCameras;
 
             var currentCams = await _db.Devices.CountAsync(d => d.Type.StartsWith("camera"));
             if (currentCams >= maxCams)
@@ -276,14 +292,16 @@ public class DevicesController : ControllerBase
     [HttpPost("devices")]
     public async Task<IActionResult> Create([FromBody] CreateDeviceRequest req)
     {
+        var licenseGuard = await RequireActiveLicenseForCreateAsync();
+        if (licenseGuard != null)
+            return licenseGuard;
+
         await _deviceLock.WaitAsync();
         try
         {
             // Kiểm tra giới hạn trạm con theo license
             var licenseStatus = await _license.GetStatusAsync();
-            var (maxNonCams, maxCams, maxRoiPoints) = (licenseStatus != null && licenseStatus.IsValid)
-                ? (licenseStatus.MaxDevices, licenseStatus.MaxCameras, licenseStatus.MaxRoiPoints)
-                : (5, 5, 5);
+            var (maxNonCams, maxCams, maxRoiPoints) = (licenseStatus!.MaxDevices, licenseStatus.MaxCameras, licenseStatus.MaxRoiPoints);
 
             if (req.Type.StartsWith("camera"))
             {
@@ -380,6 +398,10 @@ public class DevicesController : ControllerBase
     [RequestSizeLimit(20_000_000)]
     public async Task<IActionResult> ImportCabinetTemplate([FromForm] ImportCabinetTemplateRequest req)
     {
+        var licenseGuard = await RequireActiveLicenseForCreateAsync();
+        if (licenseGuard != null)
+            return licenseGuard;
+
         if (req.File == null || req.File.Length == 0)
             return BadRequest(new { message = "Không có file để import" });
         if (string.IsNullOrWhiteSpace(req.Ip))

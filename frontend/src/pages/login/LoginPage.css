@@ -5,67 +5,92 @@
   background-size: cover;
   display: flex; align-items: center; justify-content: center;
   z-index: 9999;
+  padding: 20px;
 }
 .gm-overlay {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(15, 23, 42, 0.6); z-index: 1;
+  background:
+    radial-gradient(circle at top, rgba(14, 165, 233, 0.22), transparent 42%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.42), rgba(2, 6, 23, 0.72));
+  z-index: 1;
 }
 .gm-glass-panel {
   position: relative; z-index: 2;
-  width: 360px; padding: 30px;
-  background: rgba(10, 15, 25, 0.95); 
-  border: 1px solid var(--admin-border-light); 
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7); 
-  text-align: center; color: #ffffff;
+  width: min(100%, 460px);
+  padding: 28px 28px 24px;
+  background: linear-gradient(180deg, rgba(8, 13, 24, 0.96), rgba(6, 10, 18, 0.94));
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  color: #ffffff;
   animation: fadeIn 0.3s ease-out;
+  backdrop-filter: blur(10px);
+  text-align: left;
+}
+.gm-brand {
+  text-align: center;
+  margin-bottom: 16px;
 }
 .gm-logo {
-  width: 80px; height: 80px; margin: 0 auto 16px;
-  filter: drop-shadow(0 0 10px rgba(2, 132, 199, 0.2));
+  width: 76px; height: 76px; margin: 0 auto 14px;
+  filter: drop-shadow(0 0 10px rgba(2, 132, 199, 0.28));
 }
 .gm-glass-panel h2 {
-  margin: 0 0 8px; font-size: 22px; font-weight: 900;
+  margin: 0 0 8px; font-size: 24px; font-weight: 900;
   text-transform: uppercase; letter-spacing: 2px;
   color: #0284c7; text-shadow: 0 0 15px rgba(2, 132, 199, 0.5);
 }
 .gm-slogan {
-  margin: 0 0 20px;
-  font-size: 11px;
-  color: rgba(255,255,255,0.5);
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
   font-style: normal;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   line-height: 1.5;
-  border-top: 1px solid var(--admin-border-light);
-  padding-top: 8px;
-  margin-top: 4px;
 }
-.gm-input-group { margin-bottom: 18px; text-align: left; }
-.gm-input-group label { display: block; font-size: 10px; margin-bottom: 6px; color: var(--admin-text-muted); font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+.gm-section-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+.gm-help-text {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.62);
+}
+.gm-input-group { margin-bottom: 16px; text-align: left; }
+.gm-input-group label { display: block; font-size: 10px; margin-bottom: 6px; color: rgba(226,232,240,0.72); font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
 .gm-input-group input {
-  width: 100%; box-sizing: border-box; padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.5); border: 1px solid var(--admin-border-light);
+  width: 100%; box-sizing: border-box; padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(56, 189, 248, 0.14);
   border-radius: 0px; color: white; font-size: 14px; transition: 0.2s;
 }
 .gm-input-group input:focus {
-  outline: none; border-color: #0284c7; background: rgba(0, 0, 0, 0.7);
-  box-shadow: 0 0 8px rgba(2, 132, 199, 0.2);
+  outline: none; border-color: #0284c7; background: rgba(0, 0, 0, 0.68);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.14);
 }
 .gm-btn-login {
   width: 100%; padding: 12px;
-  background: #0284c7; 
-  border: 1px solid var(--admin-border-light); border-radius: 0px;
+  background: linear-gradient(180deg, #0ea5e9, #0284c7);
+  border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 0px;
   color: white; font-size: 14px; font-weight: 800; cursor: pointer;
   text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; margin-top: 5px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
 }
 .gm-btn-login:hover {
-  background: #0369a1; border-color: #0284c7;
+  background: linear-gradient(180deg, #38bdf8, #0369a1); border-color: #7dd3fc;
 }
 .gm-btn-login:disabled {
   opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none;
 }
 .gm-error {
-  color: var(--admin-danger); font-size: 12px; margin-bottom: 15px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 0px; border: 1px solid rgba(239,68,68,0.25);
+  color: #fecaca; font-size: 12px; margin-bottom: 15px; background: rgba(239,68,68,0.1); padding: 10px 12px; border-radius: 0px; border: 1px solid rgba(239,68,68,0.28);
   text-align: left;
 }
 .gm-pw-wrap { position: relative; }
@@ -80,6 +105,10 @@
 }
 .gm-eye-btn:hover { color: rgba(255,255,255,0.9); }
 
+form {
+  display: block;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
@@ -93,4 +122,19 @@
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-6px); }
   40%, 80% { transform: translateX(6px); }
+}
+
+@media (max-width: 520px) {
+  .gm-login-wrapper {
+    padding: 14px;
+  }
+
+  .gm-glass-panel {
+    padding: 22px 18px 18px;
+  }
+
+  .gm-glass-panel h2 {
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
 }

@@ -49,6 +49,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
   const [hadPassword, setHadPassword] = useState(false);
   const [fetchedPassword, setFetchedPassword] = useState('');
   const [testConnResult, setTestConnResult] = useState<{ show: boolean; success?: boolean; msg?: string }>({ show: false });
+  const [canCreateNewDevice, setCanCreateNewDevice] = useState(false);
 
   const editingId = editingDevice?.id ?? null;
 
@@ -84,9 +85,29 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
     }
   }, [open, editingDevice]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    stationApi.getLicenseStatus()
+      .then(data => {
+        if (!cancelled) setCanCreateNewDevice(data?.activated === true && data?.isValid === true);
+      })
+      .catch(() => {
+        if (!cancelled) setCanCreateNewDevice(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const set = (patch: Partial<FormData>) => setFormData(f => ({ ...f, ...patch }));
 
   const saveDevice = async () => {
+    if (!editingId && !canCreateNewDevice) {
+      alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+      return;
+    }
+
     if (!formData.name) { alert('Vui lòng nhập tên thiết bị'); return; }
     setIsSaving(true);
     try {
@@ -181,6 +202,11 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
           </button>
         </div>
         <div className="modal-body">
+          {!canCreateNewDevice && !editingId && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--admin-danger)', fontSize: '.78rem', fontWeight: 700 }}>
+              Cần license để thêm thiết bị mới.
+            </div>
+          )}
           <div className="form-grid-2">
             <div className="form-group" style={{ gridColumn: '1/-1' }}>
               <label>Tên hiển thị *</label>
@@ -351,7 +377,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
           <button className="btn-industrial" onClick={testConn}>Test kết nối</button>
           <div style={{ flex: 1 }} />
           <button className="btn-industrial" onClick={onClose}>Hủy</button>
-          <button className="btn-industrial btn-primary" onClick={saveDevice} disabled={isSaving}>{isSaving ? '⏳ Đang lưu...' : 'Lưu thiết bị'}</button>
+          <button className="btn-industrial btn-primary" onClick={saveDevice} disabled={isSaving || (!editingId && !canCreateNewDevice)}>{isSaving ? '⏳ Đang lưu...' : 'Lưu thiết bị'}</button>
         </div>
       </div>
     </div>

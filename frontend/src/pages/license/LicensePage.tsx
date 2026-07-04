@@ -18,6 +18,24 @@ interface LicenseStatus {
   activeSessions?: number;
   isValid?: boolean;
   daysRemaining?: number;
+  source?: string;
+  state?: string;
+  message?: string;
+  addonCount?: number;
+  baseLicenseId?: string;
+  hardwareFingerprint?: string;
+}
+
+interface LicenseRequestInfo {
+  fingerprint: string;
+  machineName: string;
+  platform: string;
+  cpuId?: string;
+  mainboardUuid?: string;
+  diskSerial?: string;
+  physicalMacs?: string[];
+  licenseDirectory?: string;
+  requestedAtUtc?: string;
 }
 
 export default function LicensePage() {
@@ -25,6 +43,8 @@ export default function LicensePage() {
   
   const [status, setStatus] = useState<LicenseStatus | null>(null);
   const [key, setKey] = useState('');
+  const [licenseFile, setLicenseFile] = useState<File | null>(null);
+  const [requestInfo, setRequestInfo] = useState<LicenseRequestInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -40,8 +60,43 @@ export default function LicensePage() {
     }
   };
 
+  const loadRequestInfo = async () => {
+    try {
+      const data = await stationApi.getLicenseRequest();
+      setRequestInfo(data);
+    } catch {
+      setRequestInfo(null);
+    }
+  };
+
+  const handleExportRequest = () => {
+    if (!requestInfo) return;
+
+    const payload = {
+      fingerprint: requestInfo.fingerprint,
+      machineName: requestInfo.machineName,
+      platform: requestInfo.platform,
+      cpuId: requestInfo.cpuId,
+      mainboardUuid: requestInfo.mainboardUuid,
+      diskSerial: requestInfo.diskSerial,
+      physicalMacs: requestInfo.physicalMacs ?? [],
+      requestedAtUtc: requestInfo.requestedAtUtc,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'license-request.licreq';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   useEffect(() => {
     loadStatus();
+    loadRequestInfo();
   }, []);
 
   const handleActivate = async (e: React.FormEvent) => {
@@ -68,6 +123,29 @@ export default function LicensePage() {
     }
   };
 
+  const handleImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!licenseFile) {
+      setErrorMsg('Vui lòng chọn file .lic');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const data = await stationApi.importLicense(licenseFile);
+      setSuccessMsg(data?.message || 'Import file license thành công!');
+      setLicenseFile(null);
+      await loadStatus();
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? 'Không thể import file license');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getTierClass = (tier: string) => {
     if (tier === 'solo') return 'solo';
     if (tier === 'team') return 'team';
@@ -85,26 +163,19 @@ export default function LicensePage() {
     const actDate = isActivated && status.activatedAt ? new Date(status.activatedAt).toLocaleDateString('vi-VN') : '—';
     const statusCls = !isActivated ? 'demo' : status.isValid ? 'valid' : 'expired';
     const statusTxt = !isActivated ? 'Chưa kích hoạt' : status.isValid ? 'Đang hoạt động' : 'Đã hết hạn';
-
-    const maxUsers = isActivated ? (status.maxUsers && status.maxUsers >= 999 ? 'Không giới hạn' : status.maxUsers) : '1';
     const activeSessions = isActivated ? (status.activeSessions ?? 0) : 1;
     const maxUsersLimit = isActivated ? (status.maxUsers && status.maxUsers >= 999 ? '∞' : status.maxUsers) : 1;
 
-    const maxNonCams = isActivated ? (status.maxDevices && status.maxDevices >= 999 ? 'Không giới hạn' : (status.maxDevices ?? '—')) : '5';
-    const maxCams = isActivated ? (status.maxCameras && status.maxCameras >= 999 ? 'Không giới hạn' : (status.maxCameras ?? '—')) : '5';
-    const maxRoiPoints = isActivated ? (status.maxRoiPoints && status.maxRoiPoints >= 999 ? 'Không giới hạn' : (status.maxRoiPoints ?? '—')) : '5';
-    const maxRoiRegions = isActivated ? (status.maxRoiRegions && status.maxRoiRegions >= 999 ? 'Không giới hạn' : (status.maxRoiRegions ?? '—')) : '5';
-    const maxPdRegions = isActivated ? (status.maxPdRegions && status.maxPdRegions >= 999 ? 'Không giới hạn' : (status.maxPdRegions ?? '—')) : '5';
-
     return (
       <div className={`status-container ${statusCls}`}>
-        <div className="info-section" style={{ marginBottom: 0 }}>
+        <div className="status-topline">
+          <span>License</span>
+          <span className={`status-badge ${statusCls}`}>{statusTxt}</span>
+        </div>
+
+        <div className="status-rows">
           <div className="status-row">
-            <span>Trạng thái</span>
-            <span className={`status-badge ${statusCls}`}>{statusTxt}</span>
-          </div>
-          <div className="status-row">
-            <span>Gói sản phẩm</span>
+            <span>Gói</span>
             <span>
               <span className={`tier-pill ${isActivated && status.tier ? getTierClass(status.tier) : 'demo'}`}>
                 {tierLabel}
@@ -112,44 +183,19 @@ export default function LicensePage() {
             </span>
           </div>
           <div className="status-row">
-            <span>Người dùng & Phiên</span>
-            <span>{activeSessions} / {maxUsersLimit} người dùng</span>
-          </div>
-          
-          <div className="status-row">
-            <span>Số thiết bị tối đa</span>
-            <span>{maxNonCams}</span>
+            <span>Người dùng đồng thời</span>
+            <span>{activeSessions} / {maxUsersLimit}</span>
           </div>
           <div className="status-row">
-            <span>Số camera tối đa</span>
-            <span>{maxCams}</span>
+            <span>Ngày hết hạn</span>
+            <span>{expDate}{status.daysRemaining !== undefined ? ` (còn ${status.daysRemaining} ngày)` : ''}</span>
           </div>
           <div className="status-row">
-            <span>Số điểm nhiệt tối đa</span>
-            <span>{maxRoiPoints}</span>
+            <span>Ngày kích hoạt</span>
+            <span>{actDate}</span>
           </div>
-          <div className="status-row">
-            <span>Số vùng nhiệt tối đa</span>
-            <span>{maxRoiRegions}</span>
-          </div>
-          <div className="status-row">
-            <span>Số vùng phóng điện tối đa</span>
-            <span>{maxPdRegions}</span>
-          </div>
-
-          {isActivated && (
-            <>
-              <div className="status-row">
-                <span>Ngày kích hoạt</span>
-                <span>{actDate}</span>
-              </div>
-              <div className="status-row">
-                <span>Ngày hết hạn</span>
-                <span>{expDate} {status.daysRemaining !== undefined && `(còn ${status.daysRemaining} ngày)`}</span>
-              </div>
-            </>
-          )}
         </div>
+
       </div>
     );
   };
@@ -158,64 +204,70 @@ export default function LicensePage() {
     <div className="license-page">
       <div className="license-hero">
         <div className="license-card">
-          <div className="license-grid-layout">
-            
-            {/* Left Column: Current Status & System Limits */}
-            <div className="license-left-col">
-              <h2 className="col-title">Trạng thái bản quyền</h2>
+          <button className="license-back" type="button" onClick={() => navigate('/dashboard')} aria-label="Quay lại Dashboard">
+            ←
+          </button>
+          <div className="license-header">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#44ff88" strokeWidth="1.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <h1>Quản lý License</h1>
+            <p>Kích hoạt bản quyền phần mềm StationMonitor</p>
+          </div>
+
+          {(errorMsg || successMsg) && (
+            <div className="license-message-stack">
+              {errorMsg && <div className="license-error">⚠️ {errorMsg}</div>}
+              {successMsg && <div className="license-success">✅ {successMsg}</div>}
+            </div>
+          )}
+
+          <div className="license-stack">
+            <section className="license-panel">
+              <h2 className="panel-title">Trạng thái</h2>
               {renderStatusBox()}
-            </div>
+            </section>
 
-            {/* Right Column: Activation Form & Action Steps */}
-            <div className="license-right-col">
-              <div className="license-header">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#44ff88" strokeWidth="1.5">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-                <h1>Giftcode Bản quyền</h1>
-                <p>Kích hoạt để mở rộng giới hạn hệ thống</p>
-              </div>
+            <section className="license-panel">
+              <h2 className="panel-title">Kích hoạt offline</h2>
 
-              {canManageLicense && (
-                <div className="license-activate-section" id="activateSection">
-                  <h3>Nhập Giftcode kích hoạt</h3>
-                  <p className="license-hint">
-                    Định dạng: <code>SOLO-YYMMDD-XXXX-XXXXXXXX</code>
-                  </p>
-
-                  {errorMsg && <div className="license-error">⚠️ {errorMsg}</div>}
-                  {successMsg && <div className="license-success">✅ {successMsg}</div>}
-
-                  <form onSubmit={handleActivate} className="license-input-row">
-                    <input 
-                      type="text" 
-                      className="license-input"
-                      placeholder="VD: SOLO-270101-A3F7-1B2C3D4E"
-                      spellCheck="false" 
-                      autoComplete="off"
-                      value={key}
-                      onChange={e => setKey(e.target.value)}
-                      disabled={loading}
-                    />
-                    <button type="submit" className="btn-license-activate" disabled={loading}>
-                      {loading ? 'Đang gửi...' : 'Kích hoạt'}
-                    </button>
-                  </form>
+              <div className="license-subsection">
+                <div className="license-inline-actions">
+                  <button type="button" className="btn-license-secondary" onClick={handleExportRequest} disabled={!requestInfo}>
+                    Xuất file .licreq
+                  </button>
                 </div>
-              )}
-
-              <div className="license-contact-info">
-                ℹ️ <strong>Hỗ trợ & Cấp Giftcode:</strong> Nếu có nhu cầu mở rộng/thêm thiết bị, camera hoặc tăng số điểm nhiệt, vui lòng liên hệ trực tiếp với <strong>Nhà phát triển (Lập trình viên)</strong> để được hỗ trợ và cấp mã kích hoạt mới.
               </div>
 
-              <div className="license-actions">
-                <button className="btn-license-skip" onClick={() => navigate('/dashboard')}>
-                  Quay lại Dashboard
-                </button>
+              <div className="license-subsection">
+                {canManageLicense ? (
+                  <form onSubmit={handleImport} className="license-form-stack">
+                    <div className="license-file-picker">
+                      <input
+                        id="licenseFileInput"
+                        type="file"
+                        className="license-file-input"
+                        accept=".lic,application/json"
+                        onChange={e => setLicenseFile(e.target.files?.[0] ?? null)}
+                        disabled={loading}
+                      />
+                      <span className={`license-file-name ${licenseFile ? 'has-file' : ''}`}>
+                        {licenseFile ? licenseFile.name : 'Chưa chọn file'}
+                      </span>
+                      <label htmlFor="licenseFileInput" className="btn-license-secondary license-file-label">
+                        Chọn file .lic
+                      </label>
+                      <button type="submit" className="btn-license-activate license-import-btn" disabled={loading || !licenseFile}>
+                        {loading ? 'Đang xử lý...' : 'Import'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="license-muted">Tài khoản hiện tại không có quyền nhập license.</div>
+                )}
               </div>
-            </div>
-
+            </section>
           </div>
         </div>
       </div>

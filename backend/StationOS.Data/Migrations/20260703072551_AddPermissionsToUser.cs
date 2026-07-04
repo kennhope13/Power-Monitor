@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -10,11 +10,7 @@ namespace StationOS.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string[]>(
-                name: "Permissions",
-                table: "Users",
-                type: "text[]",
-                nullable: true);
+            migrationBuilder.Sql("ALTER TABLE \"Users\" ADD COLUMN IF NOT EXISTS \"Permissions\" text[];");
         }
 
         /// <inheritdoc />

@@ -90,6 +90,13 @@ interface DeviceManagementPageProps {
   onInitialActionHandled?: () => void;
 }
 
+interface LicenseStatus {
+  activated: boolean;
+  isValid?: boolean;
+  tier?: string;
+  expiresAt?: string;
+}
+
 /**
  * Trang quản lý thiết bị — hỗ trợ thêm/sửa/xóa thiết bị,
  * kiểm tra kết nối, quét LAN/ONVIF và cấu hình nhiệt/PD/vùng giám sát.
@@ -104,6 +111,7 @@ export default function DeviceManagementPage({
   const [stationId, setStationId] = useState<string | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
 
   // Trạng thái modal thêm/sửa thiết bị
   const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
@@ -409,6 +417,21 @@ export default function DeviceManagementPage({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    stationApi.getLicenseStatus()
+      .then(data => {
+        if (!cancelled) setLicenseStatus(data);
+      })
+      .catch(() => {
+        if (!cancelled) setLicenseStatus({ activated: false });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!stationId || loading) return;
     const shouldOpenFromQuery = searchParams.get('action') === 'new';
     const shouldOpenFromProp = initialAction === 'new';
@@ -486,8 +509,15 @@ export default function DeviceManagementPage({
     }
   };
 
+  const canCreateNewDevice = licenseStatus?.activated === true && licenseStatus?.isValid === true;
+
   /** Mở modal thêm hoặc sửa thiết bị, nạp dữ liệu hiện tại vào form nếu sửa. */
   const openDeviceModal = (d?: Device) => {
+    if (!d && !canCreateNewDevice) {
+      alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+      return;
+    }
+
     setEditingId(d?.id ?? null);
     setTestConnResult({ show: false });
     setShowPassword(false);
@@ -550,6 +580,11 @@ export default function DeviceManagementPage({
 
   /** Lưu thiết bị (tạo mới hoặc cập nhật) với cấu hình phù hợp từng loại. */
   const saveDevice = async () => {
+    if (!editingId && !canCreateNewDevice) {
+      alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+      return;
+    }
+
     if (!formData.name) { alert('Vui lòng nhập tên thiết bị'); return; }
     setIsSaving(true);
     try {
@@ -684,6 +719,11 @@ export default function DeviceManagementPage({
   };
 
   const handleImportCabinetFromForm = async () => {
+    if (!canCreateNewDevice) {
+      alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+      return;
+    }
+
     if (!stationId) {
       alert('Chưa chọn trạm');
       return;
@@ -845,13 +885,18 @@ export default function DeviceManagementPage({
               <span style={{ color: 'var(--admin-text-muted)', opacity: 0.3, margin: '0 4px' }}>|</span>
               <span style={{ color: 'var(--admin-danger)', fontWeight: 800, fontSize: '.75rem' }}>{devices.length - online} OFFLINE</span>
             </div>
+            {!canCreateNewDevice && (
+              <div className="page-toolbar-cell" style={{ height: 28, padding: '0 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--admin-danger)', fontSize: '.72rem', fontWeight: 700 }}>
+                Cần license để thêm thiết bị mới
+              </div>
+            )}
   
             {/* Action Buttons */}
             <button 
               className="btn-industrial btn-primary" 
-              disabled={requiresStationSelection}
+              disabled={requiresStationSelection || !canCreateNewDevice}
               onClick={() => openDeviceModal()}
-              style={requiresStationSelection ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+              style={(requiresStationSelection || !canCreateNewDevice) ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
             >
               + THÊM THIẾT BỊ
             </button>
@@ -1246,7 +1291,7 @@ export default function DeviceManagementPage({
               <button
                 className="btn-industrial btn-primary"
                 onClick={formData.type === 'plc_s7' && cabinetImportFile ? handleImportCabinetFromForm : saveDevice}
-                disabled={isSaving}
+                disabled={isSaving || (!editingId && !canCreateNewDevice) || (formData.type === 'plc_s7' && !!cabinetImportFile && !canCreateNewDevice)}
               >
                 {isSaving
                   ? '⏳ Đang xử lý...'
@@ -1302,12 +1347,19 @@ export default function DeviceManagementPage({
                          </div>
                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                            {f.protocol === 'hikvision' && (
-                             <button
-                               className="btn-industrial btn-sm btn-primary"
-                               onClick={() => setAutoConfigTarget({ ip: f.ip })}
-                               title="Tự động tạo tất cả luồng cho camera này"
-                             >Auto-thêm</button>
-                           )}
+                            <button
+                              className="btn-industrial btn-sm btn-primary"
+                              onClick={() => {
+                                if (!canCreateNewDevice) {
+                                  alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+                                  return;
+                                }
+                                setAutoConfigTarget({ ip: f.ip });
+                              }}
+                              disabled={!canCreateNewDevice}
+                              title="Tự động tạo tất cả luồng cho camera này"
+                            >Auto-thêm</button>
+                          )}
                            <span style={{ fontSize: '.75rem', color: f.isOnline || f.isReachable ? 'var(--admin-success)' : 'var(--admin-danger)' }}>
                              {f.isOnline || f.isReachable ? '🟢' : '⚫'}
                            </span>

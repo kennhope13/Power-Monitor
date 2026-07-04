@@ -104,33 +104,20 @@ function startAllServices(root) {
     }
     
     const psql = spawn(path.join(pgBinDir, 'pg_ctl.exe'), ['-D', pgDataDir, '-l', path.join(userData, 'postgres.log'), 'start'], {
-      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
+      cwd: path.join(root, 'pg_portable'), env, detached: true, stdio: 'ignore', windowsHide: true
     });
-    psql.stdout?.on('data', d => log('[PostgreSQL]', d.toString().trim()));
-    psql.stderr?.on('data', d => log('[PostgreSQL ERR]', d.toString().trim()));
     psql.unref();
 
     const backendLog = fs.openSync(path.join(userData, 'backend.log'), 'a');
     const backend = spawn(path.join(root, 'backend', 'StationOS.Api.exe'), [], {
-      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
-    });
-    backend.stdout?.on('data', d => {
-      const s = d.toString();
-      fs.writeSync(backendLog, s);
-      log('[Backend]', s.trim());
-    });
-    backend.stderr?.on('data', d => {
-      const s = d.toString();
-      fs.writeSync(backendLog, s);
-      log('[Backend ERR]', s.trim());
+      cwd: path.join(root, 'backend'), env, detached: true, stdio: ['ignore', backendLog, backendLog], windowsHide: true
     });
     backend.unref();
 
+    const go2rtcLog = fs.openSync(path.join(userData, 'go2rtc.log'), 'a');
     const go2rtc = spawn(path.join(root, 'go2rtc', 'go2rtc.exe'), [], {
-      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
+      cwd: path.join(root, 'go2rtc'), env, detached: true, stdio: ['ignore', go2rtcLog, go2rtcLog], windowsHide: true
     });
-    go2rtc.stdout?.on('data', d => log('[go2rtc]', d.toString().trim()));
-    go2rtc.stderr?.on('data', d => log('[go2rtc ERR]', d.toString().trim()));
     go2rtc.unref();
     
     log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');

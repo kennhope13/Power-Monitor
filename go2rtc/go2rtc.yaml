@@ -64,4 +64,4 @@ streams:
   camera_192_168_10_15_cctv:
     - rtsp://admin:Station%40123@192.168.10.15:554
   camera_192_168_10_156_cctv:
-    - rtsp://admin:Station%40123@192.168.10.156:554
+    - rtsp://admin:Demo%402024@192.168.10.156:554

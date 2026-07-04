@@ -16,6 +16,7 @@ import { setTheme as setGlobalTheme } from '@/utils/theme-manager';
 import { showToast } from '@/utils/toast';
 import { playAlertSound } from '@/utils/sound-utils';
 import { isCentralUser as isCentralUserAccount, MULTISITE_RETURN_TAB_KEY } from '@/utils/centralAccess';
+import { getDisplayStationName, getStoredStationName, hasStoredServerIp } from '@/utils/station-setup';
 import { createRealtimeHub } from '@/services/realtime.service';
 import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
@@ -73,6 +74,7 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore(s => s.user);
+  const [stationConfigVersion, setStationConfigVersion] = useState(0);
 
   // ── Security Check ──
   useEffect(() => {
@@ -94,11 +96,28 @@ export default function AppShell() {
     return () => clearInterval(interval);
   }, [user]);
 
+  useEffect(() => {
+    const refreshStationConfig = () => setStationConfigVersion(v => v + 1);
+    window.addEventListener('station-config-updated', refreshStationConfig);
+    window.addEventListener('storage', refreshStationConfig);
+    return () => {
+      window.removeEventListener('station-config-updated', refreshStationConfig);
+      window.removeEventListener('storage', refreshStationConfig);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (isCentralUserAccount(user)) return;
+    useStationStore.getState().fetch(true).catch(() => undefined);
+  }, [user]);
+
   if (!user) return null;
 
   // Trạm tổng = tài khoản 'multi' HOẶC admin không bị giới hạn trạm (không có station_ids)
   const isCentralUser = isCentralUserAccount(user);
   const headerQuery = new URLSearchParams(location.search);
+  const storedStationName = useMemo(() => getStoredStationName(), [stationConfigVersion]);
 
   // Global admin drill-down: đang xem trạm con từ màn hình đa trạm
   const viewingStationId = useStationStore(s => s.viewingStationId);
@@ -125,8 +144,8 @@ export default function AppShell() {
 
     const selectedStationId = headerQuery.get('stationId') || localStorage.getItem('selected_station_id') || '';
     const matched = stations.find(s => s.id === selectedStationId);
-    return matched?.name || 'TRẠM ĐIỆN';
-  }, [isDrillDown, drillStation, isCentralMode, stations, location.search]);
+    return getDisplayStationName(matched?.name, storedStationName) || 'CẦN CẤU HÌNH TRẠM';
+  }, [isDrillDown, drillStation, isCentralMode, stations, location.search, storedStationName]);
 
   const parsedStationLabel = useMemo(() => {
     const text = (headerStationLabel || '').trim().toUpperCase();
@@ -150,6 +169,15 @@ export default function AppShell() {
     }
     return { mode: 'single', text, sub: '' };
   }, [headerStationLabel]);
+
+  useEffect(() => {
+    if (!user || isCentralUser) return;
+    if (location.pathname.startsWith('/settings')) return;
+    const resolvedStationName = getDisplayStationName(stations[0]?.name, storedStationName);
+    if (!hasStoredServerIp() || !resolvedStationName) {
+      navigate('/settings?setup=1', { replace: true });
+    }
+  }, [user, isCentralUser, location.pathname, navigate, stations, storedStationName]);
 
   // Lọc adminNavItems theo quyền:
   // - Restricted admin (khi ở trạm tổng): ẩn settings, license

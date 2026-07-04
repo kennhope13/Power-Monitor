@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import GeneralTab from './tabs/GeneralTab';
 import NotificationTab from './tabs/NotificationTab';
 import VideoStorageTab from './tabs/VideoStorageTab';
@@ -16,12 +17,15 @@ const TABS = ['CHUNG', 'THÔNG BÁO', 'LƯU TRỮ VIDEO'];
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState(0);
+  const location = useLocation();
+  const isSetupMode = new URLSearchParams(location.search).get('setup') === '1';
 
   return (
     <div className="admin-page-container">
       <div className="page-toolbar-row">
         <div className="page-title-cell">
           <h2>CÀI ĐẶT</h2>
+          {isSetupMode && <div style={{ fontSize: '0.72rem', color: 'var(--admin-warning)', marginTop: 4, fontWeight: 700 }}>Thiết lập ban đầu: bắt buộc nhập IP và tên trạm.</div>}
         </div>
         <div className="page-toolbar-group">
           {TABS.map((t, idx) => (

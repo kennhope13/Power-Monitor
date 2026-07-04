@@ -161,7 +161,9 @@ class StationApiService {
   sendTestEmail = systemService.sendTestEmail.bind(systemService);
   getDetections = systemService.getDetections.bind(systemService);
   getLicenseStatus = systemService.getLicenseStatus.bind(systemService);
+  getLicenseRequest = systemService.getLicenseRequest.bind(systemService);
   activateLicense = systemService.activateLicense.bind(systemService);
+  importLicense = systemService.importLicense.bind(systemService);
 }
 
 export const stationApi = new StationApiService();

@@ -13,36 +13,23 @@ import './LoginPage.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('stationadmin');
+  const [password, setPassword] = useState('Station@123');
   const [showPassword, setShowPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isShaking, setIsShaking] = useState(false); // animation lắc form khi sai mật khẩu
 
-  const [showConfig, setShowConfig] = useState(false);
   const [serverIp, setServerIp] = useState('');
+  const [stationName, setStationName] = useState('');
 
   useEffect(() => {
-    setServerIp(localStorage.getItem('server_ip') || '');
+    const storedServerIp = localStorage.getItem('server_ip') || '';
+    const storedStationName = localStorage.getItem('station_name') || '';
+    setServerIp(storedServerIp);
+    setStationName(storedStationName);
   }, []);
-
-  const handleSaveConfig = () => {
-    const trimmed = serverIp.trim();
-    if (trimmed) {
-      localStorage.setItem('server_ip', trimmed);
-    } else {
-      localStorage.removeItem('server_ip');
-    }
-    window.location.reload();
-  };
-
-  const handleResetConfig = () => {
-    localStorage.removeItem('server_ip');
-    setServerIp('');
-    window.location.reload();
-  };
 
   
   const usernameRef = useRef<HTMLInputElement>(null);
@@ -75,7 +62,7 @@ export default function LoginPage() {
     }
 
     if (window.self !== window.top) {
-      authService.login('admin', 'Admin@123').then(result => {
+      authService.login('stationadmin', 'Station@123').then(result => {
         if (result.success) navigate(nextPath || '/dashboard', { replace: true });
         else usernameRef.current?.focus();
       });
@@ -87,6 +74,15 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedIp = serverIp.trim();
+    const trimmedStationName = stationName.trim();
+
+    if (!trimmedIp || !trimmedStationName) {
+      setErrorMsg('Vui lòng nhập IP máy trạm và tên trạm trước khi đăng nhập');
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 400);
+      return;
+    }
     if (!username.trim() || !password) return;
 
     setLoading(true);
@@ -95,6 +91,10 @@ export default function LoginPage() {
 
     // Delay 600ms để tránh cảm giác phản hồi quá nhanh (UX)
     await new Promise(r => setTimeout(r, 600));
+
+    localStorage.setItem('server_ip', trimmedIp);
+    localStorage.setItem('station_name', trimmedStationName);
+    window.dispatchEvent(new Event('station-config-updated'));
 
     const result = await authService.login(username.trim(), password);
 
@@ -114,9 +114,11 @@ export default function LoginPage() {
     <div className="gm-login-wrapper">
       <div className="gm-overlay"></div>
       <div className="gm-glass-panel">
-        <img src="/favico/logo.svg" alt="Station Monitor Logo" className="gm-logo" />
-        <h2>Hệ Thống Giám Sát</h2>
-        <p className="gm-slogan">"Giám sát liên tục — Phát hiện sớm — Cảnh báo đúng lúc"</p>
+        <div className="gm-brand">
+          <img src="/favico/logo.svg" alt="Station Monitor Logo" className="gm-logo" />
+          <h2>Hệ Thống Giám Sát</h2>
+          <p className="gm-slogan">"Giám sát liên tục - Phát hiện sớm - Cảnh báo đúng lúc"</p>
+        </div>
 
         {errorMsg && (
           <div className={`gm-error ${isShaking ? 'shake' : ''}`}>
@@ -125,13 +127,41 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleLogin} autoComplete="off">
+          <div className="gm-section-title">Cấu hình trạm</div>
+          <div className="gm-input-group">
+            <label htmlFor="serverIpInput">IP máy trạm</label>
+            <input
+              type="text"
+              id="serverIpInput"
+              placeholder="Ví dụ: 192.168.1.100"
+              value={serverIp}
+              onChange={e => setServerIp(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <div className="gm-input-group">
+            <label htmlFor="stationNameInput">Tên trạm</label>
+            <input
+              type="text"
+              id="stationNameInput"
+              placeholder="Ví dụ: Tân An 110kV"
+              value={stationName}
+              onChange={e => setStationName(e.target.value)}
+              disabled={loading}
+            />
+            <div className="gm-help-text">
+              Tên trạm sẽ hiển thị trên tiêu đề ứng dụng.
+            </div>
+          </div>
+
+          <div className="gm-section-title">Đăng nhập</div>
           <div className="gm-input-group">
             <label htmlFor="loginUsername">Tên đăng nhập</label>
             <input 
               ref={usernameRef}
               type="text" 
               id="loginUsername" 
-              placeholder="Ví dụ: admin" 
+              placeholder="Ví dụ: stationadmin"
               required
               value={username}
               onChange={e => setUsername(e.target.value)}
@@ -174,7 +204,7 @@ export default function LoginPage() {
               </button>
             </div>
           </div>
-          <button type="submit" className="gm-btn-login" disabled={loading}>
+          <button type="submit" className="gm-btn-login" disabled={loading || !serverIp.trim() || !stationName.trim()}>
             {loading ? (
               <>
                 <span>ĐANG ĐĂNG NHẬP...</span>
@@ -185,65 +215,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <div style={{ marginTop: '20px', textAlign: 'center' }}>
-          <button
-            type="button"
-            className="gm-config-toggle-btn"
-            onClick={() => setShowConfig(!showConfig)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--admin-text-muted)',
-              fontSize: '11px',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-              letterSpacing: '0.5px'
-            }}
-          >
-            {showConfig ? 'Ẩn cấu hình IP trạm' : 'Cấu hình IP máy trạm'}
-          </button>
-        </div>
-
-        {showConfig && (
-          <div className="gm-config-panel" style={{
-            marginTop: '15px',
-            paddingTop: '15px',
-            borderTop: '1px dashed var(--admin-border-light)',
-            textAlign: 'left'
-          }}>
-            <div className="gm-input-group" style={{ marginBottom: '10px' }}>
-              <label htmlFor="serverIpInput">Địa chỉ IP máy trạm (Master Station)</label>
-              <input
-                type="text"
-                id="serverIpInput"
-                placeholder="Ví dụ: 192.168.1.100"
-                value={serverIp}
-                onChange={e => setServerIp(e.target.value)}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                className="gm-btn-login"
-                onClick={handleSaveConfig}
-                style={{ flex: 1, padding: '8px', fontSize: '12px', background: '#0284c7' }}
-              >
-                LƯU & KẾT NỐI
-              </button>
-              {localStorage.getItem('server_ip') && (
-                <button
-                  type="button"
-                  className="gm-btn-login"
-                  onClick={handleResetConfig}
-                  style={{ padding: '8px 12px', fontSize: '12px', background: 'rgba(239,68,68,0.2)', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
-                >
-                  XÓA
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

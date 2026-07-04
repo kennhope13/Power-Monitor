@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using StationOS.Data;
 using StationOS.Services.Auth;
 using StationOS.Services.Devices;
+using StationOS.Services;
 
 namespace StationOS.Api.Extensions;
 
@@ -76,6 +77,16 @@ public static class DbInitializer
         // await SeedNetaRulesAsync(db);
         // await SeedTemperatureRulesAsync(db);
         // await SeedThermalPointsRulesAsync(db);
+
+        try
+        {
+            var licenseService = services.GetRequiredService<LicenseService>();
+            await licenseService.GetStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Startup] Không thể warm-up license cache: {ex.Message}");
+        }
         
 
         // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
