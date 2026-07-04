@@ -114,7 +114,7 @@ function startAllServices(root) {
   const env = { 
     ...process.env, 
     STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0',
-    ASPNETCORE_URLS: 'http://127.0.0.1:5000'
+    ASPNETCORE_URLS: 'http://0.0.0.0:5000'
   };
   
   if (process.platform === 'win32') {
