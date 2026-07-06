@@ -24,7 +24,9 @@ process.on('unhandledRejection', (err) => log('[REJECT]', err?.stack || err));
 let mainWindow   = null;
 let localUiServer = null;
 let localUiPort = null;
-let forceLocalUi = false;
+const preferLocalUi = process.env.STATION_ELECTRON_LOCAL_UI === '1'
+  || process.env.STATION_ELECTRON_NO_FRONTEND === '1';
+let forceLocalUi = preferLocalUi;
 
 function getTargetUrl() {
   return (app.isPackaged || forceLocalUi)
@@ -190,7 +192,7 @@ async function startAllServices(root) {
   console.log('[Station Monitor] Khởi động services từ:', root);
   const env = { 
     ...process.env, 
-    STATION_ELECTRON_NO_FRONTEND: app.isPackaged ? '1' : '0',
+    STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
     ASPNETCORE_URLS: 'http://0.0.0.0:5000'
   };
   
@@ -543,7 +545,7 @@ async function createWindow() {
 
   // Kiểm tra xem Vite dev server (port 5173) có đang chạy không (chỉ khi chưa package)
   let useVite = false;
-  if (!app.isPackaged) {
+  if (!app.isPackaged && !preferLocalUi) {
     try {
       useVite = await new Promise((resolve) => {
         const req = http.get('http://127.0.0.1:5173', (res) => {
@@ -559,6 +561,8 @@ async function createWindow() {
     } catch (e) {
       useVite = false;
     }
+  } else if (preferLocalUi) {
+    log('[Station Monitor] Shortcut mode: dùng local UI server trên cổng 4173, không dùng Vite 5173.');
   }
 
   if (!useVite) {

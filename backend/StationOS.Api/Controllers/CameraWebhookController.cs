@@ -173,6 +173,18 @@ public class CameraWebhookController : ControllerBase
         var stationId = device?.StationId ?? await FirstStationIdAsync();
 
         var (detType, alertLevel, shouldAlert) = MapType(eventType);
+
+        // Strict input range validation on maxTemp
+        if (maxTemp.HasValue && (maxTemp.Value < -50.0f || maxTemp.Value > 500.0f))
+        {
+            _logger.LogWarning("[CamWebhook] Rejected invalid temperature value: {temp} °C for event {type}", maxTemp.Value, eventType);
+            maxTemp = null;
+            if (detType == "thermal_hotspot")
+            {
+                _logger.LogWarning("[CamWebhook] Discarding event due to invalid temperature.");
+                return;
+            }
+        }
         
         // PHÓNG ĐIỆN: Phân cấp Warning/Alarm dựa trên nội dung description từ AI Engine
         if (detType == "partial_discharge" && desc != null)

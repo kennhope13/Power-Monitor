@@ -173,11 +173,10 @@ export default function AppShell() {
   useEffect(() => {
     if (!user || isCentralUser) return;
     if (location.pathname.startsWith('/settings')) return;
-    const resolvedStationName = getDisplayStationName(stations[0]?.name, storedStationName);
-    if (!hasStoredServerIp() || !resolvedStationName) {
+    if (!hasStoredServerIp()) {
       navigate('/settings?setup=1', { replace: true });
     }
-  }, [user, isCentralUser, location.pathname, navigate, stations, storedStationName]);
+  }, [user, isCentralUser, location.pathname, navigate]);
 
   // Lọc adminNavItems theo quyền:
   // - Restricted admin (khi ở trạm tổng): ẩn settings, license
