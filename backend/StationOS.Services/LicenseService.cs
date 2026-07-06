@@ -334,7 +334,7 @@ public class LicenseService
             return (LicenseLimits.Trial, LicenseStateKind.Missing, "Chưa có license", false);
 
         var status = snapshot.Status;
-        return (new LicenseLimits(status.MaxUsers, status.MaxDevices, status.MaxCameras, status.MaxRoiPoints, status.MaxRoiRegions, status.MaxPdRegions), ParseState(status.State), status.Message, true);
+        return (new LicenseLimits(status.MaxUsers, status.MaxDevices, status.MaxCameras, status.MaxCameras, status.MaxRoiPoints, status.MaxRoiRegions, status.MaxPdRegions), ParseState(status.State), status.Message, true);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -654,7 +654,7 @@ public class LicenseService
         return new LegacyLicenseRecord(
             activeLicense.Key,
             activeLicense.Tier,
-            new LicenseLimits(activeLicense.MaxUsers, 5, 5, 5, 5, 5),
+            new LicenseLimits(activeLicense.MaxUsers, 5, 5, 5, 5, 5, 5),
             activeLicense.ExpiresAt,
             activeLicense.ActivatedAt
         );
@@ -676,7 +676,7 @@ public class LicenseService
         if (kind == LicenseFileKind.Addon && string.IsNullOrWhiteSpace(payload.AddonId))
             return new LicenseValidationResult(false, "file", "invalid", "Add-on license phải có AddonId", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, kind);
 
-        var signatureOk = VerifySignature(payload, envelope.Signature);
+        var signatureOk = VerifySignature(envelope, payload);
         if (!signatureOk)
             return new LicenseValidationResult(false, "file", "invalid", "Chữ ký license không hợp lệ", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, kind);
 
@@ -684,16 +684,85 @@ public class LicenseService
         if (!hardwareMatch)
             return new LicenseValidationResult(false, "file", "hardware_mismatch", "License không khớp phần cứng máy trạm", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, kind);
 
-        var state = DateTime.UtcNow > payload.ExpiresAt ? "expired" : "active";
-        return new LicenseValidationResult(true, "file", state, state == "expired" ? "License đã hết hạn" : "License file hợp lệ", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, kind);
+        return new LicenseValidationResult(true, "file", "valid", "Hợp lệ", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, kind);
     }
 
-    private bool VerifySignature(LicensePayload payload, LicenseSignatureBlock signature)
+    private static string NormalizeMacAddress(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : System.Text.RegularExpressions.Regex.Replace(value.Trim().ToUpperInvariant(), @"[^A-Z0-9]+", string.Empty);
+
+    private static string ComputeHardwareFingerprintHash(LicenseHardwareBinding hardware)
     {
+        var payload = string.Join("|", new[]
+        {
+            NormalizeMacAddress(hardware.CpuId),
+            NormalizeMacAddress(hardware.MainboardUuid),
+            NormalizeMacAddress(hardware.DiskSerial),
+            NormalizeMacAddress(hardware.MachineName),
+            NormalizeMacAddress(hardware.Platform),
+            NormalizeMacAddress(hardware.PhysicalMacs?.FirstOrDefault())
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private static string BuildCanonicalPayload(LicensePayload payload, bool includeSensors)
+    {
+        string limitsStr;
+        if (includeSensors)
+        {
+            limitsStr = $"users={payload.Limits.MaxUsers};stations={payload.Limits.MaxDevices};cameras={payload.Limits.MaxCameras};sensors={payload.Limits.MaxSensors};roi_points={payload.Limits.MaxRoiPoints};roi_regions={payload.Limits.MaxRoiRegions};pd_regions={payload.Limits.MaxPdRegions}";
+        }
+        else
+        {
+            var sensorPart = payload.Limits.MaxSensors > 0 ? $"sensors={payload.Limits.MaxSensors};" : "";
+            limitsStr = $"users={payload.Limits.MaxUsers};stations={payload.Limits.MaxDevices};cameras={payload.Limits.MaxCameras};{sensorPart}roi_points={payload.Limits.MaxRoiPoints};roi_regions={payload.Limits.MaxRoiRegions};pd_regions={payload.Limits.MaxPdRegions}";
+        }
+        
+        var baseLicenseIdStr = string.Empty;
+        
+        return string.Join("|", new[]
+        {
+            (payload.LicenseType ?? "base").ToUpperInvariant(),
+            Guid.TryParse(payload.LicenseId, out var lid) ? lid.ToString("N") : payload.LicenseId,
+            Guid.TryParse(payload.AddonId, out var aid) ? aid.ToString("N") : string.Empty,
+            baseLicenseIdStr,
+            (payload.Tier ?? "base").Trim().ToUpperInvariant(),
+            payload.IssuedAt.ToUniversalTime().ToString("O"),
+            payload.ExpiresAt.ToUniversalTime().ToString("O"),
+            ComputeHardwareFingerprintHash(payload.Hardware),
+            limitsStr
+        });
+    }
+
+    private bool VerifySignature(LicenseEnvelope envelope, LicensePayload payload)
+    {
+        var signature = envelope.Signature;
         if (signature == null || string.IsNullOrWhiteSpace(signature.Value))
             return false;
 
-        var canonical = CanonicalizePayload(payload);
+        var candidates = new List<string>();
+        if (envelope.IsFlatFormat)
+        {
+            candidates.Add(BuildCanonicalPayload(payload, false));
+            candidates.Add(BuildCanonicalPayload(payload, true));
+        }
+        else
+        {
+            candidates.Add(CanonicalizePayload(payload));
+        }
+
+        // --- DEBUG LOGGING ---
+        Console.WriteLine($"[DEBUG] Verifying License ID: {payload.LicenseId}");
+        Console.WriteLine($"[DEBUG] Signature Alg: {signature.Algorithm}, Value: {signature.Value}");
+        foreach (var c in candidates)
+        {
+            Console.WriteLine($"[DEBUG] Candidate Payload: {c}");
+            if (signature.Algorithm == "HMAC-SHA256") 
+            {
+                Console.WriteLine($"[DEBUG] Computed HMAC: {ComputeHmac(c)}");
+            }
+        }
+        // ---------------------
+
         var alg = signature.Algorithm?.Trim().ToUpperInvariant();
         if (alg == "RSA-SHA256" || alg == "RSASSA-PKCS1-V1_5-SHA256")
         {
@@ -714,7 +783,13 @@ public class LicenseService
                 {
                     sigBytes = Convert.FromHexString(signature.Value.Trim());
                 }
-                return rsa.VerifyData(Encoding.UTF8.GetBytes(canonical), sigBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                
+                foreach (var canonical in candidates)
+                {
+                    if (rsa.VerifyData(Encoding.UTF8.GetBytes(canonical), sigBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+                        return true;
+                }
+                return false;
             }
             catch
             {
@@ -729,8 +804,13 @@ public class LicenseService
 
             try
             {
-                var expected = ComputeHmac(canonical);
-                return FixedTimeEquals(signature.Value, expected);
+                foreach (var canonical in candidates)
+                {
+                    var expected = ComputeHmac(canonical);
+                    if (FixedTimeEquals(signature.Value, expected))
+                        return true;
+                }
+                return false;
             }
             catch
             {
@@ -832,7 +912,62 @@ public class LicenseService
     {
         try
         {
-            return JsonSerializer.Deserialize<LicenseEnvelope>(content, JsonOptions);
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("Payload", out _) || root.TryGetProperty("payload", out _))
+            {
+                return JsonSerializer.Deserialize<LicenseEnvelope>(content, JsonOptions);
+            }
+
+            // Parse flat JSON format from Master-Station
+            var version = root.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 1;
+            var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : "base";
+            var licenseId = root.TryGetProperty("licenseId", out var l) ? l.GetString() : null;
+            var addonId = root.TryGetProperty("addonId", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+            var tier = root.TryGetProperty("tier", out var t) ? t.GetString() : "base";
+            
+            DateTime issuedAt = DateTime.UtcNow;
+            if (root.TryGetProperty("issuedAtUtc", out var ia)) issuedAt = ia.GetDateTime();
+
+            DateTime expiresAt = DateTime.MaxValue;
+            if (root.TryGetProperty("expiresAtUtc", out var ea)) expiresAt = ea.GetDateTime();
+
+            var hardware = new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>());
+            if (root.TryGetProperty("hardware", out var hw) && hw.ValueKind == JsonValueKind.Object)
+            {
+                var cpu = hw.TryGetProperty("cpuId", out var cpuProp) ? cpuProp.GetString() : null;
+                var mb = hw.TryGetProperty("mainboardUuid", out var mbProp) ? mbProp.GetString() : null;
+                var ds = hw.TryGetProperty("osDiskSerial", out var dsProp) ? dsProp.GetString() : null;
+                var mn = hw.TryGetProperty("machineName", out var mnProp) ? mnProp.GetString() : null;
+                var pt = hw.TryGetProperty("platform", out var ptProp) ? ptProp.GetString() : null;
+                var mac = hw.TryGetProperty("macAddress", out var macProp) ? macProp.GetString() : null;
+
+                hardware = new LicenseHardwareBinding(null, cpu, mb, ds, mn, pt, null, string.IsNullOrWhiteSpace(mac) ? Array.Empty<string>() : new[] { mac });
+            }
+
+            var limits = new LicenseLimits(0, 0, 0, 0, 0, 0, 0);
+            if (root.TryGetProperty("limits", out var lm) && lm.ValueKind == JsonValueKind.Object)
+            {
+                var lu = lm.TryGetProperty("users", out var p1) && p1.ValueKind == JsonValueKind.Number ? p1.GetInt32() : 1;
+                var lst = lm.TryGetProperty("stations", out var p2) && p2.ValueKind == JsonValueKind.Number ? p2.GetInt32() : 5;
+                var lc = lm.TryGetProperty("cameras", out var p3) && p3.ValueKind == JsonValueKind.Number ? p3.GetInt32() : 5;
+                var lse = lm.TryGetProperty("sensors", out var p3s) && p3s.ValueKind == JsonValueKind.Number ? p3s.GetInt32() : lc;
+                var lrp = lm.TryGetProperty("roiPoints", out var p4) && p4.ValueKind == JsonValueKind.Number ? p4.GetInt32() : 0;
+                var lrr = lm.TryGetProperty("roiRegions", out var p5) && p5.ValueKind == JsonValueKind.Number ? p5.GetInt32() : 0;
+                var lpr = lm.TryGetProperty("pdRegions", out var p6) && p6.ValueKind == JsonValueKind.Number ? p6.GetInt32() : 0;
+
+                limits = new LicenseLimits(lu, lst, lc, lse, lrp, lrr, lpr);
+            }
+
+            var payload = new LicensePayload(version, kind ?? "base", licenseId ?? "", addonId, tier ?? "base", null, issuedAt, expiresAt, hardware, limits);
+
+            var signature = root.TryGetProperty("signature", out var sig) ? sig.GetString() : null;
+            var signatureAlg = root.TryGetProperty("signatureAlgorithm", out var alg) ? alg.GetString() : null;
+
+            var sigBlock = new LicenseSignatureBlock(signatureAlg ?? "rsa-sha256", signature ?? "");
+
+            return new LicenseEnvelope(payload, sigBlock, true);
         }
         catch
         {

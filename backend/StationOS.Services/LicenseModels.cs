@@ -35,19 +35,21 @@ public sealed record LicenseLimits(
     int MaxUsers,
     int MaxDevices,
     int MaxCameras,
+    int MaxSensors,
     int MaxRoiPoints,
     int MaxRoiRegions,
     int MaxPdRegions)
 {
-    public static LicenseLimits Zero { get; } = new(0, 0, 0, 0, 0, 0);
+    public static LicenseLimits Zero { get; } = new(0, 0, 0, 0, 0, 0, 0);
 
-    public static LicenseLimits Trial { get; } = new(1, 5, 5, 5, 5, 5);
+    public static LicenseLimits Trial { get; } = new(1, 5, 5, 5, 5, 5, 5);
 
     public static LicenseLimits operator +(LicenseLimits a, LicenseLimits b) =>
         new(
             Math.Max(0, a.MaxUsers + b.MaxUsers),
             Math.Max(0, a.MaxDevices + b.MaxDevices),
             Math.Max(0, a.MaxCameras + b.MaxCameras),
+            Math.Max(0, a.MaxSensors + b.MaxSensors),
             Math.Max(0, a.MaxRoiPoints + b.MaxRoiPoints),
             Math.Max(0, a.MaxRoiRegions + b.MaxRoiRegions),
             Math.Max(0, a.MaxPdRegions + b.MaxPdRegions)
@@ -93,7 +95,8 @@ public sealed record LicensePayload(
 
 public sealed record LicenseEnvelope(
     LicensePayload Payload,
-    LicenseSignatureBlock Signature);
+    LicenseSignatureBlock Signature,
+    bool IsFlatFormat = false);
 
 public sealed record LicenseImportResult(
     bool Success,
