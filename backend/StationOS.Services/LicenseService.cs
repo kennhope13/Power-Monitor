@@ -729,7 +729,7 @@ public class LicenseService
             NormalizeMacAddress(hardware.DiskSerial),
             NormalizeMacAddress(hardware.MachineName),
             NormalizeMacAddress(hardware.Platform),
-            NormalizeMacAddress(hardware.PhysicalMacs?.FirstOrDefault())
+            NormalizeMacAddress(hardware.PhysicalMacs?.FirstOrDefault() ?? hardware.MacAddress)
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }
@@ -865,6 +865,7 @@ public class LicenseService
                                  !string.IsNullOrWhiteSpace(binding.MachineName) ||
                                  !string.IsNullOrWhiteSpace(binding.Platform) ||
                                  !string.IsNullOrWhiteSpace(binding.MachineGuid) ||
+                                 !string.IsNullOrWhiteSpace(binding.MacAddress) ||
                                  (binding.PhysicalMacs != null && binding.PhysicalMacs.Count > 0);
 
         if (!hasSpecificFields && !string.IsNullOrWhiteSpace(binding.Fingerprint))
@@ -923,7 +924,7 @@ public class LicenseService
 
     private static LicensePayload NormalizePayload(LicensePayload payload)
     {
-        var hardware = payload.Hardware ?? new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>());
+        var hardware = payload.Hardware ?? new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>(), null);
         var limits = payload.Limits ?? LicenseLimits.Zero;
         return payload with
         {
@@ -976,7 +977,7 @@ public class LicenseService
             DateTime expiresAt = DateTime.MaxValue;
             if (root.TryGetProperty("expiresAtUtc", out var ea)) expiresAt = ea.GetDateTime();
 
-            var hardware = new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>());
+            var hardware = new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>(), null);
             if (root.TryGetProperty("hardware", out var hw) && hw.ValueKind == JsonValueKind.Object)
             {
                 var cpu = hw.TryGetProperty("cpuId", out var cpuProp) ? cpuProp.GetString() : null;
@@ -986,7 +987,7 @@ public class LicenseService
                 var pt = hw.TryGetProperty("platform", out var ptProp) ? ptProp.GetString() : null;
                 var mac = hw.TryGetProperty("macAddress", out var macProp) ? macProp.GetString() : null;
 
-                hardware = new LicenseHardwareBinding(null, cpu, mb, ds, mn, pt, null, string.IsNullOrWhiteSpace(mac) ? Array.Empty<string>() : new[] { mac });
+                hardware = new LicenseHardwareBinding(null, cpu, mb, ds, mn, pt, null, string.IsNullOrWhiteSpace(mac) ? Array.Empty<string>() : new[] { mac }, null);
             }
 
             var limits = new LicenseLimits(0, 0, 0, 0, 0, 0, 0);
@@ -1084,7 +1085,7 @@ public class LicenseService
     private static LicenseHardwareBinding ParseFlatHardware(JsonElement element)
     {
         if (element.ValueKind != JsonValueKind.Object)
-            return new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>());
+            return new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>(), null);
 
         var mac = GetString(element, "macAddress", "mac_address");
         var macs = string.IsNullOrWhiteSpace(mac) ? Array.Empty<string>() : new[] { mac };
@@ -1097,7 +1098,8 @@ public class LicenseService
             GetString(element, "machineName", "machine_name"),
             null,
             null,
-            macs
+            macs,
+            mac
         );
     }
 

@@ -21,47 +21,54 @@ public static class DbInitializer
         {
             try
             {
+                // Kiểm tra xem database cũ (tạo bằng EnsureCreated) đã tồn tại chưa nhưng thiếu bảng lịch sử Migration
+                var conn = db.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+                
+                using var checkCmd = conn.CreateCommand();
+                checkCmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_name = 'AiModelVersions'";
+                var tableExists = checkCmd.ExecuteScalar() != null;
+                
+                checkCmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_name = '__EFMigrationsHistory'";
+                var historyExists = checkCmd.ExecuteScalar() != null;
+                
+                if (tableExists && !historyExists)
+                {
+                    Console.WriteLine("[Startup] Phát hiện Database cũ (tạo bằng EnsureCreated). Khởi tạo lịch sử Migration để tránh xung đột...");
+                    using var insertCmd = conn.CreateCommand();
+                    insertCmd.CommandText = @"
+                        CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
+                            ""MigrationId"" character varying(150) NOT NULL,
+                            ""ProductVersion"" character varying(32) NOT NULL,
+                            CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
+                        );
+                        INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
+                        VALUES 
+                        ('20260402153855_InitialCreate', '8.0.0'),
+                        ('20260405043130_AddMaintenanceTask', '8.0.0'),
+                        ('20260408104000_AddViewRotationToSldFile', '8.0.0'),
+                        ('20260415000000_AddRuleSetField', '8.0.0'),
+                        ('20260416171424_AddMediaToAlerts', '8.0.0'),
+                        ('20260507034433_AddLicense', '8.0.0'),
+                        ('20260518000000_AddDeviceCapabilities', '8.0.0'),
+                        ('20260518113459_AddSensorReadingIndexes', '8.0.0'),
+                        ('20260524100920_AddBoundary', '8.0.0'),
+                        ('20260526154303_AddUserMustChangePassword', '8.0.0'),
+                        ('20260527024248_AddRoiPoints', '8.0.0'),
+                        ('20260527024627_RenameRoiPointColumns', '8.0.0'),
+                        ('20260527030342_RevertToTxTy', '8.0.0'),
+                        ('20260530100337_AddDetectionEventNewColumns', '8.0.0'),
+                        ('20260605041729_AddAlertPointId', '8.0.0'),
+                        ('20260703072551_AddPermissionsToUser', '8.0.0')
+                        ON CONFLICT DO NOTHING;
+                    ";
+                    insertCmd.ExecuteNonQuery();
+                    Console.WriteLine("[Startup] Đã chèn lịch sử Migration thành công.");
+                }
+
                 // Đảm bảo database tồn tại trước khi migrate (đã được tạo bởi main.cjs, Migrate sẽ tự chạy script)
                 db.Database.Migrate();
                 break; // Thành công thì thoát vòng lặp
-            }
-            catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P07")
-            {
-                Console.WriteLine("[Startup] Phát hiện Database cũ (tạo bằng EnsureCreated). Bỏ qua Migrate và chèn lịch sử...");
-                
-                // Tự động tạo bảng __EFMigrationsHistory và chèn các migration cũ để ngăn lỗi 42P07 tiếp tục xảy ra
-                var conn = db.Database.GetDbConnection();
-                if (conn.State != System.Data.ConnectionState.Open) conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
-                        ""MigrationId"" character varying(150) NOT NULL,
-                        ""ProductVersion"" character varying(32) NOT NULL,
-                        CONSTRAINT ""PK___EFMigrationsHistory"" PRIMARY KEY (""MigrationId"")
-                    );
-                    INSERT INTO ""__EFMigrationsHistory"" (""MigrationId"", ""ProductVersion"")
-                    VALUES 
-                    ('20260402153855_InitialCreate', '8.0.0'),
-                    ('20260405043130_AddMaintenanceTask', '8.0.0'),
-                    ('20260408104000_AddViewRotationToSldFile', '8.0.0'),
-                    ('20260415000000_AddRuleSetField', '8.0.0'),
-                    ('20260416171424_AddMediaToAlerts', '8.0.0'),
-                    ('20260507034433_AddLicense', '8.0.0'),
-                    ('20260518000000_AddDeviceCapabilities', '8.0.0'),
-                    ('20260518113459_AddSensorReadingIndexes', '8.0.0'),
-                    ('20260524100920_AddBoundary', '8.0.0'),
-                    ('20260526154303_AddUserMustChangePassword', '8.0.0'),
-                    ('20260527024248_AddRoiPoints', '8.0.0'),
-                    ('20260527024627_RenameRoiPointColumns', '8.0.0'),
-                    ('20260527030342_RevertToTxTy', '8.0.0'),
-                    ('20260530100337_AddDetectionEventNewColumns', '8.0.0'),
-                    ('20260605041729_AddAlertPointId', '8.0.0'),
-                    ('20260703072551_AddPermissionsToUser', '8.0.0')
-                    ON CONFLICT DO NOTHING;
-                ";
-                cmd.ExecuteNonQuery();
-                Console.WriteLine("[Startup] Đã chèn lịch sử Migration thành công.");
-                break;
             }
             catch (Exception ex)
             {

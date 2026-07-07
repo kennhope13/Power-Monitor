@@ -74,7 +74,8 @@ public sealed record LicenseHardwareBinding(
     string? MachineName,
     string? Platform,
     string? MachineGuid,
-    IReadOnlyList<string>? PhysicalMacs);
+    [property: System.Text.Json.Serialization.JsonPropertyName("physicalMacs")] IReadOnlyList<string>? PhysicalMacs,
+    [property: System.Text.Json.Serialization.JsonPropertyName("macAddress")] string? MacAddress);
 
 public sealed record LicenseSignatureBlock(
     string Algorithm,
