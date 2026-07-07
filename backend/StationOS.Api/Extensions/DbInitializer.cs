@@ -21,8 +21,7 @@ public static class DbInitializer
         {
             try
             {
-                // Đảm bảo database tồn tại trước khi migrate
-                db.Database.EnsureCreated();
+                // Đảm bảo database tồn tại trước khi migrate (đã được tạo bởi main.cjs, Migrate sẽ tự chạy script)
                 db.Database.Migrate();
                 break; // Thành công thì thoát vòng lặp
             }
