@@ -1296,7 +1296,18 @@ public class LicenseService
     }
 
     private static string NormalizeText(string? value)
-        => string.IsNullOrWhiteSpace(value) ? "" : value.Trim().Replace(" ", "").Replace("-", "").ToUpperInvariant();
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var c in value.Trim().ToUpperInvariant())
+        {
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
 
     private static string? NormalizeGuidString(string? value)
     {
