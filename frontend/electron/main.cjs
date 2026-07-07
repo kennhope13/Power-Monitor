@@ -201,6 +201,16 @@ async function startAllServices(root) {
     const pgDataDir = path.join(userData, 'pg_data');
     const pgBinDir = path.join(root, 'pg_portable', 'bin');
     
+    // Dọn dẹp tiến trình cũ (zombie) trước khi khởi động
+    try {
+      spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
+      spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
+      spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
+      log('[Station Monitor] Đã dọn dẹp tiến trình cũ trên Windows.');
+    } catch (e) {
+      log('[Station Monitor] Lỗi dọn dẹp tiến trình:', e.message);
+    }
+    
     // ── Bước 1: initdb nếu chưa có data directory ──
     if (!fs.existsSync(pgDataDir)) {
       log('Khởi tạo database mới tại:', pgDataDir);
@@ -639,5 +649,16 @@ app.on('window-all-closed', () => {
     try { localUiServer.close(); } catch {}
     localUiServer = null;
   }
+  
+  // Dọn dẹp tiến trình trước khi thoát hoàn toàn
+  if (process.platform === 'win32') {
+    try {
+      const { spawnSync } = require('child_process');
+      spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
+      spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
+      spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
+    } catch (e) {}
+  }
+  
   if (process.platform !== 'darwin') app.quit();
 });
