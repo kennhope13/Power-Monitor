@@ -794,19 +794,8 @@ public class LicenseService
         // ---------------------
 
         var alg = signature.Algorithm?.Trim().ToUpperInvariant();
-        var canonical = alg?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true
-            ? signature.KeyId ?? ""
-            : CanonicalizePayload(payload);
-
-        if (string.IsNullOrWhiteSpace(canonical))
-            return false;
-
         if (alg?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true)
             alg = alg["FLAT-".Length..];
-
-        var canonicalCandidates = canonical
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .DefaultIfEmpty(canonical);
 
         if (alg == "RSA-SHA256" || alg == "RSASSA-PKCS1-V1_5-SHA256")
         {
