@@ -859,9 +859,19 @@ public class LicenseService
         if (binding == null)
             return true;
 
-        if (!string.IsNullOrWhiteSpace(binding.Fingerprint) &&
-            !binding.Fingerprint.Equals(actual.Fingerprint, StringComparison.OrdinalIgnoreCase))
-            return false;
+        bool hasSpecificFields = !string.IsNullOrWhiteSpace(binding.CpuId) ||
+                                 !string.IsNullOrWhiteSpace(binding.MainboardUuid) ||
+                                 !string.IsNullOrWhiteSpace(binding.DiskSerial) ||
+                                 !string.IsNullOrWhiteSpace(binding.MachineName) ||
+                                 !string.IsNullOrWhiteSpace(binding.Platform) ||
+                                 !string.IsNullOrWhiteSpace(binding.MachineGuid) ||
+                                 (binding.PhysicalMacs != null && binding.PhysicalMacs.Count > 0);
+
+        if (!hasSpecificFields && !string.IsNullOrWhiteSpace(binding.Fingerprint))
+        {
+            if (!binding.Fingerprint.Equals(actual.Fingerprint, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
 
         if (!string.IsNullOrWhiteSpace(binding.CpuId) &&
             !EqualsIgnoreSpace(binding.CpuId, actual.CpuId))
