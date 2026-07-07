@@ -334,7 +334,7 @@ public class LicenseService
             return (LicenseLimits.Trial, LicenseStateKind.Missing, "Chưa có license", false);
 
         var status = snapshot.Status;
-        return (new LicenseLimits(status.MaxUsers, status.MaxDevices, status.MaxCameras, status.MaxRoiPoints, status.MaxRoiRegions, status.MaxPdRegions), ParseState(status.State), status.Message, true);
+        return (new LicenseLimits(status.MaxUsers, status.MaxDevices, status.MaxCameras, status.MaxSensors, status.MaxRoiPoints, status.MaxRoiRegions, status.MaxPdRegions), ParseState(status.State), status.Message, true);
     }
 
     // ─────────────────────────────────────────────────────────
@@ -460,6 +460,7 @@ public class LicenseService
         EnsureLicenseRoot();
         var actual = _hardware.Build();
         var warnings = new List<string>();
+        var usage = await GetLicenseUsageAsync();
 
         var basePath = Path.Combine(_licenseRoot, "base.lic");
         if (File.Exists(basePath))
@@ -475,7 +476,7 @@ public class LicenseService
                 if (baseLoad.Payload == null)
                     return new LicenseSnapshot(null, DateTime.UtcNow);
 
-                return new LicenseSnapshot(ToStatus(baseLoad, actual, Array.Empty<LoadedAddon>(), false, warnings, baseLoad.Validation.Message), DateTime.UtcNow);
+                return new LicenseSnapshot(ToStatus(baseLoad, actual, Array.Empty<LoadedAddon>(), false, warnings, baseLoad.Validation.Message, usage), DateTime.UtcNow);
             }
 
             var addons = await LoadAddonsAsync(actual, baseLoad.Payload);
@@ -498,9 +499,13 @@ public class LicenseService
                 combined.MaxUsers,
                 combined.MaxDevices,
                 combined.MaxCameras,
+                combined.MaxSensors,
                 combined.MaxRoiPoints,
                 combined.MaxRoiRegions,
                 combined.MaxPdRegions,
+                usage.Stations,
+                usage.Cameras,
+                usage.Sensors,
                 expires,
                 baseLoad.Payload.IssuedAt,
                 CountLimitedSessions(),
@@ -526,9 +531,13 @@ public class LicenseService
             maxUsers,
             maxDevices,
             maxCameras,
+            maxCameras,
             maxRoiPoints,
             maxRoiRegions,
             maxPdRegions,
+            usage.Stations,
+            usage.Cameras,
+            usage.Sensors,
             expiresAt,
             legacy.ActivatedAt,
             CountLimitedSessions(),
@@ -541,6 +550,23 @@ public class LicenseService
             actual.Fingerprint
         );
         return new LicenseSnapshot(legacyStatus, DateTime.UtcNow);
+    }
+
+    private async Task<LicenseUsage> GetLicenseUsageAsync()
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var stations = await db.Stations.CountAsync();
+            var cameras = await db.Devices.CountAsync(d => d.Type.StartsWith("camera"));
+            var sensors = await db.Devices.CountAsync(d => !d.Type.StartsWith("camera"));
+            return new LicenseUsage(stations, cameras, sensors);
+        }
+        catch
+        {
+            return new LicenseUsage(0, 0, 0);
+        }
     }
 
     private async Task<LicenseFileLoadResult?> LoadLicenseFileAsync(string path, HardwareFingerprintData actual)
@@ -608,7 +634,7 @@ public class LicenseService
         return new AddonLoadResult(addons, warnings);
     }
 
-    private LicenseStatusDto ToStatus(LicenseFileLoadResult license, HardwareFingerprintData actual, IReadOnlyCollection<LoadedAddon> addons, bool valid, List<string> warnings, string message)
+    private LicenseStatusDto ToStatus(LicenseFileLoadResult license, HardwareFingerprintData actual, IReadOnlyCollection<LoadedAddon> addons, bool valid, List<string> warnings, string message, LicenseUsage usage)
     {
         var combined = license.Payload.Limits;
         foreach (var addon in addons.Where(a => a.Validation.Valid))
@@ -623,9 +649,13 @@ public class LicenseService
             combined.MaxUsers,
             combined.MaxDevices,
             combined.MaxCameras,
+            combined.MaxSensors,
             combined.MaxRoiPoints,
             combined.MaxRoiRegions,
             combined.MaxPdRegions,
+            usage.Stations,
+            usage.Cameras,
+            usage.Sensors,
             expires,
             license.Payload.IssuedAt,
             CountLimitedSessions(),
@@ -654,7 +684,7 @@ public class LicenseService
         return new LegacyLicenseRecord(
             activeLicense.Key,
             activeLicense.Tier,
-            new LicenseLimits(activeLicense.MaxUsers, 5, 5, 5, 5, 5),
+            new LicenseLimits(activeLicense.MaxUsers, 5, 5, 5, 5, 5, 5),
             activeLicense.ExpiresAt,
             activeLicense.ActivatedAt
         );
@@ -693,8 +723,21 @@ public class LicenseService
         if (signature == null || string.IsNullOrWhiteSpace(signature.Value))
             return false;
 
-        var canonical = CanonicalizePayload(payload);
         var alg = signature.Algorithm?.Trim().ToUpperInvariant();
+        var canonical = alg?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true
+            ? signature.KeyId ?? ""
+            : CanonicalizePayload(payload);
+
+        if (string.IsNullOrWhiteSpace(canonical))
+            return false;
+
+        if (alg?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true)
+            alg = alg["FLAT-".Length..];
+
+        var canonicalCandidates = canonical
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .DefaultIfEmpty(canonical);
+
         if (alg == "RSA-SHA256" || alg == "RSASSA-PKCS1-V1_5-SHA256")
         {
             var pem = _publicKeyPem;
@@ -714,7 +757,8 @@ public class LicenseService
                 {
                     sigBytes = Convert.FromHexString(signature.Value.Trim());
                 }
-                return rsa.VerifyData(Encoding.UTF8.GetBytes(canonical), sigBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                return canonicalCandidates.Any(candidate =>
+                    rsa.VerifyData(Encoding.UTF8.GetBytes(candidate), sigBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
             }
             catch
             {
@@ -729,8 +773,12 @@ public class LicenseService
 
             try
             {
-                var expected = ComputeHmac(canonical);
-                return FixedTimeEquals(signature.Value, expected);
+                return canonicalCandidates.Any(candidate =>
+                {
+                    var expected = ComputeHmac(candidate);
+                    return FixedTimeEquals(signature.Value, expected) ||
+                           FixedTimeEquals(signature.Value, expected[..8].ToUpperInvariant());
+                });
             }
             catch
             {
@@ -832,13 +880,256 @@ public class LicenseService
     {
         try
         {
-            return JsonSerializer.Deserialize<LicenseEnvelope>(content, JsonOptions);
+            if (content.Length >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF)
+            {
+                content = content[3..];
+            }
+
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
+
+            if (root.TryGetProperty("payload", out _) || root.TryGetProperty("Payload", out _))
+            {
+                var envelope = JsonSerializer.Deserialize<LicenseEnvelope>(content, JsonOptions);
+                return envelope?.Payload == null || envelope.Signature == null ? null : envelope;
+            }
+
+            return DeserializeFlatLicense(root);
         }
         catch
         {
             return null;
         }
     }
+
+    private static LicenseEnvelope? DeserializeFlatLicense(JsonElement root)
+    {
+        var kind = GetString(root, "kind")?.Trim().ToLowerInvariant() ?? "base";
+        if (kind != "base" && kind != "addon")
+            return null;
+
+        var licenseId = GetString(root, "licenseId", "license_id");
+        if (string.IsNullOrWhiteSpace(licenseId))
+            return null;
+
+        var issuedAt = ParseUtc(GetString(root, "issuedAtUtc", "issued_at_utc", "issuedAt")) ?? DateTime.UtcNow;
+        var expiresAt = ParseUtc(GetString(root, "expiresAtUtc", "expires_at_utc", "expiresAt"));
+        if (expiresAt == null)
+            return null;
+
+        var hardwareElement = root.TryGetProperty("hardware", out var h) ? h : default;
+        var limitsElement = root.TryGetProperty("limits", out var l) ? l : default;
+        var hardware = ParseFlatHardware(hardwareElement);
+        var limits = ParseFlatLimits(limitsElement);
+        var addonId = GetString(root, "addonId", "addon_id");
+        var baseLicenseId = GetString(root, "baseLicenseId", "base_license_id");
+        var tier = GetString(root, "tier") ?? kind;
+        var signature = GetString(root, "signature");
+        var signatureAlgorithm = NormalizeFlatSignatureAlgorithm(GetString(root, "signatureAlgorithm", "signature_algorithm"));
+        if (string.IsNullOrWhiteSpace(signature))
+            return null;
+
+        var payload = new LicensePayload(
+            ReadInt(root, "version") <= 0 ? 1 : ReadInt(root, "version"),
+            kind,
+            licenseId,
+            addonId,
+            tier,
+            null,
+            issuedAt,
+            expiresAt.Value,
+            hardware,
+            limits
+        );
+
+        var canonical = BuildFlatCanonicalPayload(kind, licenseId, addonId, baseLicenseId, tier, issuedAt, expiresAt.Value, hardwareElement, limitsElement, includeSensors: false);
+        var canonicalWithSensors = BuildFlatCanonicalPayload(kind, licenseId, addonId, baseLicenseId, tier, issuedAt, expiresAt.Value, hardwareElement, limitsElement, includeSensors: true);
+        var canonicalPayload = canonicalWithSensors.Length > canonical.Length ? $"{canonical}\n{canonicalWithSensors}" : canonical;
+
+        return new LicenseEnvelope(
+            payload,
+            new LicenseSignatureBlock($"FLAT-{signatureAlgorithm}", signature, canonicalPayload)
+        );
+    }
+
+    private static string NormalizeFlatSignatureAlgorithm(string? value)
+    {
+        var alg = value?.Trim().ToUpperInvariant();
+        return alg switch
+        {
+            "RSA" => "RSA-SHA256",
+            "RSA-SHA256" => "RSA-SHA256",
+            "HMAC" => "HMAC-SHA256",
+            "HMAC-SHA256" => "HMAC-SHA256",
+            _ => "RSA-SHA256"
+        };
+    }
+
+    private static LicenseHardwareBinding ParseFlatHardware(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return new LicenseHardwareBinding(null, null, null, null, null, null, null, Array.Empty<string>());
+
+        var mac = GetString(element, "macAddress", "mac_address");
+        var macs = string.IsNullOrWhiteSpace(mac) ? Array.Empty<string>() : new[] { mac };
+
+        return new LicenseHardwareBinding(
+            null,
+            GetString(element, "cpuId", "cpu_id"),
+            GetString(element, "mainboardUuid", "mainboard_uuid"),
+            GetString(element, "osDiskSerial", "os_disk_serial", "diskSerial"),
+            GetString(element, "machineName", "machine_name"),
+            null,
+            null,
+            macs
+        );
+    }
+
+    private static LicenseLimits ParseFlatLimits(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return LicenseLimits.Zero;
+
+        return new LicenseLimits(
+            ReadInt(element, "users", "maxUsers", "max_users", "addUsers", "add_users"),
+            ReadInt(element, "stations", "maxDevices", "max_devices", "maxStations", "max_stations", "addStations", "add_stations"),
+            ReadInt(element, "cameras", "maxCameras", "max_cameras", "addCameras", "add_cameras"),
+            ReadInt(element, "sensors", "maxSensors", "max_sensors", "addSensors", "add_sensors"),
+            ReadInt(element, "roiPoints", "maxRoiPoints", "max_roi_points", "addRoiPoints", "add_roi_points"),
+            ReadInt(element, "roiRegions", "maxRoiRegions", "max_roi_regions", "addRoiRegions", "add_roi_regions"),
+            ReadInt(element, "pdRegions", "maxPdRegions", "max_pd_regions", "addPdRegions", "add_pd_regions")
+        );
+    }
+
+    private static string BuildFlatCanonicalPayload(
+        string kind,
+        string licenseId,
+        string? addonId,
+        string? baseLicenseId,
+        string tier,
+        DateTime issuedAtUtc,
+        DateTime expiresAtUtc,
+        JsonElement hardwareElement,
+        JsonElement limitsElement,
+        bool includeSensors)
+    {
+        var hardwareHash = ComputeFlatHardwareHash(hardwareElement);
+        var limits = BuildFlatLimitsCanonical(limitsElement, includeSensors);
+        return string.Join("|", new[]
+        {
+            kind.ToUpperInvariant(),
+            NormalizeGuidForFlatPayload(licenseId),
+            NormalizeGuidForFlatPayload(addonId),
+            NormalizeGuidForFlatPayload(baseLicenseId),
+            tier.Trim().ToUpperInvariant(),
+            issuedAtUtc.ToUniversalTime().ToString("O"),
+            expiresAtUtc.ToUniversalTime().ToString("O"),
+            hardwareHash,
+            limits
+        });
+    }
+
+    private static string ComputeFlatHardwareHash(JsonElement element)
+    {
+        var payload = string.Join("|", new[]
+        {
+            NormalizeFlatHardwareValue(GetString(element, "cpuId", "cpu_id")),
+            NormalizeFlatHardwareValue(GetString(element, "mainboardUuid", "mainboard_uuid")),
+            NormalizeFlatHardwareValue(GetString(element, "osDiskSerial", "os_disk_serial", "diskSerial")),
+            NormalizeFlatHardwareValue(GetString(element, "machineName", "machine_name")),
+            NormalizeFlatHardwareValue(GetString(element, "platform")),
+            NormalizeFlatHardwareValue(GetString(element, "macAddress", "mac_address"))
+        });
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private static string BuildFlatLimitsCanonical(JsonElement element, bool includeSensors)
+    {
+        var users = ReadInt(element, "users", "maxUsers", "max_users", "addUsers", "add_users");
+        var stations = ReadInt(element, "stations", "maxStations", "max_stations", "addStations", "add_stations");
+        var cameras = ReadInt(element, "cameras", "maxCameras", "max_cameras", "addCameras", "add_cameras");
+        var sensors = ReadInt(element, "sensors", "maxSensors", "max_sensors", "addSensors", "add_sensors");
+        var roiPoints = ReadInt(element, "roiPoints", "maxRoiPoints", "max_roi_points", "addRoiPoints", "add_roi_points");
+        var roiRegions = ReadInt(element, "roiRegions", "maxRoiRegions", "max_roi_regions", "addRoiRegions", "add_roi_regions");
+        var pdRegions = ReadInt(element, "pdRegions", "maxPdRegions", "max_pd_regions", "addPdRegions", "add_pd_regions");
+        var sensorPart = includeSensors || sensors > 0 ? $"sensors={sensors};" : "";
+        return $"users={users};stations={stations};cameras={cameras};{sensorPart}roi_points={roiPoints};roi_regions={roiRegions};pd_regions={pdRegions}";
+    }
+
+    private static string NormalizeGuidForFlatPayload(string? value)
+        => Guid.TryParse(value, out var guid) ? guid.ToString("N") : string.Empty;
+
+    private static string NormalizeFlatHardwareValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var c in value.Trim().ToUpperInvariant())
+        {
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
+    private static DateTime? ParseUtc(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        if (DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var date))
+            return DateTime.SpecifyKind(date, DateTimeKind.Utc);
+
+        return null;
+    }
+
+    private static string? GetString(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+                continue;
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null
+            };
+        }
+
+        return null;
+    }
+
+    private static int ReadInt(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return 0;
+
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+                continue;
+
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+                return number;
+
+            if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out number))
+                return number;
+        }
+
+        return 0;
+    }
+
 
     private string ComputeHmac(string payload)
     {
@@ -902,16 +1193,20 @@ public class LicenseService
 
     private static string? ReadPublicKey(IConfiguration config)
     {
-        var envValue = Environment.GetEnvironmentVariable("STATIONOS_LICENSE_PUBLIC_KEY");
+        var envValue = Environment.GetEnvironmentVariable("STATIONOS_LICENSE_PUBLIC_KEY")
+                       ?? Environment.GetEnvironmentVariable("STATIONOS_VENDOR_PUBLIC_KEY");
         if (!string.IsNullOrWhiteSpace(envValue))
             return envValue;
 
-        var configValue = config["License:PublicKey"];
+        var configValue = config["License:PublicKey"]
+                          ?? config["License:VendorPublicKey"];
         if (!string.IsNullOrWhiteSpace(configValue))
             return configValue;
 
         var path = Environment.GetEnvironmentVariable("STATIONOS_LICENSE_PUBLIC_KEY_PATH")
-                   ?? config["License:PublicKeyPath"];
+                   ?? Environment.GetEnvironmentVariable("STATIONOS_VENDOR_PUBLIC_KEY_PATH")
+                   ?? config["License:PublicKeyPath"]
+                   ?? config["License:VendorPublicKeyPath"];
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             return File.ReadAllText(path);
 
@@ -965,6 +1260,8 @@ public class LicenseService
     private sealed record LoadedAddon(LicensePayload Payload, LicenseValidationResult Validation, LicenseFileKind Kind, LicenseLimits Limits);
 
     private sealed record AddonLoadResult(List<LoadedAddon> Items, List<string> Warnings);
+
+    private sealed record LicenseUsage(int Stations, int Cameras, int Sensors);
 
     private sealed record LicenseFileLoadResult(string Path, LicenseFileKind Kind, LicensePayload? Payload, LicenseValidationResult Validation)
     {

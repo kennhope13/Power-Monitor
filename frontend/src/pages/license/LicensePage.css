@@ -1,9 +1,9 @@
 .license-page {
   min-height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 28px 16px;
+  padding: 14px 16px;
   background:
     radial-gradient(circle at top, rgba(14, 165, 233, 0.14), transparent 32%),
     linear-gradient(180deg, #080c14 0%, #0b0f19 100%);
@@ -11,13 +11,13 @@
 }
 .license-hero {
   width: 100%;
-  max-width: 760px;
+  max-width: 720px;
 }
 .license-card {
   background: linear-gradient(180deg, rgba(16, 21, 31, 0.98), rgba(10, 14, 22, 0.98));
   border: 1px solid rgba(56, 189, 248, 0.16);
   border-radius: 0px;
-  padding: 18px;
+  padding: 14px;
   box-shadow:
     0 24px 72px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -27,10 +27,10 @@
   border: 0;
   background: transparent;
   color: var(--admin-text-muted);
-  font-size: 24px;
+  font-size: 20px;
   line-height: 1;
   padding: 0;
-  margin: 0 0 6px;
+  margin: 0 0 2px;
   cursor: pointer;
 }
 .license-back:hover {
@@ -38,18 +38,18 @@
 }
 .license-header {
   text-align: center;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .license-header svg {
-  width: 34px;
-  height: 34px;
-  margin-bottom: 8px;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
 }
 .license-header h1 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
   color: var(--admin-text);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   letter-spacing: .6px;
   text-transform: uppercase;
 }
@@ -60,15 +60,15 @@
 }
 .license-message-stack {
   display: grid;
-  gap: 10px;
-  margin: 6px 0 14px;
+  gap: 8px;
+  margin: 4px 0 10px;
 }
 
 /* Status container */
 .status-container {
   background: rgba(0,0,0,0.22);
   border-radius: 0px;
-  padding: 16px;
+  padding: 12px;
   border: 1px solid rgba(56, 189, 248, 0.14);
 }
 .status-container.valid { border-color: var(--admin-success); }
@@ -80,8 +80,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
-  margin-bottom: 12px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 .status-topline > span:first-child {
@@ -116,13 +116,19 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 8px 0;
+  padding: 6px 0;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   font-size: 13px;
 }
 
 .status-row:last-child {
   border-bottom: none;
+}
+
+.status-row.status-row-section {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(56, 189, 248, 0.16);
 }
 
 .status-row > span:first-child {
@@ -132,6 +138,47 @@
 .status-row > span:last-child {
   color: var(--admin-text);
   font-weight: 700;
+  text-align: right;
+}
+
+.license-id-text {
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.license-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.license-limit-item {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(56, 189, 248, 0.10);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.license-limit-item span {
+  display: block;
+  color: var(--admin-text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.license-limit-item strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--admin-text);
+  font-size: 13px;
+  line-height: 1;
   text-align: right;
 }
 
@@ -151,8 +198,8 @@
   padding-top: 2px;
 }
 .license-subsection + .license-subsection {
-  margin-top: 16px;
-  padding-top: 16px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,0.06);
 }
 .license-hint {
@@ -177,7 +224,7 @@
 .license-form-stack {
   display: grid;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 8px;
   justify-items: start;
 }
 .license-file-picker {
@@ -337,19 +384,19 @@
 
 .license-stack {
   display: grid;
-  gap: 16px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .license-panel {
-  padding: 16px 16px 14px;
+  padding: 12px;
   border: 1px solid rgba(56, 189, 248, 0.12);
   background: rgba(255,255,255,0.02);
 }
 
 .panel-title {
-  margin: 0 0 10px;
-  font-size: 12px;
+  margin: 0 0 8px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--admin-text);
@@ -399,13 +446,19 @@
 
 @media (max-width: 560px) {
   .license-page {
-    padding: 18px 10px;
+    padding: 10px;
   }
   .license-card {
-    padding: 20px 14px;
+    padding: 12px;
   }
   .license-header h1 {
-    font-size: 20px;
+    font-size: 17px;
+  }
+  .license-limit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .license-id-text {
+    max-width: 150px;
   }
   .license-form-inline {
     flex-direction: column;
@@ -447,4 +500,102 @@
   .btn-license-secondary {
     width: 100%;
   }
+}
+
+/* Premium Diagnostic Box & Help Section */
+.license-diagnostic-box {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(239, 68, 68, 0.05) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 0px;
+  padding: 16px;
+  margin-top: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  animation: slideInDown 0.3s ease-out;
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.diagnostic-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  color: #f59e0b;
+  font-size: 13.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.diagnostic-icon {
+  flex-shrink: 0;
+}
+
+.diagnostic-body {
+  color: var(--admin-text-muted, #94a3b8);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 14px 0;
+}
+
+.diagnostic-body code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 2px;
+  color: #f43f5e;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.btn-diagnostic-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.btn-diagnostic-copy:hover {
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.25) 0%, rgba(245, 158, 11, 0.1) 100%);
+  border-color: #fbbf24;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+}
+
+.btn-diagnostic-copy.copied {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.15) 0%, rgba(34, 197, 94, 0.05) 100%);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #4ade80;
+}
+
+.btn-icon {
+  flex-shrink: 0;
+}
+
+.troubleshooting-panel {
+  border-left: 3px solid rgba(56, 189, 248, 0.4) !important;
+}
+
+.btn-copy-report.copied {
+  border-color: rgba(34, 197, 94, 0.6) !important;
+  background: rgba(34, 197, 94, 0.12) !important;
+  color: #4ade80 !important;
 }

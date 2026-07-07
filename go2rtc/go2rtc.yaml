@@ -20,11 +20,11 @@ log:
   level: info
 streams:
   cam_192_168_10_152_optical:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101
+    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101#transport=tcp
   cam_192_168_10_152_thermal:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/2#video=h264
+    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#transport=tcp
   cam_192_168_10_152_optical_sub:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102
+    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102#transport=tcp
   camera_192_168_10_153_pd:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
   camera_192_168_10_153_pd_sub:
@@ -38,7 +38,7 @@ streams:
   cam_hanoi_optical:
     - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/101
   cam_hanoi_thermal:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/201#video=h264
+    - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/201
   cam_hanoi_optical_sub:
     - rtsp://admin:Demo%402024@192.168.20.152:554/Streaming/Channels/102
   cam_danang_pd:
@@ -52,7 +52,7 @@ streams:
   camera_152_thermal:
     - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#video=h264
   camera_152_thermal_sub:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/202#video=h264
+    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102#transport=tcp
   camera_153_pd:
     - rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101
   camera_153_pd_sub:
@@ -65,3 +65,5 @@ streams:
     - rtsp://admin:Station%40123@192.168.10.15:554
   camera_192_168_10_156_cctv:
     - rtsp://admin:Demo%402024@192.168.10.156:554
+  camera_192_168_10_109_cctv:
+    - rtsp://admin:Demo%402024@192.168.10.109:554

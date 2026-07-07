@@ -10,6 +10,10 @@ interface LicenseStatus {
   maxUsers?: number;
   maxDevices?: number;
   maxCameras?: number;
+  maxSensors?: number;
+  currentStations?: number;
+  currentCameras?: number;
+  currentSensors?: number;
   maxRoiPoints?: number;
   maxRoiRegions?: number;
   maxPdRegions?: number;
@@ -48,6 +52,8 @@ export default function LicensePage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [importErrorDetail, setImportErrorDetail] = useState<{ message: string; state?: string; licenseId?: string; addonId?: string; tier?: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const canManageLicense = authService.hasPermission('license:manage');
 
@@ -72,15 +78,16 @@ export default function LicensePage() {
   const handleExportRequest = () => {
     if (!requestInfo) return;
 
+    const primaryMac = (requestInfo.physicalMacs?.[0] ?? '').replace(/[-:]/g, '').toUpperCase();
     const payload = {
-      fingerprint: requestInfo.fingerprint,
-      machineName: requestInfo.machineName,
-      platform: requestInfo.platform,
-      cpuId: requestInfo.cpuId,
-      mainboardUuid: requestInfo.mainboardUuid,
-      diskSerial: requestInfo.diskSerial,
-      physicalMacs: requestInfo.physicalMacs ?? [],
-      requestedAtUtc: requestInfo.requestedAtUtc,
+      fingerprint: {
+        cpuId: requestInfo.cpuId ?? '',
+        mainboardUuid: requestInfo.mainboardUuid ?? '',
+        osDiskSerial: requestInfo.diskSerial ?? '',
+        machineName: requestInfo.machineName,
+        platform: requestInfo.platform,
+        macAddress: primaryMac,
+      },
     };
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -123,6 +130,103 @@ export default function LicensePage() {
     }
   };
 
+  const handleCopyDevMessage = () => {
+    const fingerprint = requestInfo?.fingerprint || 'MÃ_FINGERPRINT_CỦA_TRẠM';
+    const errorJson = importErrorDetail 
+      ? JSON.stringify(importErrorDetail)
+      : '{"message":"Không đọc được file license","state":"invalid","licenseId":null,"addonId":null,"tier":null}';
+
+    const devMsg = `Hi team, khi import file license \`.lic\` ở trạm con (Power-Monitor), hệ thống báo lỗi:
+\`${errorJson}\`
+
+**Nguyên nhân:** 
+Hàm \`DeserializeEnvelope\` trong file \`LicenseService.cs\` của hệ thống trạm con thực hiện phân tích cú pháp JSON sang class \`LicenseEnvelope\` bị thất bại (trả về \`null\`). Có thể file license đang được sinh ra dưới dạng chuỗi Key thông thường (Legacy Key) hoặc cấu trúc JSON đang bị lệch so với model của Backend.
+
+Nhờ team kiểm tra lại cấu trúc xuất file \`.lic\` đảm bảo phải khớp chính xác với C# Records \`LicenseEnvelope\` dưới đây:
+
+\`\`\`csharp
+public sealed record LicenseEnvelope(
+    LicensePayload Payload,
+    LicenseSignatureBlock Signature);
+
+public sealed record LicensePayload(
+    int Version,
+    string LicenseType,     // "base" hoặc "addon"
+    string LicenseId,       // UUID
+    string? AddonId,
+    string Tier,            // "solo", "team", "ent"
+    string? Customer,
+    DateTime IssuedAt,
+    DateTime ExpiresAt,
+    LicenseHardwareBinding Hardware,
+    LicenseLimits Limits);
+
+public sealed record LicenseSignatureBlock(
+    string Algorithm,       // "RSA-SHA256" hoặc "HMAC-SHA256"
+    string Value,           // Chữ ký Base64 hoặc Hex
+    string? KeyId = null);
+
+public sealed record LicenseHardwareBinding(
+    string? Fingerprint,
+    string? CpuId,
+    string? MainboardUuid,
+    string? DiskSerial,
+    string? MachineName,
+    string? Platform,
+    string? MachineGuid,
+    IReadOnlyList<string>? PhysicalMacs);
+
+public sealed record LicenseLimits(
+    int MaxUsers,
+    int MaxDevices,
+    int MaxCameras,
+    int MaxSensors,
+    int MaxRoiPoints,
+    int MaxRoiRegions,
+    int MaxPdRegions);
+\`\`\`
+
+Hoặc team có thể xuất file dưới dạng JSON mẫu này:
+\`\`\`json
+{
+  "Payload": {
+    "Version": 1,
+    "LicenseType": "base",
+    "LicenseId": "nhập-uuid-vào-đây",
+    "Tier": "solo",
+    "Customer": "Tên Khách Hàng",
+    "IssuedAt": "2026-07-06T00:00:00Z",
+    "ExpiresAt": "2027-07-06T00:00:00Z",
+    "Hardware": {
+      "Fingerprint": "${fingerprint}",
+      "CpuId": "...",
+      "MainboardUuid": "...",
+      "PhysicalMacs": []
+    },
+    "Limits": {
+      "MaxUsers": 1,
+      "MaxDevices": 10,
+      "MaxCameras": 10,
+      "MaxSensors": 10,
+      "MaxRoiPoints": 30,
+      "MaxRoiRegions": 10,
+      "MaxPdRegions": 10
+    }
+  },
+  "Signature": {
+    "Algorithm": "RSA-SHA256",
+    "Value": "Chữ_ký_bảo_mật"
+  }
+}
+\`\`\`
+Cảm ơn team!`;
+
+    navigator.clipboard.writeText(devMsg).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!licenseFile) {
@@ -133,6 +237,7 @@ export default function LicensePage() {
     setLoading(true);
     setErrorMsg('');
     setSuccessMsg('');
+    setImportErrorDetail(null);
 
     try {
       const data = await stationApi.importLicense(licenseFile);
@@ -140,7 +245,24 @@ export default function LicensePage() {
       setLicenseFile(null);
       await loadStatus();
     } catch (err: any) {
-      setErrorMsg(err?.message ?? 'Không thể import file license');
+      const rawMsg = err?.message ?? '';
+      try {
+        const parsed = JSON.parse(rawMsg);
+        if (parsed && typeof parsed === 'object' && parsed.message) {
+          setErrorMsg(parsed.message);
+          setImportErrorDetail({
+            message: parsed.message,
+            state: parsed.state,
+            licenseId: parsed.licenseId,
+            addonId: parsed.addonId,
+            tier: parsed.tier
+          });
+          return;
+        }
+      } catch {
+        // Not JSON
+      }
+      setErrorMsg(rawMsg || 'Không thể import file license');
     } finally {
       setLoading(false);
     }
@@ -152,6 +274,17 @@ export default function LicensePage() {
     return 'ent';
   };
 
+  const formatLimit = (value?: number) => {
+    if (value === undefined || value === null) return '—';
+    if (value >= 99999 || value >= 999) return '∞';
+    return value.toLocaleString('vi-VN');
+  };
+
+  const formatUsage = (current?: number, limit?: number) => {
+    const used = current ?? 0;
+    return `${used.toLocaleString('vi-VN')}/${formatLimit(limit)}`;
+  };
+
   const renderStatusBox = () => {
     if (!status) {
       return <div style={{ color: 'var(--admin-text-muted)', fontSize: 13, textAlign: 'center', padding: 20 }}>Đang tải trạng thái...</div>;
@@ -161,8 +294,28 @@ export default function LicensePage() {
     const tierLabel = isActivated ? (status.tier === 'solo' ? 'Solo' : status.tier === 'team' ? 'Team' : status.tier === 'enterprise' ? 'Enterprise' : status.tier) : 'Dùng thử (Trial)';
     const expDate = isActivated && status.expiresAt ? new Date(status.expiresAt).toLocaleDateString('vi-VN') : '—';
     const actDate = isActivated && status.activatedAt ? new Date(status.activatedAt).toLocaleDateString('vi-VN') : '—';
-    const statusCls = !isActivated ? 'demo' : status.isValid ? 'valid' : 'expired';
-    const statusTxt = !isActivated ? 'Chưa kích hoạt' : status.isValid ? 'Đang hoạt động' : 'Đã hết hạn';
+
+    let statusCls = 'demo';
+    let statusTxt = 'Chưa kích hoạt';
+    if (isActivated) {
+      if (status.isValid) {
+        statusCls = 'valid';
+        statusTxt = 'Đang hoạt động';
+      } else {
+        statusCls = 'expired';
+        const state = status.state?.toLowerCase();
+        if (state === 'hardware_mismatch') {
+          statusTxt = 'Sai phần cứng';
+        } else if (state === 'expired') {
+          statusTxt = 'Đã hết hạn';
+        } else if (state === 'addon_rejected') {
+          statusTxt = 'Add-on bị từ chối';
+        } else {
+          statusTxt = 'Không hợp lệ';
+        }
+      }
+    }
+
     const activeSessions = isActivated ? (status.activeSessions ?? 0) : 1;
     const maxUsersLimit = isActivated ? (status.maxUsers && status.maxUsers >= 999 ? '∞' : status.maxUsers) : 1;
 
@@ -194,6 +347,34 @@ export default function LicensePage() {
             <span>Ngày kích hoạt</span>
             <span>{actDate}</span>
           </div>
+          {isActivated && (
+            <>
+              <div className="status-row status-row-section">
+                <span>Quyền được cấp</span>
+                <span>{status.source === 'file' ? 'File license' : 'License key'}</span>
+              </div>
+              <div className="license-limit-grid">
+                <div className="license-limit-item">
+                  <span>Trạm</span>
+                  <strong>{formatUsage(status.currentStations, status.maxDevices)}</strong>
+                </div>
+                <div className="license-limit-item">
+                  <span>Camera</span>
+                  <strong>{formatUsage(status.currentCameras, status.maxCameras)}</strong>
+                </div>
+                <div className="license-limit-item">
+                  <span>Sensor</span>
+                  <strong>{formatUsage(status.currentSensors, status.maxSensors)}</strong>
+                </div>
+              </div>
+              {status.baseLicenseId && (
+                <div className="status-row">
+                  <span>License ID</span>
+                  <span className="license-id-text">{status.baseLicenseId}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
       </div>
@@ -220,6 +401,44 @@ export default function LicensePage() {
             <div className="license-message-stack">
               {errorMsg && <div className="license-error">⚠️ {errorMsg}</div>}
               {successMsg && <div className="license-success">✅ {successMsg}</div>}
+              
+              {importErrorDetail && (
+                <div className="license-diagnostic-box">
+                  <div className="diagnostic-header">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--admin-warning, #f59e0b)" strokeWidth="2.5" className="diagnostic-icon">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <span>Lỗi Định Dạng File Bản Quyền (.lic)</span>
+                  </div>
+                  <p className="diagnostic-body">
+                    Hệ thống trạm con không thể chuyển đổi JSON trong file license sang cấu trúc <code>LicenseEnvelope</code> của backend.
+                  </p>
+                  <button
+                    type="button"
+                    className={`btn-diagnostic-copy ${copied ? 'copied' : ''}`}
+                    onClick={handleCopyDevMessage}
+                  >
+                    {copied ? (
+                      <>
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" className="btn-icon">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Đã sao chép báo cáo lỗi!
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" className="btn-icon">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        Sao chép tin nhắn báo lỗi chi tiết gửi Dev
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

@@ -299,6 +299,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
                     <span>RTSP URL — Nhiệt</span>
                     <select className="form-select" style={{ fontSize: 11, padding: '2px 6px', width: 'auto', minWidth: 120 }} onChange={e => { if (e.target.value) set({ rtspThermal: e.target.value }); }}>
                       <option value="">-- Preset --</option>
+                      <option value="/Streaming/Channels/2">Hikvision kênh nhiệt 2 (HEVC/H.265)</option>
                       <option value="/Streaming/Channels/201">Hikvision kênh nhiệt 201</option>
                       <option value="/Streaming/Channels/202">Hikvision nhiệt sub 202</option>
                       <option value="/thermal/main">Generic /thermal/main</option>

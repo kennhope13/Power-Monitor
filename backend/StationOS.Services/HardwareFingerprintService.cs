@@ -162,12 +162,24 @@ internal sealed class HardwareFingerprintService
         var result = new List<string>();
         try
         {
+            var virtualPrefixes = new[] { "lo", "veth", "docker", "br-", "virbr", "tun", "tap", "wg", "vmnet", "vboxnet", "vnet" };
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
                     continue;
                 if (nic.OperationalStatus != OperationalStatus.Up)
                     continue;
+
+                var name = nic.Name.ToLowerInvariant();
+                if (virtualPrefixes.Any(prefix => name.StartsWith(prefix)))
+                    continue;
+
+                if (OperatingSystem.IsLinux())
+                {
+                    var devicePath = $"/sys/class/net/{nic.Name}/device";
+                    if (!Directory.Exists(devicePath))
+                        continue;
+                }
 
                 var mac = nic.GetPhysicalAddress().ToString();
                 if (!string.IsNullOrWhiteSpace(mac) && mac != "000000000000" && !result.Any(x => string.Equals(x, mac, StringComparison.OrdinalIgnoreCase)))
