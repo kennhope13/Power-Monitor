@@ -10,13 +10,15 @@
 ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$ROOT"
 
+export ASPNETCORE_ENVIRONMENT=Development
+
 echo "=================================================="
 echo "   STATIONOS - KHỞI ĐỘNG HỆ THỐNG MỚI (LINUX)"
 echo "=================================================="
 echo ""
 
-# 1. Dọn dẹp chỉ các cổng của project này (5173, 5000, 8100)
-echo "[1/4] Đang dọn dẹp các tiến trình đang giữ cổng 5173, 5000 và 8100..."
+# 1. Dọn dẹp chỉ các cổng của project này (5173, 5000, 8100) và các tiến trình zombie
+echo "[1/4] Đang dọn dẹp các tiến trình cũ..."
 for port in 5173 5000 8100; do
     PIDS=$(lsof -t -i:$port 2>/dev/null)
     if [ -n "$PIDS" ]; then
@@ -25,19 +27,33 @@ for port in 5173 5000 8100; do
     fi
 done
 
+# Giải phóng thêm các tiến trình build / compiler bị kẹt của dotnet
+echo "  → Dọn dẹp các tiến trình compiler/dotnet dư thừa..."
+pkill -9 -f "VBCSCompiler" 2>/dev/null || true
+pkill -9 -f "MSBuild" 2>/dev/null || true
+pkill -9 -f "StationOS.Api" 2>/dev/null || true
+
 if command -v docker &> /dev/null; then
-    sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
+    # Chỉ dọn dẹp container nếu docker daemon đang chạy
+    if docker ps >/dev/null 2>&1; then
+        docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
+    fi
 fi
 sleep 1
 echo "✅ Dọn dẹp hoàn tất."
 
 # 2. Khởi động PostgreSQL (TimescaleDB)
 echo "[2/4] Khởi động Database TimescaleDB..."
-if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    sudo docker compose -f docker-compose.db.yml up -d
-    echo "✅ Database đang chạy (Port: 5432)"
+if lsof -i :5432 >/dev/null 2>&1; then
+    echo "✅ Database đang chạy sẵn (Port: 5432)"
 else
-    echo "⚠️  Docker / Docker Compose chưa được bật hoặc cài đặt. Vui lòng đảm bảo cổng 5432 có database postgres/postgres123."
+    if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        echo "  → Cổng 5432 chưa mở. Đang khởi động Database bằng docker compose..."
+        sudo docker compose -f docker-compose.db.yml up -d || echo "⚠️ Lỗi: Không thể chạy docker compose, vui lòng khởi động database thủ công."
+        echo "✅ Đã gửi lệnh khởi động Database."
+    else
+        echo "⚠️  Docker / Docker Compose chưa được bật hoặc cài đặt. Vui lòng đảm bảo cổng 5432 có database postgres/postgres123."
+    fi
 fi
 
 # 3. Khởi động Video Streaming (go2rtc)
@@ -53,8 +69,28 @@ echo "✅ go2rtc đang chạy ngầm (Port: 1984)"
 # 4. Khởi động Backend (.NET 8)
 echo "[4/4] Khởi động C# Backend..."
 export DOTNET_CLI_HOME=/tmp
-nohup dotnet run --project backend/StationOS.Api > backend.log 2>&1 &
-BACKEND_PID=$!
+
+# Tận dụng binary đã build sẵn để khởi động tức thì, tránh Roslyn compiler chiếm 100% CPU
+API_BIN="$ROOT/backend/StationOS.Api/bin/Debug/net8.0/StationOS.Api"
+API_DLL="$ROOT/backend/StationOS.Api/bin/Debug/net8.0/StationOS.Api.dll"
+
+if [ -f "$API_BIN" ]; then
+    echo "  → Khởi chạy Backend từ binary đã biên dịch..."
+    cd "$ROOT/backend/StationOS.Api"
+    nohup ./bin/Debug/net8.0/StationOS.Api > "$ROOT/backend.log" 2>&1 &
+    BACKEND_PID=$!
+    cd "$ROOT"
+elif [ -f "$API_DLL" ]; then
+    echo "  → Khởi chạy Backend từ DLL đã biên dịch..."
+    cd "$ROOT/backend/StationOS.Api"
+    nohup dotnet "$API_DLL" > "$ROOT/backend.log" 2>&1 &
+    BACKEND_PID=$!
+    cd "$ROOT"
+else
+    echo "  → Không tìm thấy bản build. Khởi chạy bằng dotnet run (sẽ mất vài phút)..."
+    nohup dotnet run --project backend/StationOS.Api > backend.log 2>&1 &
+    BACKEND_PID=$!
+fi
 echo "✅ Backend đang khởi chạy ngầm (PID: $BACKEND_PID, Port: 5000)"
 
 # Đợi backend sẵn sàng (tối đa 15 giây, dừng ngay khi OK)

@@ -124,50 +124,79 @@ class ThermalAnalyzer:
             zone_results = {}
             fetched_ok = False
 
-            if not self._use_fallback_only:
-                matrix_data = await self._read_thermal_matrix()
-                if matrix_data:
-                    floats, w, h = matrix_data
+        if matrix_data:
+            temperatures, w, h, mapping = matrix_data
 
-                    # Trích xuất nhiệt độ cho points
-                    for pt in self.points:
-                        px = int(pt.x * w)
-                        py = int(pt.y * h)
-                        px = max(0, min(px, w - 1))
-                        py = max(0, min(py, h - 1))
-                        idx = py * w + px
-                        point_temps[pt.id] = float(floats[idx])
+            # 2. Trích xuất nhiệt độ cho points
+            for pt in self.points:
+                px_norm = pt.x
+                py_norm = pt.y
+                if mapping:
+                    px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                    py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                    px_norm = max(0.0, min(1.0, px_norm))
+                    py_norm = max(0.0, min(1.0, py_norm))
 
-                    # Trích xuất nhiệt độ cho zones (Max temp trong vùng)
-                    for zn in self.zones:
-                        if not zn.polygon or len(zn.polygon) < 3:
-                            continue
-                        
-                        poly_pts = np.array([[int(p[0]*w), int(p[1]*h)] for p in zn.polygon], np.int32)
-                        mask = np.zeros((h, w), dtype=np.uint8)
-                        cv2.fillPoly(mask, [poly_pts], 255)
-                        
-                        masked_floats = floats.reshape((h, w))[mask == 255]
-                        if masked_floats.size > 0:
-                            max_val = float(np.max(masked_floats))
-                            
-                            full_matrix = floats.reshape((h, w))
-                            full_matrix_masked = np.where(mask == 255, full_matrix, -1000.0)
-                            max_idx = np.argmax(full_matrix_masked)
-                            max_y, max_x = divmod(max_idx, w)
-                            
-                            zone_results[zn.id] = {
-                                "max": max_val,
-                                "x": float(max_x / w),
-                                "y": float(max_y / h)
-                            }
-                    self._consecutive_matrix_failures = 0
-                    fetched_ok = True
-                else:
-                    self._consecutive_matrix_failures += 1
-                    if self._consecutive_matrix_failures >= 3:
-                        logger.warning("[ThermalAnalyzer] Camera %s failed raw matrix fetch 3 times. Switching to rulesTemperatureInfo fallback only.", self.camera_ip)
-                        self._use_fallback_only = True
+                px = int(px_norm * w)
+                py = int(py_norm * h)
+                px = max(0, min(px, w - 1))
+                py = max(0, min(py, h - 1))
+                idx = py * w + px
+                val = float(temperatures[idx])
+                if -50.0 <= val <= 500.0:
+                    point_temps[pt.id] = val
+
+            # 3. Trích xuất nhiệt độ cho zones (Max temp trong vùng)
+            for zn in self.zones:
+                if not zn.polygon or len(zn.polygon) < 3:
+                    continue
+                
+                # Tạo mask cho polygon trên matrix nhỏ
+                mapped_polygon = []
+                for p in zn.polygon:
+                    px_norm = p[0]
+                    py_norm = p[1]
+                    if mapping:
+                        px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                        py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                        px_norm = max(0.0, min(1.0, px_norm))
+                        py_norm = max(0.0, min(1.0, py_norm))
+                    mapped_polygon.append([int(px_norm * w), int(py_norm * h)])
+
+                poly_pts = np.array(mapped_polygon, np.int32)
+                mask = np.zeros((h, w), dtype=np.uint8)
+                cv2.fillPoly(mask, [poly_pts], 255)
+                
+                # Lọc các giá trị nhiệt độ trong vùng và clamp
+                masked_temps = temperatures.reshape((h, w))[mask == 255]
+                valid_temps = masked_temps[(masked_temps >= -50.0) & (masked_temps <= 500.0)]
+                if valid_temps.size > 0:
+                    max_val = float(np.max(valid_temps))
+                    
+                    full_matrix = temperatures.reshape((h, w))
+                    full_matrix_masked = np.where((mask == 255) & (full_matrix >= -50.0) & (full_matrix <= 500.0), full_matrix, -1000.0)
+                    max_idx = np.argmax(full_matrix_masked)
+                    max_y, max_x = divmod(max_idx, w)
+                    
+                    # Convert max back to visible coordinates
+                    vx = float(max_x / w)
+                    vy = float(max_y / h)
+                    if mapping:
+                        vx = vx * mapping.get("width", 1.0) + mapping.get("x", 0.0)
+                        vy = vy * mapping.get("height", 1.0) + mapping.get("y", 0.0)
+
+                    zone_results[zn.id] = {
+                        "max": max_val,
+                        "x": vx,
+                        "y": vy
+                    }
+        else:
+            # Dự phòng cho camera không hỗ trợ đọc matrix raw (ví dụ: Camera 152)
+            fallback_res = await self._read_temperatures_fallback()
+            if fallback_res:
+                point_temps, zone_results = fallback_res
+            else:
+                return
 
             if not fetched_ok:
                 fallback_res = await self._read_temperatures_fallback()
@@ -280,7 +309,7 @@ class ThermalAnalyzer:
                 await client.post(f"{cfg.backend_url}/api/v1/measurements/ingest", json=payload)
         except Exception: pass
 
-    async def _read_thermal_matrix(self) -> tuple[np.ndarray, int, int] | None:
+    async def _read_thermal_matrix(self) -> tuple[np.ndarray, int, int, dict | None] | None:
         if not self.points and not self.zones: return None
         now = time.time()
         if now < self._auth_cooldown_until: return None
@@ -310,27 +339,79 @@ class ThermalAnalyzer:
                     if "boundary=" in ct: boundary = f"--{ct.split('boundary=')[-1].strip()}".encode('ascii')
                     parts = content.split(boundary)
                     w, h, data_len = 256, 192, 196608
+                    mapping = None
                     for part in parts:
                         if b'application/json' in part:
                             h_end = part.find(b'\r\n\r\n')
                             if h_end != -1:
                                 import json
                                 info = json.loads(part[h_end+4:].decode('utf-8', errors='ignore').strip()).get("JpegPictureWithAppendData", {})
-                                w, h = info.get("jpegPicWidth", 256), info.get("jpegPicHeight", 192)
+                                w = info.get("thermalPicWidth") or info.get("jpegPicWidth") or 256
+                                h = info.get("thermalPicHeight") or info.get("jpegPicHeight") or 192
                                 data_len = info.get("p2pDataLen") or (w * h * 4)
+                                mapping = info.get("VisibleValidRect")
                     for part in parts:
                         if b'application/octet-stream' in part:
                             h_end = part.find(b'\r\n\r\n')
                             if h_end != -1:
                                 matrix_bytes = part[h_end+4:][:data_len]
-                                if len(matrix_bytes) >= w * h * 4:
-                                    return np.frombuffer(matrix_bytes, dtype=np.float32), w, h
-                                elif len(matrix_bytes) >= w * h * 2:
-                                    # Fallback for cameras returning 2-byte integer formats (int16 BE / 100)
-                                    return np.frombuffer(matrix_bytes, dtype='>i2').astype(np.float32) / 100.0, w, h
+                                raw_matrix = self._decode_thermal_matrix(matrix_bytes, int(w), int(h))
+                                if raw_matrix is not None:
+                                    return raw_matrix, int(w), int(h), mapping
                     break
             except Exception: pass
         return None
+
+    def _decode_thermal_matrix(self, matrix_bytes: bytes, w: int, h: int) -> np.ndarray | None:
+        """Decode Hikvision append-data thermal matrix.
+
+        Different Hikvision thermal models expose p2p data as either 2-byte
+        centi-degrees or 4-byte floats. Picking the wrong format yields values
+        around 300C for normal scenes, so score candidate decodes by plausibility.
+        """
+        pixels = w * h
+        candidates: list[np.ndarray] = []
+
+        if len(matrix_bytes) >= pixels * 4:
+            chunk4 = matrix_bytes[:pixels * 4]
+            candidates.extend([
+                np.frombuffer(chunk4, dtype='<f4').astype(np.float32),
+                np.frombuffer(chunk4, dtype='>f4').astype(np.float32),
+                np.frombuffer(chunk4, dtype='<i4').astype(np.float32) / 100.0,
+                np.frombuffer(chunk4, dtype='>i4').astype(np.float32) / 100.0,
+            ])
+
+        if len(matrix_bytes) >= pixels * 2:
+            chunk2 = matrix_bytes[:pixels * 2]
+            candidates.extend([
+                np.frombuffer(chunk2, dtype='<i2').astype(np.float32) / 100.0,
+                np.frombuffer(chunk2, dtype='>i2').astype(np.float32) / 100.0,
+            ])
+
+        best = None
+        best_score = -1.0
+        for arr in candidates:
+            if arr.size != pixels:
+                continue
+            finite = arr[np.isfinite(arr)]
+            if finite.size < pixels * 0.95:
+                continue
+            physical = finite[(finite >= -40.0) & (finite <= 200.0)]
+            if physical.size == 0:
+                continue
+
+            valid_ratio = physical.size / finite.size
+            median = float(np.median(physical))
+            p95 = float(np.percentile(physical, 95))
+            center_penalty = abs(median - 35.0) / 200.0
+            high_penalty = max(0.0, p95 - 120.0) / 200.0
+            score = valid_ratio - center_penalty - high_penalty
+
+            if score > best_score:
+                best_score = score
+                best = arr
+
+        return best
 
     async def _fetch_rule_id_to_name(self) -> dict[int, str]:
         mapping = {}

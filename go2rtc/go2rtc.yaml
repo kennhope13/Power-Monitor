@@ -22,7 +22,7 @@ streams:
   cam_192_168_10_152_optical:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101#transport=tcp
   cam_192_168_10_152_thermal:
-    - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#transport=tcp
+    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201#video=h264
   cam_192_168_10_152_optical_sub:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102#transport=tcp
   camera_192_168_10_153_pd:

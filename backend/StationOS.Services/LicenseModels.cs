@@ -95,7 +95,8 @@ public sealed record LicensePayload(
 
 public sealed record LicenseEnvelope(
     LicensePayload Payload,
-    LicenseSignatureBlock Signature);
+    LicenseSignatureBlock Signature,
+    bool IsFlatFormat = false);
 
 public sealed record LicenseImportResult(
     bool Success,

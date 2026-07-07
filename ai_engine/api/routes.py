@@ -328,19 +328,14 @@ async def _read_matrix_cached(camera_ip: str, username: str, password: str):
                     hend = part.find(b"\r\n\r\n")
                     if hend != -1:
                         raw = part[hend+4:][:data_len]
-                        if len(raw) >= w * h * 4:
-                            matrix = np.frombuffer(raw[:w*h*4], dtype=np.float32).reshape(h, w).copy()
-                        elif len(raw) >= w * h * 2:
-                            matrix = np.frombuffer(raw[:w*h*2], dtype='>i2').astype(np.float32).reshape(h, w).copy() / 100.0
-                        else:
-                            continue
-                        
-                        bad = ~np.isfinite(matrix) | (matrix < -50) | (matrix > 500)
-                        if bad.any():
-                            matrix[bad] = np.nan
-                        result = {"matrix": matrix, "w": w, "h": h, "mapping": mapping, "ts": now}
-                        _thermal_matrix_cache[camera_ip] = result
-                        return result
+                        if len(raw) >= w * h * 2:
+                            matrix = (np.frombuffer(raw[:w*h*2], dtype='>i2').reshape(h, w) / 100.0).copy()
+                            bad = ~np.isfinite(matrix) | (matrix < -50) | (matrix > 500)
+                            if bad.any():
+                                matrix[bad] = np.nan
+                            result = {"matrix": matrix, "w": w, "h": h, "mapping": mapping, "ts": now}
+                            _thermal_matrix_cache[camera_ip] = result
+                            return result
         except Exception:
             pass
     return None
