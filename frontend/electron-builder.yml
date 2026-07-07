@@ -19,6 +19,8 @@ extraResources:
     to: "pg_portable"
   - from: "../go2rtc"
     to: "go2rtc"
+  - from: "../vc_redist.x64.exe"
+    to: "vc_redist.x64.exe"
 linux:
   target:
     - AppImage
@@ -34,3 +36,5 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: Station Monitor
+  runAfterFinish: false
+  include: build/installer.nsh

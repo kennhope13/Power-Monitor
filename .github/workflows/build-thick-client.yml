@@ -42,6 +42,9 @@ jobs:
           Rename-Item pgsql pg_portable
           rm pg.zip
 
+      - name: 📦 Download VCRedist
+        run: Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile vc_redist.x64.exe
+
       - name: 📦 Download go2rtc
         run: |
           Invoke-WebRequest -Uri "https://github.com/AlexxIT/go2rtc/releases/download/v1.9.2/go2rtc_win64.zip" -OutFile go2rtc.zip
