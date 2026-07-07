@@ -1096,8 +1096,8 @@ public class LicenseService
             GetString(element, "mainboardUuid", "mainboard_uuid"),
             GetString(element, "osDiskSerial", "os_disk_serial", "diskSerial"),
             GetString(element, "machineName", "machine_name"),
-            null,
-            null,
+            GetString(element, "platform", "platform"),
+            GetString(element, "machineGuid", "machine_guid"),
             macs,
             mac
         );
