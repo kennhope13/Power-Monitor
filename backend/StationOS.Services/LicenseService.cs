@@ -693,6 +693,24 @@ public class LicenseService
     private LicenseValidationResult ValidateEnvelope(LicenseEnvelope envelope, HardwareFingerprintData actual, string? fileName = null)
     {
         var payload = NormalizePayload(envelope.Payload);
+
+        // --- PATCH FOR FLAT FORMAT COMPATIBILITY ---
+        if (envelope.IsFlatFormat || envelope.Signature?.Algorithm?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            payload = payload with
+            {
+                Hardware = payload.Hardware with
+                {
+                    CpuId = string.IsNullOrWhiteSpace(payload.Hardware.CpuId) ? actual.CpuId : payload.Hardware.CpuId,
+                    MainboardUuid = string.IsNullOrWhiteSpace(payload.Hardware.MainboardUuid) ? actual.MainboardUuid : payload.Hardware.MainboardUuid,
+                    DiskSerial = string.IsNullOrWhiteSpace(payload.Hardware.DiskSerial) ? actual.DiskSerial : payload.Hardware.DiskSerial,
+                    MachineName = string.IsNullOrWhiteSpace(payload.Hardware.MachineName) ? actual.MachineName : payload.Hardware.MachineName,
+                    Platform = string.IsNullOrWhiteSpace(payload.Hardware.Platform) ? actual.Platform : payload.Hardware.Platform
+                }
+            };
+        }
+        // -------------------------------------------
+
         var kind = ParseFileKind(payload.LicenseType);
         if (kind == null)
             return new LicenseValidationResult(false, "file", "invalid", "LicenseType phải là base hoặc addon", payload.Tier, payload.LicenseId, payload.AddonId, actual.Fingerprint, payload.ExpiresAt, payload.Limits, null);
@@ -748,6 +766,10 @@ public class LicenseService
         }
         
         var baseLicenseIdStr = string.Empty;
+        if (string.Equals(payload.LicenseType, "addon", StringComparison.OrdinalIgnoreCase))
+        {
+            baseLicenseIdStr = Guid.TryParse(payload.LicenseId, out var blid) ? blid.ToString("N") : payload.LicenseId;
+        }
         
         return string.Join("|", new[]
         {
@@ -769,8 +791,11 @@ public class LicenseService
         if (signature == null || string.IsNullOrWhiteSpace(signature.Value))
             return false;
 
+        var alg = signature.Algorithm?.Trim().ToUpperInvariant();
+        var isFlat = envelope.IsFlatFormat || (alg != null && alg.StartsWith("FLAT-"));
+
         var candidates = new List<string>();
-        if (envelope.IsFlatFormat)
+        if (isFlat)
         {
             candidates.Add(BuildCanonicalPayload(payload, false));
             candidates.Add(BuildCanonicalPayload(payload, true));
@@ -793,9 +818,10 @@ public class LicenseService
         }
         // ---------------------
 
-        var alg = signature.Algorithm?.Trim().ToUpperInvariant();
         if (alg?.StartsWith("FLAT-", StringComparison.OrdinalIgnoreCase) == true)
+        {    
             alg = alg["FLAT-".Length..];
+        }
 
         if (alg == "RSA-SHA256" || alg == "RSASSA-PKCS1-V1_5-SHA256")
         {
@@ -952,16 +978,17 @@ public class LicenseService
     private static string CanonicalizePayload(LicensePayload payload)
         => JsonSerializer.Serialize(payload, JsonOptions);
 
-    private static LicenseEnvelope? DeserializeEnvelope(byte[] content)
+    private LicenseEnvelope? DeserializeEnvelope(byte[] content)
     {
         try
         {
-            using var doc = JsonDocument.Parse(content);
+            var json = Encoding.UTF8.GetString(content).Trim('\uFEFF');
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             if (root.TryGetProperty("Payload", out _) || root.TryGetProperty("payload", out _))
             {
-                return JsonSerializer.Deserialize<LicenseEnvelope>(content, JsonOptions);
+                return JsonSerializer.Deserialize<LicenseEnvelope>(json, JsonOptions);
             }
 
             // Parse flat JSON format from Master-Station

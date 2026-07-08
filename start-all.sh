@@ -11,6 +11,7 @@ ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$ROOT"
 
 export ASPNETCORE_ENVIRONMENT=Development
+export ASPNETCORE_URLS="http://0.0.0.0:5000"
 
 echo "=================================================="
 echo "   STATIONOS - KHỞI ĐỘNG HỆ THỐNG MỚI (LINUX)"
