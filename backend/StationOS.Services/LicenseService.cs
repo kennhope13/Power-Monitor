@@ -285,6 +285,12 @@ public class LicenseService
         if (kind == LicenseFileKind.Base)
         {
             targetPath = Path.Combine(_licenseRoot, "base.lic");
+            if (File.Exists(targetPath))
+            {
+                var existing = await ValidateLicenseFileAsync("base.lic", await File.ReadAllBytesAsync(targetPath));
+                if (existing.Valid && existing.LicenseId == envelope.Payload.LicenseId)
+                    return new LicenseImportResult(false, $"License Base này đã được nạp rồi", targetPath, envelope.Payload.LicenseId, null, envelope.Payload.Tier, "duplicate_base");
+            }
         }
         else
         {

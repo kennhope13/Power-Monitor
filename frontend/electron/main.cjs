@@ -203,6 +203,9 @@ async function startAllServices(root) {
     
     // Dọn dẹp tiến trình cũ (zombie) trước khi khởi động
     try {
+      // Đảm bảo kill bất kỳ tiến trình nào đang giữ cổng 5000
+      spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
+      
       spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
@@ -278,11 +281,11 @@ async function startAllServices(root) {
     // ── Bước 5: Khởi động Backend (SAU KHI PostgreSQL sẵn sàng + DB đã tạo) ──
     spawnHiddenWin32(
       path.join(root, 'backend', 'StationOS.Api.exe'),
-      [],
+      ['--urls', 'http://127.0.0.1:5000'],
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
       path.join(userData, 'backend_err.log'),
-      { PGCLIENTENCODING: 'UTF8', ASPNETCORE_URLS: 'http://127.0.0.1:5000' }
+      { PGCLIENTENCODING: 'UTF8' }
     );
 
     // ── Bước 6: Khởi động go2rtc ──
@@ -664,6 +667,7 @@ app.on('window-all-closed', () => {
   if (process.platform === 'win32') {
     try {
       const { spawnSync } = require('child_process');
+      spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });

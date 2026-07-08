@@ -130,102 +130,6 @@ export default function LicensePage() {
     }
   };
 
-  const handleCopyDevMessage = () => {
-    const fingerprint = requestInfo?.fingerprint || 'MÃ_FINGERPRINT_CỦA_TRẠM';
-    const errorJson = importErrorDetail 
-      ? JSON.stringify(importErrorDetail)
-      : '{"message":"Không đọc được file license","state":"invalid","licenseId":null,"addonId":null,"tier":null}';
-
-    const devMsg = `Hi team, khi import file license \`.lic\` ở trạm con (Power-Monitor), hệ thống báo lỗi:
-\`${errorJson}\`
-
-**Nguyên nhân:** 
-Hàm \`DeserializeEnvelope\` trong file \`LicenseService.cs\` của hệ thống trạm con thực hiện phân tích cú pháp JSON sang class \`LicenseEnvelope\` bị thất bại (trả về \`null\`). Có thể file license đang được sinh ra dưới dạng chuỗi Key thông thường (Legacy Key) hoặc cấu trúc JSON đang bị lệch so với model của Backend.
-
-Nhờ team kiểm tra lại cấu trúc xuất file \`.lic\` đảm bảo phải khớp chính xác với C# Records \`LicenseEnvelope\` dưới đây:
-
-\`\`\`csharp
-public sealed record LicenseEnvelope(
-    LicensePayload Payload,
-    LicenseSignatureBlock Signature);
-
-public sealed record LicensePayload(
-    int Version,
-    string LicenseType,     // "base" hoặc "addon"
-    string LicenseId,       // UUID
-    string? AddonId,
-    string Tier,            // "solo", "team", "ent"
-    string? Customer,
-    DateTime IssuedAt,
-    DateTime ExpiresAt,
-    LicenseHardwareBinding Hardware,
-    LicenseLimits Limits);
-
-public sealed record LicenseSignatureBlock(
-    string Algorithm,       // "RSA-SHA256" hoặc "HMAC-SHA256"
-    string Value,           // Chữ ký Base64 hoặc Hex
-    string? KeyId = null);
-
-public sealed record LicenseHardwareBinding(
-    string? Fingerprint,
-    string? CpuId,
-    string? MainboardUuid,
-    string? DiskSerial,
-    string? MachineName,
-    string? Platform,
-    string? MachineGuid,
-    IReadOnlyList<string>? PhysicalMacs);
-
-public sealed record LicenseLimits(
-    int MaxUsers,
-    int MaxDevices,
-    int MaxCameras,
-    int MaxSensors,
-    int MaxRoiPoints,
-    int MaxRoiRegions,
-    int MaxPdRegions);
-\`\`\`
-
-Hoặc team có thể xuất file dưới dạng JSON mẫu này:
-\`\`\`json
-{
-  "Payload": {
-    "Version": 1,
-    "LicenseType": "base",
-    "LicenseId": "nhập-uuid-vào-đây",
-    "Tier": "solo",
-    "Customer": "Tên Khách Hàng",
-    "IssuedAt": "2026-07-06T00:00:00Z",
-    "ExpiresAt": "2027-07-06T00:00:00Z",
-    "Hardware": {
-      "Fingerprint": "${fingerprint}",
-      "CpuId": "...",
-      "MainboardUuid": "...",
-      "PhysicalMacs": []
-    },
-    "Limits": {
-      "MaxUsers": 1,
-      "MaxDevices": 10,
-      "MaxCameras": 10,
-      "MaxSensors": 10,
-      "MaxRoiPoints": 30,
-      "MaxRoiRegions": 10,
-      "MaxPdRegions": 10
-    }
-  },
-  "Signature": {
-    "Algorithm": "RSA-SHA256",
-    "Value": "Chữ_ký_bảo_mật"
-  }
-}
-\`\`\`
-Cảm ơn team!`;
-
-    navigator.clipboard.writeText(devMsg).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
 
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -403,40 +307,18 @@ Cảm ơn team!`;
               {successMsg && <div className="license-success">✅ {successMsg}</div>}
               
               {importErrorDetail && (
-                <div className="license-diagnostic-box">
-                  <div className="diagnostic-header">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--admin-warning, #f59e0b)" strokeWidth="2.5" className="diagnostic-icon">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                      <line x1="12" y1="9" x2="12" y2="13" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                <div className="license-diagnostic-box" style={{ padding: '12px 16px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: '6px', marginTop: '10px' }}>
+                  <div className="diagnostic-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b', fontWeight: 600, marginBottom: '4px' }}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
                     </svg>
-                    <span>Lỗi Định Dạng File Bản Quyền (.lic)</span>
+                    <span>Lỗi xác thực Bản quyền</span>
                   </div>
-                  <p className="diagnostic-body">
-                    Hệ thống trạm con không thể chuyển đổi JSON trong file license sang cấu trúc <code>LicenseEnvelope</code> của backend.
+                  <p className="diagnostic-body" style={{ color: 'var(--admin-text)', fontSize: '13px', margin: 0, opacity: 0.9 }}>
+                    File này không hợp lệ hoặc đã bị chỉnh sửa, vui lòng liên hệ nhà cung cấp.
                   </p>
-                  <button
-                    type="button"
-                    className={`btn-diagnostic-copy ${copied ? 'copied' : ''}`}
-                    onClick={handleCopyDevMessage}
-                  >
-                    {copied ? (
-                      <>
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="3" className="btn-icon">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                        Đã sao chép báo cáo lỗi!
-                      </>
-                    ) : (
-                      <>
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" className="btn-icon">
-                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
-                        Sao chép tin nhắn báo lỗi chi tiết gửi Dev
-                      </>
-                    )}
-                  </button>
                 </div>
               )}
             </div>
