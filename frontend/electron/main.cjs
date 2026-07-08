@@ -66,7 +66,7 @@ function findProjectRoot() {
 // ─────────────────────────────────────────────
 function checkIfServicesRunning() {
   return new Promise((resolve) => {
-    const req = http.get('http://127.0.0.1:5000/health', (res) => {
+    const req = http.get('http://127.0.0.1:5050/health', (res) => {
       res.destroy();
       resolve(true);
     });
@@ -193,7 +193,7 @@ async function startAllServices(root) {
   const env = { 
     ...process.env, 
     STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
-    ASPNETCORE_URLS: 'http://0.0.0.0:5000'
+    ASPNETCORE_URLS: 'http://0.0.0.0:5050'
   };
   
   if (process.platform === 'win32') {
@@ -272,7 +272,7 @@ async function startAllServices(root) {
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
       path.join(userData, 'backend_err.log'),
-      { PGCLIENTENCODING: 'UTF8', ASPNETCORE_URLS: 'http://127.0.0.1:5000' }
+      { PGCLIENTENCODING: 'UTF8', ASPNETCORE_URLS: 'http://127.0.0.1:5050' }
     );
 
     // ── Bước 6: Khởi động go2rtc ──
@@ -309,7 +309,7 @@ function waitForServer(onReady) {
       res.destroy();
       
       // UI Server đã sẵn sàng, tiếp tục kiểm tra Backend API (port 5000)
-      const backendReq = http.get('http://127.0.0.1:5000/health', (backendRes) => {
+      const backendReq = http.get('http://127.0.0.1:5050/health', (backendRes) => {
         backendRes.destroy();
         log('[Station Monitor] Cả UI và Backend đều đã sẵn sàng.');
         onReady();
@@ -382,7 +382,7 @@ function startLocalUiServer() {
       const reqUrl = req.url || '/';
 
       if (reqUrl.startsWith('/api/') || reqUrl.startsWith('/media/') || reqUrl.startsWith('/ws/')) {
-        pipeProxy(req, res, 'http://127.0.0.1:5000');
+        pipeProxy(req, res, 'http://127.0.0.1:5050');
         return;
       }
       if (reqUrl === '/ai-api' || reqUrl.startsWith('/ai-api/')) {
