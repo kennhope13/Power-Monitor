@@ -155,7 +155,7 @@ public class AuthController : ControllerBase
         if (!_license.IsSessionActive(sessionId))
         {
             // Try to register it (if server restarted or if there's room)
-            var registered = _license.TryRegisterOnRequest(sessionId, user.Id.ToString(), DateTime.UtcNow.AddDays(3650));
+            var registered = await _license.TryRegisterOnRequestAsync(sessionId, user.Id.ToString(), DateTime.UtcNow.AddDays(3650));
             if (!registered)
             {
                 return Unauthorized(new { message = "Phiên hoạt động đã bị đăng xuất từ thiết bị khác" });
