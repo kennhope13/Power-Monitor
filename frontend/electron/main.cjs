@@ -672,16 +672,11 @@ app.on('window-all-closed', () => {
     localUiServer = null;
   }
   
-  // Dọn dẹp tiến trình trước khi thoát hoàn toàn
-  if (process.platform === 'win32') {
-    try {
-      const { spawnSync } = require('child_process');
-      spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
-      spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
-      spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
-      spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
-    } catch (e) {}
-  }
+  // ── KHÔNG kill backend/postgres/go2rtc khi đóng cửa sổ ──
+  // Để chúng chạy ngầm. Khi mở app lại, checkIfServicesRunning() 
+  // sẽ thấy services đã sẵn sàng → load UI ngay lập tức, không cần khởi động lại.
+  log('[Station Monitor] Đóng cửa sổ. Backend + PostgreSQL + go2rtc vẫn chạy ngầm.');
   
   if (process.platform !== 'darwin') app.quit();
 });
+
