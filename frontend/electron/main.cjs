@@ -67,8 +67,9 @@ function findProjectRoot() {
 function checkIfServicesRunning() {
   return new Promise((resolve) => {
     const req = http.get('http://127.0.0.1:5000/health', (res) => {
+      const ok = res.statusCode === 200;
       res.destroy();
-      resolve(true);
+      resolve(ok);
     });
     req.on('error', () => {
       resolve(false);
@@ -312,6 +313,7 @@ async function startAllServices(root) {
 
 // ─────────────────────────────────────────────
 // Poll cho đến khi cả UI server và Backend API (port 5000) sẵn sàng
+// Backend /health trả 503 khi DB chưa migrate xong, 200 khi sẵn sàng hoàn toàn
 // ─────────────────────────────────────────────
 function waitForServer(onReady) {
   const targetUrl = getTargetUrl();
@@ -323,17 +325,24 @@ function waitForServer(onReady) {
       
       // UI Server đã sẵn sàng, tiếp tục kiểm tra Backend API (port 5000)
       const backendReq = http.get('http://127.0.0.1:5000/health', (backendRes) => {
+        const statusCode = backendRes.statusCode;
         backendRes.destroy();
-        log('[Station Monitor] Cả UI và Backend đều đã sẵn sàng.');
-        onReady();
+        
+        if (statusCode === 200) {
+          log('[Station Monitor] Cả UI và Backend đều đã sẵn sàng.');
+          onReady();
+        } else {
+          log(`[Station Monitor] Backend chưa sẵn sàng (HTTP ${statusCode}). Đang đợi DB migrate...`);
+          setTimeout(check, 1500);
+        }
       });
       backendReq.on('error', () => {
         log('[Station Monitor] Giao diện sẵn sàng nhưng Backend chưa phản hồi. Đang đợi...');
-        setTimeout(check, 1000);
+        setTimeout(check, 1500);
       });
-      backendReq.setTimeout(1000, () => {
+      backendReq.setTimeout(2000, () => {
         backendReq.destroy();
-        setTimeout(check, 1000);
+        setTimeout(check, 1500);
       });
     });
     

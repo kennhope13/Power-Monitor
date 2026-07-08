@@ -79,8 +79,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<AuditMiddleware>(); // Ghi audit log tự động
 
-// Endpoint kiểm tra sức khỏe hệ thống (Docker Healthcheck)
-app.MapGet("/health", () => Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow }));
+// ── Cờ sẵn sàng: /health chỉ trả 200 SAU KHI DB đã migrate xong ──
+var isReady = false;
+
+// Endpoint kiểm tra sức khỏe hệ thống (Docker Healthcheck + Electron waitForServer)
+// Trả 503 khi DB chưa migrate xong → Electron sẽ tiếp tục poll cho đến khi 200
+app.MapGet("/health", () => isReady
+    ? Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow })
+    : Results.StatusCode(503));
 
 app.MapControllers();
 
@@ -90,6 +96,10 @@ app.MapHub<RealtimeHub>("/ws/realtime");
 // ── Database & Seeding Startup Tasks ──────────────────────
 // PHẢI chạy trước Hangfire vì Hangfire sẽ cố gắng connect để tạo bảng ngay khi UseHangfireDashboard/RecurringJob.AddOrUpdate được gọi
 await app.InitializeDatabaseAsync();
+
+// ── Đánh dấu backend đã sẵn sàng phục vụ request ──
+isReady = true;
+Console.WriteLine("[Startup] Backend đã sẵn sàng phục vụ request.");
 
 // Hangfire dashboard bảo mật với HangfireAuthorizationFilter
 app.UseHangfireDashboard("/hangfire", new DashboardOptions
