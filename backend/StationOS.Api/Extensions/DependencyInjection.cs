@@ -143,7 +143,7 @@ public static class DependencyInjection
                             ctx.Token = token;
                         return Task.CompletedTask;
                     },
-                    OnTokenValidated = ctx =>
+                    OnTokenValidated = async ctx =>
                     {
                         var sessionId = ctx.Principal?.FindFirst("sessionId")?.Value;
                         var userId = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -170,11 +170,11 @@ public static class DependencyInjection
                             
                             if (!licenseService.IsSessionActive(sessionId))
                             {
-                                bool registered = licenseService.TryRegisterOnRequest(sessionId, userId, expiresAt);
+                                bool registered = await licenseService.TryRegisterOnRequestAsync(sessionId, userId, expiresAt);
                                 if (!registered)
                                 {
                                     ctx.Fail("Session is no longer active (kicked out or limit exceeded)");
-                                    return Task.CompletedTask;
+                                    return;
                                 }
                             }
                             else
@@ -182,7 +182,6 @@ public static class DependencyInjection
                                 licenseService.RegisterActiveSession(sessionId, userId, expiresAt);
                             }
                         }
-                        return Task.CompletedTask;
                     }
                 };
             });

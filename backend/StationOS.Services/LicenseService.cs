@@ -387,7 +387,7 @@ public class LicenseService
         return (true, status.State.ToLowerInvariant());
     }
 
-    public bool TryRegisterOnRequest(string sessionId, string userId, DateTime expiresAt)
+    public async Task<bool> TryRegisterOnRequestAsync(string sessionId, string userId, DateTime expiresAt)
     {
         CleanExpiredSessions();
 
@@ -404,7 +404,7 @@ public class LicenseService
             return true;
         }
 
-        var snapshot = GetSnapshotAsync().GetAwaiter().GetResult();
+        var snapshot = await GetSnapshotAsync();
         var status = snapshot?.Status;
         if (status != null && status.IsValid && status.MaxUsers > 0 && CountLimitedSessions() >= status.MaxUsers)
             return false;
