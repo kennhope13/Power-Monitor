@@ -14,7 +14,7 @@ import { useSearchParams } from 'react-router-dom';
 import { stationApi, AlertItem, AlertHistoryEntry } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore, useAlertStore } from '@/store';
 import { ALERT_STATUS, ALERT_LEVEL, alertStatusLabel, alertLevelLabel } from '@/types/enums';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '@/services/realtime.service';
 import { fmtDateTime } from '@/utils/format';
 import { confirmDialog } from '@/utils/confirm';
 import { showToast } from '@/utils/toast';
@@ -238,7 +238,7 @@ export default function AlertsHistoryPage() {
 
   // Realtime
   useEffect(() => {
-    const hubConnection = createRealtimeHub();
+    const hubConnection = getRealtimeHub();
 
     hubConnection.on('AlertNew', (alert: any) => {
       const aid = alert.id || alert.Id;
@@ -278,8 +278,11 @@ export default function AlertsHistoryPage() {
       }
     });
 
-    hubConnection.start().catch((err: any) => console.warn('SignalR start error:', err));
-    return () => { hubConnection.stop(); };
+    startRealtimeHub().catch((err: any) => console.warn('SignalR start error:', err));
+    return () => { 
+      hubConnection.off('AlertNew');
+      hubConnection.off('AlertUpdated');
+    };
   }, [filterStatus, selectedId]);
 
   // Load detail automatically if alertId in query string

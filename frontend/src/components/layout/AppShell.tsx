@@ -17,7 +17,7 @@ import { showToast } from '@/utils/toast';
 import { playAlertSound } from '@/utils/sound-utils';
 import { isCentralUser as isCentralUserAccount, MULTISITE_RETURN_TAB_KEY } from '@/utils/centralAccess';
 import { getDisplayStationName, getStoredStationName, hasStoredServerIp } from '@/utils/station-setup';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub, stopRealtimeHub } from '@/services/realtime.service';
 import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
   LayoutDashboard, Video, AlertTriangle, LineChart,
@@ -253,7 +253,7 @@ export default function AppShell() {
     }).catch(() => { });
 
     // Khởi tạo SignalR Hub toàn cục để lắng nghe mọi sự kiện trên mọi Tab
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
 
     // 1. Lắng nghe cảnh báo mới từ Rule Engine, Camera, Maintenance
     hub.on('AlertNew', (alert: AlertItem) => {
@@ -357,7 +357,7 @@ export default function AppShell() {
     let isMounted = true;
     const startHub = async () => {
       try {
-        await hub.start();
+        await startRealtimeHub();
         console.log('[AppShell] SignalR Global Connected.');
       } catch (err) {
         console.warn('[AppShell] SignalR Global Connection failed, retrying in 5s...', err);
@@ -370,7 +370,7 @@ export default function AppShell() {
 
     return () => {
       isMounted = false;
-      hub.stop();
+      stopRealtimeHub();
     };
   }, [fetchAlerts, invalidateAlerts]);
 

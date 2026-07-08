@@ -4,7 +4,7 @@ import { stationApi } from '../../../services/StationApiService';
 import { CameraDevice } from '../../../types/api.types';
 import { authService } from '../../../services/AuthService';
 import { GO2RTC_URL } from '../../../utils/env';
-import { createRealtimeHub } from '../../../services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '../../../services/realtime.service';
 import { confirmDialog } from '@/utils/confirm';
 
 type VVR = { x:number, y:number, width:number, height:number };
@@ -157,7 +157,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
 
   // Lắng nghe SignalR SensorUpdate — cùng nguồn với realtime page
   useEffect(() => {
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
     hub.on('SensorUpdate', (data: any[]) => {
       if (!Array.isArray(data)) return;
       const mine = data.filter(d => d.deviceId === did || d.deviceId?.toLowerCase() === did.toLowerCase());
@@ -174,8 +174,8 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
         return upd?.max != null ? { ...r, maxTemp: upd.max } : r;
       }));
     });
-    hub.start().catch(() => {});
-    return () => { hub.stop(); };
+    startRealtimeHub().catch(() => {});
+    return () => { hub.off('SensorUpdate'); };
   }, [did]);
 
   useEffect(() => {

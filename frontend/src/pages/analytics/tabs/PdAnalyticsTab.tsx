@@ -4,7 +4,7 @@ import { getCSSColor } from '@/utils/theme-colors';
 import { GO2RTC_URL, API_BASE_URL, AI_ENGINE_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
 import { stationApi, Device } from '@/services/StationApiService';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '@/services/realtime.service';
 import { RotateCw, Zap } from 'lucide-react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import * as XLSX from 'xlsx';
@@ -140,7 +140,7 @@ export default function PdAnalyticsTab({ fromDate, toDate, registerExport }: PdA
   // SignalR for real-time history updates
   useEffect(() => {
     if (!selectedCamera) return;
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
     
     hub.on('CameraEvent', (evt: any) => {
       if (evt.cameraId === selectedCamera.id && evt.detectionType === 'partial_discharge') {
@@ -163,8 +163,8 @@ export default function PdAnalyticsTab({ fromDate, toDate, registerExport }: PdA
       }
     });
 
-    hub.start().catch(() => {});
-    return () => { hub.stop(); };
+    startRealtimeHub().catch(() => {});
+    return () => { hub.off('CameraEvent'); };
   }, [selectedCamera, boundaries, getEventLevel]);
 
   // Render Chart (Bar chart for events)

@@ -11,7 +11,7 @@ import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import { stationApi, CameraDevice, RoiPoint, Boundary } from '@/services/StationApiService';
 import { GO2RTC_URL, AI_ENGINE_URL, API_BASE_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '@/services/realtime.service';
 import { useAlertStore } from '@/store/alertStore';
 import { useDeviceStore } from '@/store/deviceStore';
 import { useStationStore } from '@/store/stationStore';
@@ -254,7 +254,7 @@ export default function RealtimeMonitorPage() {
 
   // SignalR (Simplified: only local UI state, global alerts handled in AppShell)
   useEffect(() => {
-    const hubConnection = createRealtimeHub();
+    const hubConnection = getRealtimeHub();
     hubConnection.on('DeviceStatus', (data: { deviceId: string; status: string }) => {
       setDeviceStatus(prev => ({ ...prev, [data.deviceId.toLowerCase()]: data.status }));
     });
@@ -276,8 +276,11 @@ export default function RealtimeMonitorPage() {
       });
     });
 
-    hubConnection.start().catch(() => {});
-    return () => { hubConnection.stop(); };
+    startRealtimeHub().catch(() => {});
+    return () => { 
+      hubConnection.off('DeviceStatus');
+      hubConnection.off('SensorUpdate');
+    };
   }, []);
 
   // Helpers
