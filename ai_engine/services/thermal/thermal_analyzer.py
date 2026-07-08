@@ -124,95 +124,110 @@ class ThermalAnalyzer:
             zone_results = {}
             fetched_ok = False
 
-        if matrix_data:
-            temperatures, w, h, mapping = matrix_data
+            # 1. Thử đọc matrix raw trước
+            if not self._use_fallback_only:
+                try:
+                    matrix_data = await self._read_thermal_matrix()
+                    if matrix_data:
+                        self._consecutive_matrix_failures = 0
+                        temperatures, w, h, mapping = matrix_data
 
-            # 2. Trích xuất nhiệt độ cho points
-            for pt in self.points:
-                px_norm = pt.x
-                py_norm = pt.y
-                if mapping:
-                    px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
-                    py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
-                    px_norm = max(0.0, min(1.0, px_norm))
-                    py_norm = max(0.0, min(1.0, py_norm))
+                        # Trích xuất nhiệt độ cho points từ raw matrix
+                        for pt in self.points:
+                            px_norm = pt.x
+                            py_norm = pt.y
+                            if mapping:
+                                px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                                py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                                px_norm = max(0.0, min(1.0, px_norm))
+                                py_norm = max(0.0, min(1.0, py_norm))
 
-                px = int(px_norm * w)
-                py = int(py_norm * h)
-                px = max(0, min(px, w - 1))
-                py = max(0, min(py, h - 1))
-                idx = py * w + px
-                val = float(temperatures[idx])
-                if -50.0 <= val <= 500.0:
-                    point_temps[pt.id] = val
+                            px = int(px_norm * w)
+                            py = int(py_norm * h)
+                            px = max(0, min(px, w - 1))
+                            py = max(0, min(py, h - 1))
+                            idx = py * w + px
+                            val = float(temperatures[idx])
+                            if -50.0 <= val <= 500.0:
+                                point_temps[pt.id] = val
 
-            # 3. Trích xuất nhiệt độ cho zones (Max temp trong vùng)
-            for zn in self.zones:
-                if not zn.polygon or len(zn.polygon) < 3:
-                    continue
-                
-                # Tạo mask cho polygon trên matrix nhỏ
-                mapped_polygon = []
-                for p in zn.polygon:
-                    px_norm = p[0]
-                    py_norm = p[1]
-                    if mapping:
-                        px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
-                        py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
-                        px_norm = max(0.0, min(1.0, px_norm))
-                        py_norm = max(0.0, min(1.0, py_norm))
-                    mapped_polygon.append([int(px_norm * w), int(py_norm * h)])
+                        # Trích xuất nhiệt độ cho zones từ raw matrix
+                        for zn in self.zones:
+                            if not zn.polygon or len(zn.polygon) < 3:
+                                continue
+                            
+                            # Tạo mask cho polygon trên matrix nhỏ
+                            mapped_polygon = []
+                            for p in zn.polygon:
+                                px_norm = p[0]
+                                py_norm = p[1]
+                                if mapping:
+                                    px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                                    py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                                    px_norm = max(0.0, min(1.0, px_norm))
+                                    py_norm = max(0.0, min(1.0, py_norm))
+                                mapped_polygon.append([int(px_norm * w), int(py_norm * h)])
 
-                poly_pts = np.array(mapped_polygon, np.int32)
-                mask = np.zeros((h, w), dtype=np.uint8)
-                cv2.fillPoly(mask, [poly_pts], 255)
-                
-                # Lọc các giá trị nhiệt độ trong vùng và clamp
-                masked_temps = temperatures.reshape((h, w))[mask == 255]
-                valid_temps = masked_temps[(masked_temps >= -50.0) & (masked_temps <= 500.0)]
-                if valid_temps.size > 0:
-                    max_val = float(np.max(valid_temps))
-                    
-                    full_matrix = temperatures.reshape((h, w))
-                    full_matrix_masked = np.where((mask == 255) & (full_matrix >= -50.0) & (full_matrix <= 500.0), full_matrix, -1000.0)
-                    max_idx = np.argmax(full_matrix_masked)
-                    max_y, max_x = divmod(max_idx, w)
-                    
-                    # Convert max back to visible coordinates
-                    vx = float(max_x / w)
-                    vy = float(max_y / h)
-                    if mapping:
-                        vx = vx * mapping.get("width", 1.0) + mapping.get("x", 0.0)
-                        vy = vy * mapping.get("height", 1.0) + mapping.get("y", 0.0)
+                            poly_pts = np.array(mapped_polygon, np.int32)
+                            mask = np.zeros((h, w), dtype=np.uint8)
+                            cv2.fillPoly(mask, [poly_pts], 255)
+                            
+                            # Lọc các giá trị nhiệt độ trong vùng và clamp
+                            masked_temps = temperatures.reshape((h, w))[mask == 255]
+                            valid_temps = masked_temps[(masked_temps >= -50.0) & (masked_temps <= 500.0)]
+                            if valid_temps.size > 0:
+                                max_val = float(np.max(valid_temps))
+                                
+                                full_matrix = temperatures.reshape((h, w))
+                                full_matrix_masked = np.where((mask == 255) & (full_matrix >= -50.0) & (full_matrix <= 500.0), full_matrix, -1000.0)
+                                max_idx = np.argmax(full_matrix_masked)
+                                max_y, max_x = divmod(max_idx, w)
+                                
+                                # Convert max back to visible coordinates
+                                vx = float(max_x / w)
+                                vy = float(max_y / h)
+                                if mapping:
+                                    vx = vx * mapping.get("width", 1.0) + mapping.get("x", 0.0)
+                                    vy = vy * mapping.get("height", 1.0) + mapping.get("y", 0.0)
 
-                    zone_results[zn.id] = {
-                        "max": max_val,
-                        "x": vx,
-                        "y": vy
-                    }
-        else:
-            # Dự phòng cho camera không hỗ trợ đọc matrix raw (ví dụ: Camera 152)
-            fallback_res = await self._read_temperatures_fallback()
-            if fallback_res:
-                point_temps, zone_results = fallback_res
-            else:
-                return
+                                zone_results[zn.id] = {
+                                    "max": max_val,
+                                    "x": vx,
+                                    "y": vy
+                                }
+                        fetched_ok = True
+                    else:
+                        self._consecutive_matrix_failures += 1
+                        if self._consecutive_matrix_failures >= 3:
+                            self._use_fallback_only = True
+                            logger.info("[ThermalAnalyzer] Switching to fallback thermometry for %s", self.camera_ip)
+                except Exception as ex:
+                    logger.warning("[ThermalAnalyzer] Matrix read failed for %s: %s", self.camera_ip, ex)
+                    self._consecutive_matrix_failures += 1
+                    if self._consecutive_matrix_failures >= 3:
+                        self._use_fallback_only = True
 
+            # 2. Dự phòng/fallback nếu matrix raw thất bại hoặc không dùng
             if not fetched_ok:
-                fallback_res = await self._read_temperatures_fallback()
-                if fallback_res:
-                    point_temps, zone_results = fallback_res
-                    fetched_ok = True
+                try:
+                    fallback_res = await self._read_temperatures_fallback()
+                    if fallback_res:
+                        point_temps, zone_results = fallback_res
+                        fetched_ok = True
+                except Exception as ex:
+                    logger.warning("[ThermalAnalyzer] Fallback read failed for %s: %s", self.camera_ip, ex)
 
+            # 3. Lưu cache & Ingest
             if fetched_ok:
                 self._cached_point_temps = point_temps
                 self._cached_zone_results = zone_results
-                # Gửi nhiệt độ thực tế về backend tức thì khi có dữ liệu mới
                 await self._ingest_measurements(point_temps, zone_results)
-
-        # Sử dụng kết quả lưu trong cache
-        point_temps = self._cached_point_temps
-        zone_results = self._cached_zone_results
+            else:
+                point_temps = self._cached_point_temps
+                zone_results = self._cached_zone_results
+        else:
+            point_temps = self._cached_point_temps
+            zone_results = self._cached_zone_results
 
         if not point_temps and not zone_results:
             return

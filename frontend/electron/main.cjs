@@ -518,6 +518,25 @@ function errorHTML(msg) {
 }
 
 // ─────────────────────────────────────────────
+// Kiểm tra xem backend đã chạy sẵn trong nền hay chưa
+// ─────────────────────────────────────────────
+function checkServicesRunning() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:5000/health', (res) => {
+      res.destroy();
+      resolve(true); // Nhận được bất kỳ phản hồi HTTP nào đều có nghĩa là backend đang chạy
+    });
+    req.on('error', () => {
+      resolve(false);
+    });
+    req.setTimeout(800, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────
 // Tạo cửa sổ chính
 // ─────────────────────────────────────────────
 async function createWindow() {
@@ -566,10 +585,15 @@ async function createWindow() {
     return;
   }
 
-  // ── LUÔN khởi động lại services mỗi lần mở app ──
-  // Đảm bảo clean state, không phụ thuộc vào trạng thái cũ
-  log('[Station Monitor] Khởi động lại services (đảm bảo clean state)...');
-  await startAllServices(root);
+  // ── Kiểm tra xem services đã chạy ngầm hay chưa ──
+  log('[Station Monitor] Kiểm tra xem services đã chạy ngầm hay chưa...');
+  const alreadyRunning = await checkServicesRunning();
+  if (alreadyRunning) {
+    log('[Station Monitor] Services đã chạy sẵn trong nền. Bỏ qua bước khởi động lại.');
+  } else {
+    log('[Station Monitor] Services chưa chạy hoặc chưa sẵn sàng. Tiến hành khởi động...');
+    await startAllServices(root);
+  }
 
   // Kiểm tra xem Vite dev server (port 5173) có đang chạy không (chỉ khi chưa package)
   let useVite = false;
