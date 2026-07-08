@@ -32,7 +32,7 @@ streams:
   cam_192_168_10_120_optical:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/101
   cam_192_168_10_120_thermal:
-    - ffmpeg:rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201#video=h264
+    - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/201
   cam_192_168_10_120_optical_sub:
     - rtsp://admin:Demo%402024@192.168.10.120:554/Streaming/Channels/102
   cam_hanoi_optical:
@@ -66,4 +66,4 @@ streams:
   camera_192_168_10_156_cctv:
     - rtsp://admin:Demo%402024@192.168.10.156:554
   camera_192_168_10_109_cctv:
-    - rtsp://admin:Demo%402024@192.168.10.109:554
+    - rtsp://admin:admin123@192.168.10.109:554

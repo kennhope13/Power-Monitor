@@ -64,12 +64,31 @@ function findProjectRoot() {
 // ─────────────────────────────────────────────
 // Kiểm tra xem backend service đã chạy sẵn chưa
 // ─────────────────────────────────────────────
-function checkIfServicesRunning() {
+function checkIfServicesRunning(root) {
   return new Promise((resolve) => {
     const req = http.get('http://127.0.0.1:5000/health', (res) => {
-      const ok = res.statusCode === 200;
+      const backendOk = res.statusCode === 200;
       res.destroy();
-      resolve(ok);
+      if (!backendOk) {
+        resolve(false);
+        return;
+      }
+
+      if (process.platform !== 'win32' || !root) {
+        resolve(true);
+        return;
+      }
+
+      try {
+        const pgReady = spawnSync(
+          path.join(root, 'pg_portable', 'bin', 'pg_isready.exe'),
+          ['-h', '127.0.0.1', '-p', '5432', '-U', 'postgres'],
+          { timeout: 3000, windowsHide: true, encoding: 'utf8' }
+        );
+        resolve(pgReady.status === 0);
+      } catch {
+        resolve(false);
+      }
     });
     req.on('error', () => {
       resolve(false);
@@ -520,11 +539,31 @@ function errorHTML(msg) {
 // ─────────────────────────────────────────────
 // Kiểm tra xem backend đã chạy sẵn trong nền hay chưa
 // ─────────────────────────────────────────────
-function checkServicesRunning() {
+function checkServicesRunning(root) {
   return new Promise((resolve) => {
     const req = http.get('http://127.0.0.1:5000/health', (res) => {
+      const backendOk = res.statusCode === 200;
       res.destroy();
-      resolve(true); // Nhận được bất kỳ phản hồi HTTP nào đều có nghĩa là backend đang chạy
+      if (!backendOk) {
+        resolve(false);
+        return;
+      }
+
+      if (process.platform !== 'win32' || !root) {
+        resolve(true);
+        return;
+      }
+
+      try {
+        const pgReady = spawnSync(
+          path.join(root, 'pg_portable', 'bin', 'pg_isready.exe'),
+          ['-h', '127.0.0.1', '-p', '5432', '-U', 'postgres'],
+          { timeout: 3000, windowsHide: true, encoding: 'utf8' }
+        );
+        resolve(pgReady.status === 0);
+      } catch {
+        resolve(false);
+      }
     });
     req.on('error', () => {
       resolve(false);
@@ -587,7 +626,7 @@ async function createWindow() {
 
   // ── Kiểm tra xem services đã chạy ngầm hay chưa ──
   log('[Station Monitor] Kiểm tra xem services đã chạy ngầm hay chưa...');
-  const alreadyRunning = await checkServicesRunning();
+  const alreadyRunning = await checkServicesRunning(root);
   if (alreadyRunning) {
     log('[Station Monitor] Services đã chạy sẵn trong nền. Bỏ qua bước khởi động lại.');
   } else {
@@ -660,8 +699,16 @@ async function createWindow() {
         return;
       }
       const healthReq = http.get('http://127.0.0.1:5000/health', (res) => {
+        const backendOk = res.statusCode === 200;
         res.destroy();
-        // Backend vẫn sống, OK
+        if (backendOk) return;
+
+        log(`[Watchdog] Backend health HTTP ${res.statusCode}. Đang tự động khởi động lại...`);
+        startAllServices(root).then(() => {
+          log('[Watchdog] Đã khởi động lại services.');
+        }).catch(err => {
+          log('[Watchdog] Lỗi khởi động lại:', err.message);
+        });
       });
       healthReq.on('error', () => {
         log('[Watchdog] Backend không phản hồi! Đang tự động khởi động lại...');
@@ -722,5 +769,4 @@ app.on('window-all-closed', () => {
   
   if (process.platform !== 'darwin') app.quit();
 });
-
 

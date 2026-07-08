@@ -6,9 +6,11 @@
 
 using Microsoft.AspNetCore.HttpOverrides;
 using Hangfire;
+using Microsoft.EntityFrameworkCore;
 using StationOS.Api.Hubs;
 using StationOS.Api.Middleware;
 using StationOS.Api.Extensions;
+using StationOS.Data;
 using StationOS.Services.Reports;
 using StationOS.Workers.Polling;
 
@@ -83,10 +85,28 @@ app.UseMiddleware<AuditMiddleware>(); // Ghi audit log tự động
 var isReady = false;
 
 // Endpoint kiểm tra sức khỏe hệ thống (Docker Healthcheck + Electron waitForServer)
-// Trả 503 khi DB chưa migrate xong → Electron sẽ tiếp tục poll cho đến khi 200
-app.MapGet("/health", () => isReady
-    ? Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow })
-    : Results.StatusCode(503));
+// Trả 503 khi DB chưa migrate xong hoặc PostgreSQL đã rớt sau startup.
+app.MapGet("/health", async (IServiceProvider services, CancellationToken ct) =>
+{
+    if (!isReady)
+    {
+        return Results.StatusCode(503);
+    }
+
+    try
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var dbOk = await db.Database.CanConnectAsync(ct);
+        return dbOk
+            ? (IResult)Results.Ok(new { status = "ok", database = "ok", timestamp = DateTime.UtcNow })
+            : Results.StatusCode(503);
+    }
+    catch
+    {
+        return Results.StatusCode(503);
+    }
+});
 
 app.MapControllers();
 
