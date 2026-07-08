@@ -566,14 +566,10 @@ async function createWindow() {
     return;
   }
 
-  // Khởi động services nếu chưa chạy
-  const isRunning = await checkIfServicesRunning();
-  if (!isRunning) {
-    log('[Station Monitor] Services chưa chạy, tiến hành khởi động...');
-    await startAllServices(root);
-  } else {
-    log('[Station Monitor] Services đã chạy sẵn, bỏ qua bước khởi động.');
-  }
+  // ── LUÔN khởi động lại services mỗi lần mở app ──
+  // Đảm bảo clean state, không phụ thuộc vào trạng thái cũ
+  log('[Station Monitor] Khởi động lại services (đảm bảo clean state)...');
+  await startAllServices(root);
 
   // Kiểm tra xem Vite dev server (port 5173) có đang chạy không (chỉ khi chưa package)
   let useVite = false;
@@ -631,6 +627,30 @@ async function createWindow() {
     mainWindow.loadURL(targetUrl)
       .then(() => log('loadURL success'))
       .catch(err => log('loadURL ERROR:', err.message));
+    
+    // ── Backend Watchdog ──
+    // Kiểm tra backend health mỗi 10 giây, nếu chết thì tự restart
+    const watchdogInterval = setInterval(() => {
+      if (!mainWindow) {
+        clearInterval(watchdogInterval);
+        return;
+      }
+      const healthReq = http.get('http://127.0.0.1:5000/health', (res) => {
+        res.destroy();
+        // Backend vẫn sống, OK
+      });
+      healthReq.on('error', () => {
+        log('[Watchdog] Backend không phản hồi! Đang tự động khởi động lại...');
+        startAllServices(root).then(() => {
+          log('[Watchdog] Đã khởi động lại services.');
+        }).catch(err => {
+          log('[Watchdog] Lỗi khởi động lại:', err.message);
+        });
+      });
+      healthReq.setTimeout(3000, () => {
+        healthReq.destroy();
+      });
+    }, 10000);
   });
 
   // Bắt did-fail-load
@@ -673,10 +693,10 @@ app.on('window-all-closed', () => {
   }
   
   // ── KHÔNG kill backend/postgres/go2rtc khi đóng cửa sổ ──
-  // Để chúng chạy ngầm. Khi mở app lại, checkIfServicesRunning() 
-  // sẽ thấy services đã sẵn sàng → load UI ngay lập tức, không cần khởi động lại.
-  log('[Station Monitor] Đóng cửa sổ. Backend + PostgreSQL + go2rtc vẫn chạy ngầm.');
+  // Để chúng chạy ngầm, khi mở lại app sẽ kill + restart tự động trong startAllServices
+  log('[Station Monitor] Đóng cửa sổ. Services vẫn chạy ngầm.');
   
   if (process.platform !== 'darwin') app.quit();
 });
+
 
