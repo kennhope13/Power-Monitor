@@ -259,10 +259,6 @@ export default function LicensePage() {
               </div>
               <div className="license-limit-grid">
                 <div className="license-limit-item">
-                  <span>Trạm</span>
-                  <strong>{formatUsage(status.currentStations, status.maxDevices)}</strong>
-                </div>
-                <div className="license-limit-item">
                   <span>Camera</span>
                   <strong>{formatUsage(status.currentCameras, status.maxCameras)}</strong>
                 </div>
