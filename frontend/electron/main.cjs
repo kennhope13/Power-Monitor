@@ -570,6 +570,15 @@ function startLocalUiServer() {
             socket.write(proxyHead);
           }
 
+          proxySocket.on('error', (err) => {
+            log(`[ProxySocket Error] ${err.message}`);
+            socket.destroy();
+          });
+          socket.on('error', (err) => {
+            log(`[Socket Error] ${err.message}`);
+            proxySocket.destroy();
+          });
+
           proxySocket.pipe(socket);
           socket.pipe(proxySocket);
         });
@@ -909,9 +918,6 @@ app.on('window-all-closed', () => {
     try { localUiServer.close(); } catch {}
     localUiServer = null;
   }
-  
-  // Dừng Backend và PostgreSQL khi đóng hết cửa sổ (giữ lại go2rtc)
-  stopAppServices();
   
   if (process.platform !== 'darwin') app.quit();
 });
