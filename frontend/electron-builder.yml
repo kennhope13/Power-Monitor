@@ -33,6 +33,7 @@ win:
   icon: build/icon.png
 nsis:
   oneClick: false
+  perMachine: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: Station Monitor
