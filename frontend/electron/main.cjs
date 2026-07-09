@@ -477,6 +477,50 @@ function startLocalUiServer() {
       });
     });
 
+    server.on('upgrade', (req, socket, head) => {
+      const reqUrl = req.url || '/';
+      if (reqUrl.startsWith('/ws/')) {
+        const targetUrl = new URL(reqUrl, 'http://127.0.0.1:5000');
+        const options = {
+          port: 5000,
+          host: '127.0.0.1',
+          path: targetUrl.pathname + targetUrl.search,
+          headers: req.headers,
+          method: req.method || 'GET'
+        };
+
+        const proxyReq = http.request(options);
+        proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+          socket.write(
+            `HTTP/1.1 101 Switching Protocols\r\n` +
+            Object.keys(proxyRes.headers)
+              .map(key => `${key}: ${proxyRes.headers[key]}`)
+              .join('\r\n') +
+            '\r\n\r\n'
+          );
+
+          if (proxyHead && proxyHead.length > 0) {
+            socket.write(proxyHead);
+          }
+
+          proxySocket.pipe(socket);
+          socket.pipe(proxySocket);
+        });
+
+        proxyReq.on('error', (err) => {
+          log(`[WS Proxy Error] ${err.message}`);
+          socket.end();
+        });
+
+        if (head && head.length > 0) {
+          proxyReq.write(head);
+        }
+        proxyReq.end();
+      } else {
+        socket.end();
+      }
+    });
+
     server.on('error', reject);
     server.listen(4173, '0.0.0.0', () => {
       localUiServer = server;

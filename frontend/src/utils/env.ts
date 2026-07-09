@@ -44,12 +44,12 @@ export const GO2RTC_URL: string = (() => {
 })();
 
 // URL gốc của backend API — dùng cho REST và WebSocket SignalR
-const rawApi = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://127.0.0.1:5000';
+const rawApi = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 /** URL gốc của backend REST API và SignalR — tự thay localhost bằng hostname thực. */
 export const API_BASE_URL: string = (() => {
   const host = getTargetHostname();
   if (host) {
-    return rawApi.replace(/(localhost|127\.0\.0\.1)/g, host);
+    return `http://${host}:5000`;
   }
   return rawApi;
 })();
