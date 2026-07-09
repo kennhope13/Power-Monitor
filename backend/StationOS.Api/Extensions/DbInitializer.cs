@@ -88,25 +88,38 @@ public static class DbInitializer
             Console.WriteLine($"[Startup] Không thể set client_encoding: {ex.Message}");
         }
 
-        // 1. Tạo extension TimescaleDB (cần thiết cho hypertable) - CHẠY SAU KHI ĐÃ CÓ DATABASE
+        // 1. Kiểm tra xem extension TimescaleDB có sẵn trên server không
+        bool isTimescaleAvailable = false;
         try
         {
-            await db.Database.ExecuteSqlRawAsync(@"CREATE EXTENSION IF NOT EXISTS timescaledb;");
+            // pg_available_extensions chứa danh sách các extension CÓ THỂ cài đặt trên server
+            using var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'";
+            isTimescaleAvailable = (await cmd.ExecuteScalarAsync()) != null;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Startup] TimescaleDB extension không khả dụng: {ex.Message}");
+            Console.WriteLine($"[Startup] Lỗi khi kiểm tra pg_available_extensions: {ex.Message}");
         }
 
-        // 3. Biến SensorReadings thành hypertable (sau khi table đã được tạo)
-        try
+        if (isTimescaleAvailable)
         {
-            await db.Database.ExecuteSqlRawAsync(
-                @"SELECT create_hypertable('""SensorReadings""', 'Time', if_not_exists => TRUE, migrate_data => TRUE);");
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(@"CREATE EXTENSION IF NOT EXISTS timescaledb;");
+                await db.Database.ExecuteSqlRawAsync(@"SELECT create_hypertable('""SensorReadings""', 'Time', if_not_exists => TRUE, migrate_data => TRUE);");
+                Console.WriteLine("[Startup] Đã kích hoạt TimescaleDB và chuyển SensorReadings thành hypertable.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Startup] Lỗi khi tạo hypertable: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine($"[Startup] Không convert SensorReadings sang hypertable (OK nếu không phải TimescaleDB): {ex.Message}");
+            Console.WriteLine("[Startup] BỎ QUA: PostgreSQL không có TimescaleDB extension. Sẽ chạy bằng bảng chuẩn (Standard Table).");
         }
 
         // Đảm bảo các cột được thêm vào kể cả khi migration đã bị đánh dấu "applied" mà DDL chưa chạy
