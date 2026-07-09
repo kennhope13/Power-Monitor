@@ -17,6 +17,16 @@ const cleanHostname = (input: string): string => {
 
 // Helper to get target hostname based on saved localStorage IP or window location
 const getTargetHostname = (): string | null => {
+  // Nếu đang chạy local (Electron shell hoặc trình duyệt chạy trên localhost/127.0.0.1),
+  // ta bắt buộc sử dụng đường dẫn tương đối (relative path qua cổng 4173 hoặc 5173).
+  // Bỏ qua giá trị IP ngoài trong localStorage để tránh lỗi định tuyến mạng hoặc lỗi CORS.
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return null;
+    }
+  }
+
   if (typeof window !== 'undefined' && window.localStorage) {
     const saved = window.localStorage.getItem('server_ip');
     if (saved && saved.trim() !== '') {
@@ -34,6 +44,7 @@ const getTargetHostname = (): string | null => {
   }
   return null;
 };
+
 
 // URL server go2rtc để phát stream camera qua WebRTC
 const rawGo2rtc = (import.meta.env.VITE_GO2RTC_URL as string | undefined) ?? 'http://127.0.0.1:1984';
