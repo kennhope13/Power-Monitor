@@ -208,13 +208,21 @@ function spawnHiddenWin32(exePath, args, cwd, stdoutPath, stderrPath, extraEnv) 
   proc.unref();
 }
 
+let isStartingServices = false;
+
 async function startAllServices(root) {
-  console.log('[Station Monitor] Khởi động services từ:', root);
-  const env = { 
-    ...process.env, 
-    STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
-    ASPNETCORE_URLS: 'http://0.0.0.0:5000'
-  };
+  if (isStartingServices) {
+    log('[Station Monitor] Services đang được khởi động, bỏ qua yêu cầu mới.');
+    return;
+  }
+  isStartingServices = true;
+  try {
+    console.log('[Station Monitor] Khởi động services từ:', root);
+    const env = { 
+      ...process.env, 
+      STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
+      ASPNETCORE_URLS: 'http://0.0.0.0:5000'
+    };
   
   if (process.platform === 'win32') {
     const userData = app.getPath('userData');
@@ -227,6 +235,15 @@ async function startAllServices(root) {
       spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
       
       spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
+      
+      try {
+        const pgCtlExe = path.join(pgBinDir, 'pg_ctl.exe');
+        if (fs.existsSync(pgCtlExe)) {
+          log('[Station Monitor] Đang dừng PostgreSQL an toàn...');
+          spawnSync(pgCtlExe, ['stop', '-D', pgDataDir, '-m', 'fast', '-w', '-t', '5'], { windowsHide: true, timeout: 6000 });
+        }
+      } catch (e) { }
+
       spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
       spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
       log('[Station Monitor] Đã dọn dẹp tiến trình cũ trên Windows.');
@@ -327,6 +344,9 @@ async function startAllServices(root) {
       windowsHide: true
     });
     proc.unref();
+  }
+  } finally {
+    isStartingServices = false;
   }
 }
 
@@ -693,6 +713,7 @@ async function createWindow() {
     
     // ── Backend Watchdog ──
     // Kiểm tra backend health mỗi 10 giây, nếu chết thì tự restart
+    let consecutiveFailures = 0;
     const watchdogInterval = setInterval(() => {
       if (!mainWindow) {
         clearInterval(watchdogInterval);
@@ -701,22 +722,37 @@ async function createWindow() {
       const healthReq = http.get('http://127.0.0.1:5000/health', (res) => {
         const backendOk = res.statusCode === 200;
         res.destroy();
-        if (backendOk) return;
+        if (backendOk) {
+          consecutiveFailures = 0;
+          return;
+        }
 
-        log(`[Watchdog] Backend health HTTP ${res.statusCode}. Đang tự động khởi động lại...`);
-        startAllServices(root).then(() => {
-          log('[Watchdog] Đã khởi động lại services.');
-        }).catch(err => {
-          log('[Watchdog] Lỗi khởi động lại:', err.message);
-        });
+        consecutiveFailures++;
+        if (consecutiveFailures >= 3) {
+          log(`[Watchdog] Backend health HTTP ${res.statusCode} liên tục 3 lần. Đang tự động khởi động lại...`);
+          consecutiveFailures = 0;
+          startAllServices(root).then(() => {
+            log('[Watchdog] Đã khởi động lại services.');
+          }).catch(err => {
+            log('[Watchdog] Lỗi khởi động lại:', err.message);
+          });
+        } else {
+          log(`[Watchdog] Backend health HTTP ${res.statusCode}. Lỗi lần ${consecutiveFailures}...`);
+        }
       });
       healthReq.on('error', () => {
-        log('[Watchdog] Backend không phản hồi! Đang tự động khởi động lại...');
-        startAllServices(root).then(() => {
-          log('[Watchdog] Đã khởi động lại services.');
-        }).catch(err => {
-          log('[Watchdog] Lỗi khởi động lại:', err.message);
-        });
+        consecutiveFailures++;
+        if (consecutiveFailures >= 3) {
+          log('[Watchdog] Backend không phản hồi liên tục 3 lần! Đang tự động khởi động lại...');
+          consecutiveFailures = 0;
+          startAllServices(root).then(() => {
+            log('[Watchdog] Đã khởi động lại services.');
+          }).catch(err => {
+            log('[Watchdog] Lỗi khởi động lại:', err.message);
+          });
+        } else {
+          log(`[Watchdog] Backend không phản hồi. Lỗi lần ${consecutiveFailures}...`);
+        }
       });
       healthReq.setTimeout(3000, () => {
         healthReq.destroy();
