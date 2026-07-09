@@ -101,6 +101,57 @@ function checkIfServicesRunning(root) {
 }
 
 // ─────────────────────────────────────────────
+// Dừng Backend và PostgreSQL khi đóng ứng dụng
+// ─────────────────────────────────────────────
+function stopAppServices() {
+  const root = findProjectRoot();
+  if (!root) return;
+
+  log('[Station Monitor] Bắt đầu dừng Backend và PostgreSQL...');
+
+  if (process.platform === 'win32') {
+    const userData = app.getPath('userData');
+    const pgDataDir = path.join(userData, 'pg_data');
+    const pgBinDir = path.join(root, 'pg_portable', 'bin');
+
+    // 1. Dừng backend và giải phóng port 5000
+    try {
+      spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
+      spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
+      log('[Station Monitor] Đã đóng tiến trình Backend.');
+    } catch (e) {
+      log('[Station Monitor] Lỗi dừng Backend:', e.message);
+    }
+
+    // 2. Dừng PostgreSQL bằng pg_ctl stop
+    try {
+      const pgCtlExe = path.join(pgBinDir, 'pg_ctl.exe');
+      if (fs.existsSync(pgCtlExe)) {
+        log('[Station Monitor] Đang dừng PostgreSQL an toàn...');
+        spawnSync(pgCtlExe, ['stop', '-D', pgDataDir, '-m', 'fast', '-w', '-t', '5'], { windowsHide: true, timeout: 6000 });
+      }
+    } catch (e) {
+      log('[Station Monitor] Lỗi dừng PostgreSQL (pg_ctl):', e.message);
+    }
+
+    // 3. Đảm bảo kill triệt để postgres.exe
+    try {
+      spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
+    } catch (e) { }
+
+    log('[Station Monitor] Đã hoàn tất dừng Backend và PostgreSQL.');
+  } else {
+    try {
+      spawnSync('pkill', ['-f', 'StationOS.Api'], { timeout: 3000 });
+      spawnSync('pkill', ['-f', 'postgres'], { timeout: 3000 });
+      log('[Station Monitor] Đã dừng Backend và Postgres trên Linux/macOS.');
+    } catch (e) {
+      log('[Station Monitor] Lỗi dừng services trên Linux/macOS:', e.message);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
 // Đợi PostgreSQL sẵn sàng nhận kết nối
 // ─────────────────────────────────────────────
 function waitForPostgres(pgBinDir, maxRetries = 30) {
@@ -230,6 +281,7 @@ async function startAllServices(root) {
     const pgBinDir = path.join(root, 'pg_portable', 'bin');
     
     // Dọn dẹp tiến trình cũ (zombie) trước khi khởi động
+    let go2rtcRunning = false;
     try {
       // Đảm bảo kill bất kỳ tiến trình nào đang giữ cổng 5000
       spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
@@ -245,7 +297,19 @@ async function startAllServices(root) {
       } catch (e) { }
 
       spawnSync('taskkill', ['/F', '/IM', 'postgres.exe', '/T'], { windowsHide: true });
-      spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
+
+      // Kiểm tra xem go2rtc có đang chạy sẵn không
+      try {
+        const checkGo2rtc = spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 1984 -ErrorAction SilentlyContinue'], { windowsHide: true, encoding: 'utf8' });
+        if (checkGo2rtc.status === 0 && checkGo2rtc.stdout.includes('1984')) {
+          go2rtcRunning = true;
+          log('[Station Monitor] go2rtc đã chạy sẵn trên cổng 1984. Giữ nguyên go2rtc.');
+        }
+      } catch (e) { }
+
+      if (!go2rtcRunning) {
+        spawnSync('taskkill', ['/F', '/IM', 'go2rtc.exe', '/T'], { windowsHide: true });
+      }
       log('[Station Monitor] Đã dọn dẹp tiến trình cũ trên Windows.');
     } catch (e) {
       log('[Station Monitor] Lỗi dọn dẹp tiến trình:', e.message);
@@ -326,15 +390,18 @@ async function startAllServices(root) {
     );
 
     // ── Bước 6: Khởi động go2rtc ──
-    spawnHiddenWin32(
-      path.join(root, 'go2rtc', 'go2rtc.exe'),
-      [],
-      path.join(root, 'go2rtc'),
-      path.join(userData, 'go2rtc.log'),
-      path.join(userData, 'go2rtc_err.log')
-    );
-    
-    log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
+    if (!go2rtcRunning) {
+      spawnHiddenWin32(
+        path.join(root, 'go2rtc', 'go2rtc.exe'),
+        [],
+        path.join(root, 'go2rtc'),
+        path.join(userData, 'go2rtc.log'),
+        path.join(userData, 'go2rtc_err.log')
+      );
+      log('[Station Monitor] Đã kích hoạt PostgreSQL, Backend và go2rtc trên Windows.');
+    } else {
+      log('[Station Monitor] Đã kích hoạt PostgreSQL và Backend (giữ nguyên go2rtc đang chạy sẵn) trên Windows.');
+    }
   } else {
     const proc = spawn('bash', ['start-all.sh'], {
       cwd: root,
@@ -843,10 +910,21 @@ app.on('window-all-closed', () => {
     localUiServer = null;
   }
   
-  // ── KHÔNG kill backend/postgres/go2rtc khi đóng cửa sổ ──
-  // Để chúng chạy ngầm, khi mở lại app sẽ kill + restart tự động trong startAllServices
-  log('[Station Monitor] Đóng cửa sổ. Services vẫn chạy ngầm.');
+  // Dừng Backend và PostgreSQL khi đóng hết cửa sổ (giữ lại go2rtc)
+  stopAppServices();
   
   if (process.platform !== 'darwin') app.quit();
+});
+
+let isQuitting = false;
+app.on('before-quit', () => {
+  if (!isQuitting) {
+    isQuitting = true;
+    if (localUiServer) {
+      try { localUiServer.close(); } catch {}
+      localUiServer = null;
+    }
+    stopAppServices();
+  }
 });
 
