@@ -20,7 +20,10 @@ const getTargetHostname = (): string | null => {
   if (typeof window !== 'undefined' && window.localStorage) {
     const saved = window.localStorage.getItem('server_ip');
     if (saved && saved.trim() !== '') {
-      return cleanHostname(saved);
+      const cleaned = cleanHostname(saved);
+      if (cleaned && cleaned !== 'localhost' && cleaned !== '127.0.0.1') {
+        return cleaned;
+      }
     }
   }
   if (typeof window !== 'undefined' && window.location) {
