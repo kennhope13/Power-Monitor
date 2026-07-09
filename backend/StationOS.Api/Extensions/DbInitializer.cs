@@ -93,7 +93,7 @@ public static class DbInitializer
         try
         {
             // pg_available_extensions chứa danh sách các extension CÓ THỂ cài đặt trên server
-            using var conn = db.Database.GetDbConnection();
+            var conn = db.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'";
