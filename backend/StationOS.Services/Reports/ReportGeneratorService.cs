@@ -6,6 +6,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Hosting;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -24,9 +25,9 @@ public record ReportOptions(
 public class ReportGeneratorService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IHostEnvironment     _env;
+    private readonly IWebHostEnvironment     _env;
 
-    public ReportGeneratorService(IServiceScopeFactory scopeFactory, IHostEnvironment env)
+    public ReportGeneratorService(IServiceScopeFactory scopeFactory, IWebHostEnvironment env)
     {
         _scopeFactory = scopeFactory;
         _env = env;
@@ -300,7 +301,7 @@ public class ReportGeneratorService
 
         // ── Lưu file ─────────────────────────────────────────
         var reportId = Guid.NewGuid();
-        var reportsDir = Path.Combine(_env.ContentRootPath, "wwwroot", "reports");
+        var reportsDir = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "reports");
         Directory.CreateDirectory(reportsDir);
         var fileName = $"{reportId}.pdf";
         var filePath = Path.Combine(reportsDir, fileName);

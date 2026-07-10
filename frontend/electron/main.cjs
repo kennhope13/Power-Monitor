@@ -273,7 +273,8 @@ async function startAllServices(root) {
       ...process.env, 
       STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
       ASPNETCORE_URLS: 'http://0.0.0.0:5000',
-      STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses')
+      STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses'),
+      STATIONOS_WEB_ROOT: path.join(userData, 'wwwroot')
     };
   
   if (process.platform === 'win32') {
@@ -388,7 +389,8 @@ async function startAllServices(root) {
       path.join(userData, 'backend_err.log'),
       { 
         PGCLIENTENCODING: 'UTF8',
-        STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses')
+        STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses'),
+        STATIONOS_WEB_ROOT: path.join(userData, 'wwwroot')
       }
     );
 

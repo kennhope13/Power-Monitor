@@ -16,6 +16,36 @@ using StationOS.Workers.Polling;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Override WebRootPath if STATIONOS_WEB_ROOT env var is specified
+var customWebRoot = Environment.GetEnvironmentVariable("STATIONOS_WEB_ROOT");
+if (!string.IsNullOrEmpty(customWebRoot))
+{
+    builder.WebHost.UseWebRoot(customWebRoot);
+    if (!Directory.Exists(customWebRoot))
+    {
+        Directory.CreateDirectory(customWebRoot);
+    }
+    
+    // Ensure all required folders are present
+    var subdirs = new[] {
+        Path.Combine(customWebRoot, "media"),
+        Path.Combine(customWebRoot, "media", "buffer"),
+        Path.Combine(customWebRoot, "media", "recordings"),
+        Path.Combine(customWebRoot, "media", "detections"),
+        Path.Combine(customWebRoot, "media", "videos"),
+        Path.Combine(customWebRoot, "reports"),
+        Path.Combine(customWebRoot, "sld")
+    };
+    foreach (var dir in subdirs)
+    {
+        if (!Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+    }
+}
+
+
 // ── Register Services via Extension Method ───────────────
 builder.Services.AddStationOSServices(builder.Configuration);
 builder.Services.AddResponseCompression();
