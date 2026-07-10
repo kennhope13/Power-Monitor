@@ -14,13 +14,10 @@ using StationOS.Data;
 using StationOS.Services.Reports;
 using StationOS.Workers.Polling;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Override WebRootPath if STATIONOS_WEB_ROOT env var is specified
+WebApplicationBuilder builder;
 var customWebRoot = Environment.GetEnvironmentVariable("STATIONOS_WEB_ROOT");
 if (!string.IsNullOrEmpty(customWebRoot))
 {
-    builder.WebHost.UseWebRoot(customWebRoot);
     if (!Directory.Exists(customWebRoot))
     {
         Directory.CreateDirectory(customWebRoot);
@@ -43,6 +40,16 @@ if (!string.IsNullOrEmpty(customWebRoot))
             Directory.CreateDirectory(dir);
         }
     }
+
+    builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    {
+        Args = args,
+        WebRootPath = customWebRoot
+    });
+}
+else
+{
+    builder = WebApplication.CreateBuilder(args);
 }
 
 
