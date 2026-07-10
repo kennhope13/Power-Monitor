@@ -15183,6 +15183,7 @@ body.has-critical-banner .panels-grid {
   color: var(--admin-text-muted);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .sb-popover-item:hover {

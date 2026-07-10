@@ -682,7 +682,7 @@ export default function AppShell() {
 
                   {/* Popover Menu — position:fixed để thoát overflow:hidden của sidebar */}
                   {showUserMenu && (
-                    <div className="sb-user-popover" style={{ position: 'fixed', bottom: popupPos.bottom, left: popupPos.left, top: 'auto', width: 200, padding: '6px 0' }}>
+                    <div className="sb-user-popover" style={{ position: 'fixed', bottom: popupPos.bottom, left: popupPos.left, top: 'auto', width: 230, padding: '6px 0' }}>
                       <div
                         className="sb-popover-item"
                         onClick={() => setShowThemeList(!showThemeList)}
