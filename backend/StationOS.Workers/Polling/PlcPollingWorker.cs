@@ -508,9 +508,17 @@ public class PlcPollingWorker : BackgroundService
             {
                 if (simulated)
                 {
-                    value = 0;
-                    quality = 1;
-                    unit = ResolveCabinetUnit(point);
+                    readings.Add(new SensorReading
+                    {
+                        Time = now,
+                        StationId = device.StationId,
+                        DeviceId = device.Id,
+                        PointId = point.PointId,
+                        Value = null,
+                        Unit = ResolveCabinetUnit(point),
+                        Quality = 2
+                    });
+                    continue;
                 }
                 else
                 {
