@@ -202,11 +202,7 @@ export default function DeviceModal({ open, editingDevice, stationId, onClose, o
           </button>
         </div>
         <div className="modal-body">
-          {!canCreateNewDevice && !editingId && (
-            <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--admin-danger)', fontSize: '.78rem', fontWeight: 700 }}>
-              Cần license để thêm thiết bị mới.
-            </div>
-          )}
+
           <div className="form-grid-2">
             <div className="form-group" style={{ gridColumn: '1/-1' }}>
               <label>Tên hiển thị *</label>

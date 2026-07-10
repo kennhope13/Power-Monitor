@@ -885,11 +885,7 @@ export default function DeviceManagementPage({
               <span style={{ color: 'var(--admin-text-muted)', opacity: 0.3, margin: '0 4px' }}>|</span>
               <span style={{ color: 'var(--admin-danger)', fontWeight: 800, fontSize: '.75rem' }}>{devices.length - online} OFFLINE</span>
             </div>
-            {!canCreateNewDevice && (
-              <div className="page-toolbar-cell" style={{ height: 28, padding: '0 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--admin-danger)', fontSize: '.72rem', fontWeight: 700 }}>
-                Cần license để thêm thiết bị mới
-              </div>
-            )}
+
   
             {/* Action Buttons */}
             <button 

@@ -9,8 +9,8 @@ const path = require('path');
 const fs = require('fs');
 
 const FRONTEND_URL = 'http://localhost:5173';
-const ADMIN_USER = 'admin';
-const ADMIN_PASS = 'Admin@123';
+const ADMIN_USER = 'stationadmin';
+const ADMIN_PASS = 'Station@123';
 
 const screenshotDir = path.join(__dirname, 'screenshots');
 if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir);
@@ -23,8 +23,8 @@ const shot = async (page, name) => {
 };
 
 (async () => {
-  log('🚀 Khởi động Playwright (Chromium headless=false)');
-  const browser = await chromium.launch({ headless: false, slowMo: 300 });
+  log('🚀 Khởi động Playwright (Chromium headless=true)');
+  const browser = await chromium.launch({ headless: true, slowMo: 100 });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
 
@@ -43,7 +43,9 @@ const shot = async (page, name) => {
     await page.waitForTimeout(1500);
     await shot(page, '01_login_page');
 
-    log('   Điền thông tin admin');
+    log('   Điền thông tin config & admin');
+    await page.fill('#serverIpInput', '127.0.0.1');
+    await page.fill('#stationNameInput', 'Trạm Tân An 110kV');
     await page.fill('#loginUsername', ADMIN_USER);
     await page.fill('#loginPassword', ADMIN_PASS);
     await shot(page, '02_login_filled');
@@ -112,22 +114,36 @@ const shot = async (page, name) => {
 
     // ── 6. Xóa device vừa thêm ──────────────────────────────
     log('6️⃣  Tìm và xóa device "Test Device Playwright"');
-    const deleteBtn = page.locator('tr:has-text("Test Device Playwright") button:has-text("Xóa")').first();
-    if (await deleteBtn.count() > 0) {
-      page.once('dialog', d => { log(`   Dialog: ${d.message().slice(0, 60)}`); d.accept(); });
-      await deleteBtn.click();
-      await page.waitForTimeout(3000);
-      await shot(page, '09_after_delete');
+    const row = page.locator('tr:has-text("Test Device Playwright")').first();
+    if (await row.count() > 0) {
+      const dropdownTrigger = row.locator('button[title="Thao tác"]').first();
+      await dropdownTrigger.click();
+      await page.waitForTimeout(1000);
+      await shot(page, '08_5_dropdown_open');
 
-      const afterDeleteRows = await page.locator('table tbody tr').count();
-      log(`   📊 Số device sau delete: ${afterDeleteRows}`);
-      if (afterDeleteRows === initialRows) {
-        log('   ✅ DELETE device THÀNH CÔNG (trở về số ban đầu)');
+      const deleteBtn = page.locator('button:has-text("Xóa thiết bị")').first();
+      if (await deleteBtn.count() > 0) {
+        await deleteBtn.click();
+        await page.waitForTimeout(1000);
+        await shot(page, '08_7_confirm_modal_visible');
+
+        log('   Click nút xác nhận xóa (#ccd-confirm)');
+        await page.locator('#ccd-confirm').click();
+        await page.waitForTimeout(3000);
+        await shot(page, '09_after_delete');
+
+        const afterDeleteRows = await page.locator('table tbody tr').count();
+        log(`   📊 Số device sau delete: ${afterDeleteRows}`);
+        if (afterDeleteRows === initialRows) {
+          log('   ✅ DELETE device THÀNH CÔNG (trở về số ban đầu)');
+        } else {
+          log(`   ⚠ Số row sau delete = ${afterDeleteRows}, expected ${initialRows}`);
+        }
       } else {
-        log(`   ⚠ Số row sau delete = ${afterDeleteRows}, expected ${initialRows}`);
+        log('   ⚠ Không tìm thấy nút Xóa thiết bị trong dropdown');
       }
     } else {
-      log('   ⚠ Không tìm thấy nút Xóa cho test device');
+      log('   ⚠ Không tìm thấy hàng chứa Test Device Playwright');
     }
 
     // ── 7. Kiểm tra các trang khác ──────────────────────────

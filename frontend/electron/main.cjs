@@ -268,15 +268,15 @@ async function startAllServices(root) {
   }
   isStartingServices = true;
   try {
-    console.log('[Station Monitor] Khởi động services từ:', root);
+    const userData = app.getPath('userData');
     const env = { 
       ...process.env, 
       STATION_ELECTRON_NO_FRONTEND: (app.isPackaged || preferLocalUi) ? '1' : '0',
-      ASPNETCORE_URLS: 'http://0.0.0.0:5000'
+      ASPNETCORE_URLS: 'http://0.0.0.0:5000',
+      STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses')
     };
   
   if (process.platform === 'win32') {
-    const userData = app.getPath('userData');
     const pgDataDir = path.join(userData, 'pg_data');
     const pgBinDir = path.join(root, 'pg_portable', 'bin');
     
@@ -386,7 +386,10 @@ async function startAllServices(root) {
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
       path.join(userData, 'backend_err.log'),
-      { PGCLIENTENCODING: 'UTF8' }
+      { 
+        PGCLIENTENCODING: 'UTF8',
+        STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses')
+      }
     );
 
     // ── Bước 6: Khởi động go2rtc ──

@@ -301,7 +301,7 @@ public class DevicesController : ControllerBase
         {
             // Kiểm tra giới hạn trạm con theo license
             var licenseStatus = await _license.GetStatusAsync();
-            var (maxNonCams, maxCams, maxRoiPoints) = (licenseStatus!.MaxDevices, licenseStatus.MaxCameras, licenseStatus.MaxRoiPoints);
+            var (maxNonCams, maxCams, maxRoiPoints) = (System.Math.Max(licenseStatus!.MaxDevices, licenseStatus.MaxSensors), licenseStatus.MaxCameras, licenseStatus.MaxRoiPoints);
 
             if (req.Type.StartsWith("camera"))
             {

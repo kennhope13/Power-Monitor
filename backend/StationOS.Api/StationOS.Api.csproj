@@ -35,4 +35,9 @@
     <None Remove="AI\**" />
   </ItemGroup>
 
+  <!-- Khong copy cac file media/detections/videos/reports local khi publish -->
+  <ItemGroup>
+    <Content Update="wwwroot\media\**;wwwroot\detections\**;wwwroot\videos\**;wwwroot\reports\**" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

@@ -50,7 +50,9 @@ public class LicenseService
         _scopeFactory = scopeFactory;
         _env = env;
         _logger = logger;
-        _licenseRoot = Path.Combine(_env.ContentRootPath, "Licenses");
+        _licenseRoot = Environment.GetEnvironmentVariable("STATIONOS_LICENSE_ROOT")
+                        ?? config["License:RootPath"]
+                        ?? Path.Combine(_env.ContentRootPath, "Licenses");
 
         _vendorSecret = Environment.GetEnvironmentVariable("STATIONOS_VENDOR_SECRET")
                         ?? config["License:VendorSecret"];

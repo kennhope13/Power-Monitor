@@ -224,11 +224,7 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
               <button className="modal-close-btn" onClick={() => setAutoConfigTarget(null)}><X size={20} /></button>
             </div>
             <div className="modal-body">
-              {!canCreateNewDevice && (
-                <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--admin-danger)', fontSize: '.78rem', fontWeight: 700 }}>
-                  Cần license để thêm thiết bị mới.
-                </div>
-              )}
+
               <div style={{ marginBottom: 14, padding: '8px 12px', background: 'var(--admin-layer-2)', border: '1px solid var(--admin-border)', fontSize: '.8rem', color: 'var(--admin-text-muted)' }}>
                 IP: <b style={{ color: 'var(--admin-text)' }}>{autoConfigTarget.ip}</b> — Hệ thống sẽ tự detect capabilities qua ISAPI và tạo đúng số bản ghi.
               </div>
