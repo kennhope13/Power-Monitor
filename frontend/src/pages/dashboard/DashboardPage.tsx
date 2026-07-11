@@ -652,8 +652,12 @@ export default function DashboardPage() {
                 >
                   {Object.entries(camOptionsGroups).map(([zone, opts]) => (
                     opts.length > 0 ? (
-                      <optgroup key={zone} label={zone}>
-                        {opts.map(opt => <option key={opt.id} value={opt.id} title={opt.title}>{opt.label}</option>)}
+                      <optgroup key={zone} label={zone} style={{ background: 'var(--admin-border, #1e293b)', color: 'var(--admin-text, #fff)' }}>
+                        {opts.map(opt => (
+                          <option key={opt.id} value={opt.id} title={opt.title} style={{ background: 'var(--admin-border, #1e293b)', color: 'var(--admin-text, #fff)' }}>
+                            {opt.label}
+                          </option>
+                        ))}
                       </optgroup>
                     ) : null
                   ))}

@@ -608,6 +608,28 @@ public static class DbInitializer
             return;
         }
 
+        // Copy the physical seed SVG file if running in custom web root mode
+        var seedFileName = "7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg";
+        var sourcePath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "sld", seedFileName);
+        var customWebRoot = Environment.GetEnvironmentVariable("STATIONOS_WEB_ROOT");
+        if (!string.IsNullOrEmpty(customWebRoot) && System.IO.File.Exists(sourcePath))
+        {
+            var destPath = Path.Combine(customWebRoot, "sld", seedFileName);
+            if (!System.IO.File.Exists(destPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.Combine(customWebRoot, "sld"));
+                    System.IO.File.Copy(sourcePath, destPath, overwrite: true);
+                    Console.WriteLine($"[SeedSLD] Copied seed SVG to {destPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SeedSLD] Error copying seed SVG: {ex.Message}");
+                }
+            }
+        }
+
         // Check if active SldFile already exists
         var activeSld = await db.SldFiles.FirstOrDefaultAsync(f => f.StationId == station.Id && f.IsActive);
         if (activeSld == null)

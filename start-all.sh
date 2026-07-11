@@ -28,11 +28,10 @@ for port in 5173 5000 8100; do
     fi
 done
 
-# Giải phóng thêm các tiến trình build / compiler bị kẹt của dotnet
-echo "  → Dọn dẹp các tiến trình compiler/dotnet dư thừa..."
-pkill -9 -f "VBCSCompiler" 2>/dev/null || true
-pkill -9 -f "MSBuild" 2>/dev/null || true
-pkill -9 -f "StationOS.Api" 2>/dev/null || true
+# Không dùng pkill theo tên StationOS.Api: thao tác đó sẽ giết cả backend
+# trạm tổng đang chạy ở port 6000. Vòng lặp phía trên đã dừng chính xác
+# backend trạm con theo port 5000.
+echo "  → Chỉ dọn các tiến trình thuộc port của trạm con."
 
 if command -v docker &> /dev/null; then
     # Chỉ dọn dẹp container nếu docker daemon đang chạy
@@ -59,7 +58,11 @@ fi
 
 # 3. Khởi động Video Streaming (go2rtc)
 echo "[3/4] Khởi động go2rtc Video Streamer..."
-kill -9 $(pgrep -f "go2rtc") >/dev/null 2>&1 || true
+# Chỉ dừng go2rtc của trạm con; không ảnh hưởng go2rtc trạm tổng port 2984.
+GO2RTC_PIDS=$(lsof -ti TCP:1984 -sTCP:LISTEN 2>/dev/null || true)
+if [ -n "$GO2RTC_PIDS" ]; then
+    echo "$GO2RTC_PIDS" | xargs kill -9 >/dev/null 2>&1 || true
+fi
 if command -v docker &> /dev/null; then
     sudo docker rm -f stationos-go2rtc-monitor >/dev/null 2>&1 || true
 fi
