@@ -35,6 +35,7 @@
     color: var(--admin-text-muted);
     border-bottom: 1px solid var(--admin-border);
     background: var(--admin-layer-1);
+    white-space: nowrap;
 }
 
 .data-table tbody td {
@@ -247,6 +248,30 @@
 
 .btn-industrial.btn-sm::before, .btn-industrial.btn-sm::after {
     width: 6px; height: 6px;
+}
+
+.btn-industrial.btn-back {
+    color: var(--admin-accent);
+    border-color: color-mix(in srgb, var(--admin-accent) 35%, transparent);
+    background: color-mix(in srgb, var(--admin-accent) 6%, transparent);
+    letter-spacing: 1.5px;
+}
+
+.btn-industrial.btn-back::before, .btn-industrial.btn-back::after {
+    opacity: 0.45;
+    border-color: var(--admin-accent);
+}
+
+.btn-industrial.btn-back:hover {
+    background: color-mix(in srgb, var(--admin-accent) 18%, transparent);
+    border-color: var(--admin-accent);
+    color: var(--admin-accent) !important;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--admin-accent) 30%, transparent);
+    transform: translateY(-1px);
+}
+
+.btn-industrial.btn-back:hover::before, .btn-industrial.btn-back:hover::after {
+    opacity: 1;
 }
 
 /* ── Form Elements ──────────────────────────────────────── */

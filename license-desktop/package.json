@@ -1,0 +1,51 @@
+{
+  "name": "stationos-license-generator",
+  "version": "1.0.0",
+  "description": "StationOS Giftcode Bản Quyền Generator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --linux AppImage",
+    "build-deb": "electron-builder --linux deb"
+  },
+  "build": {
+    "appId": "com.stationos.license-generator",
+    "productName": "StationOS License Generator",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "icon.png",
+      "category": "Utility"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icon.png",
+      "!node_modules/**/*",
+      "node_modules/electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../scratch/generate_license_streamlit.py",
+        "to": "generate_license_streamlit.py"
+      },
+      {
+        "from": "../scratch/generated_keys.json",
+        "to": "generated_keys.json"
+      }
+    ]
+  },
+  "keywords": [
+    "stationos",
+    "license",
+    "giftcode"
+  ],
+  "author": "StationOS",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  }
+}

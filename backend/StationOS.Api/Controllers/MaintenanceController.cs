@@ -18,6 +18,7 @@ using StationOS.Data;
 using StationOS.Data.Entities;
 using Microsoft.Extensions.Logging;
 using StationOS.Services;
+using System.Security.Claims;
 
 namespace StationOS.Api.Controllers;
 
@@ -35,6 +36,12 @@ public class MaintenanceController : ControllerBase
         _db = db;
         _email = email;
         _logger = logger;
+    }
+
+    private bool CanManageMaintenance()
+    {
+        // Trạm con không được phép tự tạo/sửa/xóa lịch bảo trì (chỉ đồng bộ từ trạm tổng)
+        return false;
     }
 
     // ── GET /api/v1/maintenance ──────────────────────────────
@@ -82,6 +89,11 @@ public class MaintenanceController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateMaintenanceRequest req)
     {
+        if (!CanManageMaintenance())
+        {
+            return StatusCode(403, new { message = "Trạm con không được phép tự tạo lịch bảo trì. Chức năng này chỉ được thực hiện từ Trạm Tổng." });
+        }
+
         var task = new MaintenanceTask
         {
             StationId     = req.StationId,
@@ -97,6 +109,15 @@ public class MaintenanceController : ControllerBase
         };
 
         _db.MaintenanceTasks.Add(task);
+        _db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+        {
+            EntityType = "MaintenanceTask",
+            EntityId   = task.Id,
+            Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                task.Id, task.StationId, task.DeviceId, task.Title, task.Type,
+                task.ScheduledDate, task.AssignedTo, task.Notes, task.Status, task.CreatedAt,
+            }),
+        });
         await _db.SaveChangesAsync();
 
         await SendMaintenanceEmailIfNeededAsync(task, req.SendEmail);
@@ -119,6 +140,11 @@ public class MaintenanceController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateMaintenanceRequest req)
     {
+        if (!CanManageMaintenance())
+        {
+            return StatusCode(403, new { message = "Trạm con không được phép tự cập nhật lịch bảo trì. Chức năng này chỉ được thực hiện từ Trạm Tổng." });
+        }
+
         var task = await _db.MaintenanceTasks.FindAsync(id);
         if (task == null) return NotFound(new { message = "Không tìm thấy task" });
 
@@ -130,6 +156,16 @@ public class MaintenanceController : ControllerBase
         if (req.Checklist != null)     task.Checklist     = req.Checklist;
         if (req.Status != null)        task.Status        = req.Status;
 
+        _db.SyncQueues.Add(new StationOS.Data.Entities.SyncQueue
+        {
+            EntityType = "MaintenanceTask",
+            EntityId   = task.Id,
+            Payload    = System.Text.Json.JsonSerializer.Serialize(new {
+                task.Id, task.StationId, task.DeviceId, task.Title, task.Type,
+                task.ScheduledDate, task.AssignedTo, task.Notes, task.Status,
+                task.CreatedAt, task.CompletedAt,
+            }),
+        });
         await _db.SaveChangesAsync();
 
         await SendMaintenanceEmailIfNeededAsync(task, req.SendEmail);
@@ -197,6 +233,11 @@ public class MaintenanceController : ControllerBase
     [Authorize(Roles = "admin,manager")]
     public async Task<IActionResult> Delete(Guid id)
     {
+        if (!CanManageMaintenance())
+        {
+            return StatusCode(403, new { message = "Trạm con không được phép tự xóa lịch bảo trì. Chức năng này chỉ được thực hiện từ Trạm Tổng." });
+        }
+
         var task = await _db.MaintenanceTasks.FindAsync(id);
         if (task == null) return NotFound(new { message = "Không tìm thấy task" });
 
@@ -277,6 +318,11 @@ public class MaintenanceController : ControllerBase
     [HttpPost("from-alert/{alertId:guid}")]
     public async Task<IActionResult> CreateFromAlert(Guid alertId)
     {
+        if (!CanManageMaintenance())
+        {
+            return StatusCode(403, new { message = "Trạm con không được phép tự tạo lịch bảo trì từ cảnh báo. Chức năng này chỉ được thực hiện từ Trạm Tổng." });
+        }
+
         var alert = await _db.Alerts.FindAsync(alertId);
         if (alert == null) return NotFound(new { message = "Không tìm thấy alert" });
 

@@ -6,17 +6,21 @@
 // ============================================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
-import { Calendar, RefreshCw, Play, Camera } from 'lucide-react';
+import DateRangePicker from '@/components/ui/DateRangePicker';
+import { Play, Camera, Download, ChevronDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { stationApi, AlertItem, AlertHistoryEntry } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore, useAlertStore } from '@/store';
 import { ALERT_STATUS, ALERT_LEVEL, alertStatusLabel, alertLevelLabel } from '@/types/enums';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '@/services/realtime.service';
 import { fmtDateTime } from '@/utils/format';
 import { confirmDialog } from '@/utils/confirm';
+import { showToast } from '@/utils/toast';
 import { GO2RTC_URL } from '@/utils/env';
 import { authService } from '@/services/AuthService';
+import * as XLSX from 'xlsx';
 import './AlertsHistoryPage.css';
 
 type SortCol = 'time' | 'level';
@@ -29,8 +33,17 @@ type AlertDetail = AlertItem & { history: AlertHistoryEntry[] };
  */
 const getAlertSummary = (msg: string) => {
   if (!msg) return "";
+  
+  // Loại bỏ các emoji (như 🚨) khỏi phần tóm tắt để giao diện sạch hơn
+  let clean = msg.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').replace(/\p{Emoji_Presentation}/gu, '');
+  
   // Xóa phần nguồn [DEVICE] nếu có vì đã có nhãn riêng
-  let clean = msg.replace(/^\[.*?\]\s*/, '');
+  clean = clean.replace(/^\[.*?\]\s*/, '');
+
+  // Rút gọn phần địa điểm/vị trí chi tiết để chỉ hiển thị hành vi chính ở danh sách
+  if (clean.includes(' tại khu vực ')) {
+    clean = clean.split(' tại khu vực ')[0] || '';
+  }
   
   // Nếu là cảnh báo nhiệt độ: "Vùng/Điểm Tên: 32.0°C — chi tiết..." -> Lấy trước dấu "—"
   if (clean.includes(' — ')) {
@@ -44,7 +57,68 @@ const getAlertSummary = (msg: string) => {
     clean = (clean.split('.')[0] || '') + '.';
   }
 
-  return clean;
+  return clean.trim();
+};
+
+type ParsedAlertDisplay = {
+  eyebrow?: string;
+  headline: string;
+  detail?: string;
+  tone?: 'alarm' | 'warning' | 'info';
+};
+
+const isMaintenanceAlert = (msg: string) => /^\[MT:.*?\]/i.test(msg || '');
+
+const parseAlertDisplay = (msg: string): ParsedAlertDisplay => {
+  if (!msg) {
+    return { headline: '' };
+  }
+
+  const match = msg.match(/^\[(.*?)\]\s*(.*)$/);
+  const tag = match?.[1];
+  const body = match?.[2] || msg;
+  const cleanBody = getAlertSummary(body);
+
+  if (tag?.startsWith('MT:')) {
+    const overdue = body.match(/^Bảo trì quá hạn\s+(\d+)\s+ngày:\s*(.*)$/i);
+    if (overdue) {
+      return {
+        eyebrow: `QUÁ HẠN ${overdue[1]} NGÀY`,
+        headline: overdue[2] || 'Hạng mục bảo trì',
+        detail: 'Cần kiểm tra và xử lý ngay',
+        tone: 'alarm',
+      };
+    }
+
+    const dueToday = body.match(/^Hôm nay phải bảo trì:\s*(.*)$/i);
+    if (dueToday) {
+      return {
+        eyebrow: 'ĐẾN HẠN HÔM NAY',
+        headline: dueToday[1] || 'Hạng mục bảo trì',
+        detail: 'Nhắc lịch bảo trì định kỳ',
+        tone: 'warning',
+      };
+    }
+
+    return {
+      eyebrow: 'BẢO TRÌ',
+      headline: cleanBody,
+      tone: 'warning',
+    };
+  }
+
+  if (match) {
+    return {
+      eyebrow: tag,
+      headline: cleanBody,
+      tone: 'info',
+    };
+  }
+
+  return {
+    headline: cleanBody,
+    tone: 'info',
+  };
 };
 
 /**
@@ -64,7 +138,8 @@ export default function AlertsHistoryPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
-  const [timeRange, setTimeRange] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [sortBy, setSortBy] = useState<SortCol>('time');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -83,21 +158,15 @@ export default function AlertsHistoryPage() {
   const ackAlertInStore = useAlertStore(s => s.ack);
   const closeAlertInStore = useAlertStore(s => s.close);
   const [filterDevice, setFilterDevice] = useState('');
+  const [downloadDropdownOpen, setDownloadDropdownOpen] = useState(false);
+  const downloadDropdownRef = React.useRef<HTMLDivElement>(null);
+  const downloadMenuRef = React.useRef<HTMLDivElement>(null);
+  const [downloadMenuPos, setDownloadMenuPos] = useState({ top: 0, left: 0, width: 0 });
 
-  // Bộ lọc nâng cao — loại sự kiện và cấp độ
+  // Bộ lọc nâng cao — loại sự kiện, cấp độ và nguồn hành động
   const [filterType, setFilterType] = useState('');
   const [filterLevel, setFilterLevel] = useState('');
-
-  // Modal chọn khoảng ngày tùy chỉnh
-  const [dateModalOpen, setDateModalOpen] = useState(false);
-
-  // Khoảng thời gian mặc định: Tất cả lịch sử
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-
-  // Giá trị tạm trong modal (chưa áp dụng cho đến khi bấm Xác nhận)
-  const [tempStartDate, setTempStartDate] = useState('');
-  const [tempEndDate, setTempEndDate] = useState('');
+  const [filterSource, setFilterSource] = useState('');
 
   // Load devices list on mount (qua store — chia sẻ với các page khác)
   useEffect(() => {
@@ -105,35 +174,6 @@ export default function AlertsHistoryPage() {
       stations.forEach(s => fetchDevices(s.id));
     }).catch(e => console.error("Lỗi tải stations/devices:", e));
   }, [fetchStations, fetchDevices]);
-
-  // Presets trigger date changes
-  useEffect(() => {
-    if (timeRange === 'custom') return;
-    const now = new Date();
-    let start = new Date();
-    if (timeRange === 'today') {
-      // start is today
-    } else if (timeRange === 'yesterday') {
-      start.setDate(now.getDate() - 1);
-      now.setDate(now.getDate() - 1);
-    } else if (timeRange === '7d') {
-      start.setDate(now.getDate() - 7);
-    } else if (timeRange === '30d') {
-      start.setDate(now.getDate() - 30);
-    } else if (timeRange === 'all') {
-      setStartDate('');
-      setEndDate('');
-      return;
-    }
-    setStartDate(start.toISOString().split('T')[0] ?? '');
-    setEndDate(now.toISOString().split('T')[0] ?? '');
-  }, [timeRange]);
-
-  // Sync temp dates when main dates are set
-  useEffect(() => {
-    setTempStartDate(startDate);
-    setTempEndDate(endDate);
-  }, [startDate, endDate]);
 
   // Ack modal state
   const [ackModalOpen, setAckModalOpen] = useState(false);
@@ -144,7 +184,6 @@ export default function AlertsHistoryPage() {
   const loadAlerts = useCallback(async () => {
     setLoading(true);
     try {
-      // Chuyển ngày text sang ISO để gửi API
       const from = startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined;
       const to = endDate ? new Date(endDate + 'T23:59:59').toISOString() : undefined;
       const data = await stationApi.getAlerts(filterStatus || undefined, from, to);
@@ -160,9 +199,46 @@ export default function AlertsHistoryPage() {
     loadAlerts();
   }, [loadAlerts]);
 
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!downloadDropdownRef.current) return;
+      if (downloadDropdownRef.current.contains(target)) return;
+      if (downloadMenuRef.current?.contains(target)) return;
+      if (!downloadDropdownRef.current.contains(target)) {
+        setDownloadDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  useEffect(() => {
+    if (!downloadDropdownOpen || !downloadDropdownRef.current) return;
+
+    const updateMenuPos = () => {
+      const trigger = downloadDropdownRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setDownloadMenuPos({
+        top: rect.bottom + 6,
+        left: rect.right - Math.max(rect.width, 170),
+        width: Math.max(rect.width, 170),
+      });
+    };
+
+    updateMenuPos();
+    window.addEventListener('resize', updateMenuPos);
+    window.addEventListener('scroll', updateMenuPos, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuPos);
+      window.removeEventListener('scroll', updateMenuPos, true);
+    };
+  }, [downloadDropdownOpen]);
+
   // Realtime
   useEffect(() => {
-    const hubConnection = createRealtimeHub();
+    const hubConnection = getRealtimeHub();
 
     hubConnection.on('AlertNew', (alert: any) => {
       const aid = alert.id || alert.Id;
@@ -202,8 +278,11 @@ export default function AlertsHistoryPage() {
       }
     });
 
-    hubConnection.start().catch((err: any) => console.warn('SignalR start error:', err));
-    return () => { hubConnection.stop(); };
+    startRealtimeHub().catch((err: any) => console.warn('SignalR start error:', err));
+    return () => { 
+      hubConnection.off('AlertNew');
+      hubConnection.off('AlertUpdated');
+    };
   }, [filterStatus, selectedId]);
 
   // Load detail automatically if alertId in query string
@@ -263,8 +342,20 @@ export default function AlertsHistoryPage() {
     if (selectedId === id) loadDetail(selectedId);
   };
 
+  /** Gửi cảnh báo thủ công lên trạm tổng. */
+  const handleSendCentral = async (id: string) => {
+    try {
+      await stationApi.sendAlertCentral(id);
+      showToast('Đã gửi cảnh báo lên trạm tổng thành công.', 'success');
+    } catch (err: any) {
+      console.warn('[AlertsHistory] Gửi trạm tổng thất bại:', err);
+      const msg = err?.message || 'Không thể kết nối hoặc gửi lên trạm tổng.';
+      showToast(msg, 'error');
+    }
+  };
+
   /** Xuất danh sách cảnh báo hiện tại ra file CSV và kích hoạt tải về. */
-  const exportCsv = () => {
+  const exportCsvServer = () => {
     const opts = {
       status: filterStatus || undefined,
       from: startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined,
@@ -291,17 +382,21 @@ export default function AlertsHistoryPage() {
       result = result.filter(a => a.deviceId === filterDevice);
     }
     if (filterType) {
-      // Lọc theo từ khóa trong nội dung message
       if (filterType === 'nguoi') {
         result = result.filter(a => a.message?.toLowerCase().includes('người') || a.message?.toLowerCase().includes('xâm nhập'));
       } else if (filterType === 'chay') {
         result = result.filter(a => a.message?.toLowerCase().includes('cháy') || a.message?.toLowerCase().includes('khói'));
       } else if (filterType === 'diem') {
         result = result.filter(a => a.message?.toLowerCase().includes('điểm') || a.message?.toLowerCase().includes('nhiệt độ'));
+      } else if (filterType === 'pd') {
+        result = result.filter(a => a.message?.toLowerCase().includes('phóng điện') || a.source === 'partial_discharge' || /\bpd\b/i.test(a.message || ''));
       }
     }
     if (filterLevel) {
       result = result.filter(a => a.level?.toLowerCase() === filterLevel.toLowerCase());
+    }
+    if (filterSource) {
+      result = result.filter(a => a.source === filterSource);
     }
 
     // Thứ tự ưu tiên mức độ: alarm > warning > info
@@ -315,7 +410,78 @@ export default function AlertsHistoryPage() {
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [alerts, filterDevice, filterType, filterLevel, sortBy, sortDir]);
+  }, [alerts, filterDevice, filterType, filterLevel, filterSource, sortBy, sortDir]);
+
+  const exportRows = useMemo(() => {
+    return sortedAlerts.map((a, idx) => ({
+      STT: idx + 1,
+      'Thời gian': fmtDateTime(a.triggeredAt),
+      'Trạm': a.stationName || a.stationId || '',
+      'Thiết bị': devices.find(d => d.id.toLowerCase() === (a.deviceId || '').toLowerCase())?.name || a.deviceId || '',
+      'Nguồn': a.source || '',
+      'Mức độ': alertLevelLabel(a.level || ''),
+      'Trạng thái': alertStatusLabel(a.status || ''),
+      'Điểm': a.pointId || '',
+      'Giá trị': a.value ?? '',
+      'Nội dung': a.message || '',
+    }));
+  }, [sortedAlerts, devices]);
+
+  const exportHeaders = useMemo(() => Object.keys(exportRows[0] || {}), [exportRows]);
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportCsv = () => {
+    const csv = [
+      exportHeaders.map(h => `"${h.replace(/"/g, '""')}"`).join(','),
+      ...exportRows.map(row => exportHeaders.map(h => {
+        const v = (row as Record<string, unknown>)[h];
+        return `"${String(v ?? '').replace(/"/g, '""')}"`;
+      }).join(',')),
+    ].join('\n');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `alerts_${new Date().toISOString().slice(0, 10)}.csv`);
+  };
+
+  const exportXlsx = () => {
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    ws['!cols'] = exportHeaders.map((header) => {
+      const values = exportRows.map(row => String((row as Record<string, unknown>)[header] ?? ''));
+      const maxLen = Math.max(header.length, ...values.map(v => v.length));
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Alerts');
+    XLSX.writeFile(wb, `alerts_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const exportPdf = () => {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nhật ký cảnh báo</title>
+<style>
+  body{font-family:Arial,'Segoe UI',sans-serif;font-size:9pt;margin:20px;color:#111}
+  h1{font-size:13pt;font-weight:900;letter-spacing:2px;margin-bottom:4px}
+  .sub{font-size:8pt;color:#555;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#1e293b;color:#fff;padding:5px 6px;font-size:7.5pt;text-align:left;border:1px solid #334155}
+  td{border:1px solid #cbd5e1;padding:3px 6px;font-size:7.5pt;vertical-align:top}
+  tr:nth-child(even) td{background:#f8fafc}
+  @page{size:A4 landscape;margin:12mm}
+</style></head><body>
+<h1>NHẬT KÝ CẢNH BÁO</h1>
+<div class="sub">Xuất ngày ${dateStr} — Tổng: ${exportRows.length} bản ghi</div>
+<table><thead><tr>${exportHeaders.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${exportRows.map(row => `<tr>${exportHeaders.map(h => `<td>${(row as Record<string,unknown>)[h] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
+</table></body></html>`;
+    const win = window.open('', '_blank');
+    if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
+  };
 
   /** Đổi cột sắp xếp hoặc đảo chiều nếu đang sắp xếp theo cột đó. */
   const handleSort = (col: SortCol) => {
@@ -334,23 +500,11 @@ export default function AlertsHistoryPage() {
           <h2>NHẬT KÝ</h2>
         </div>
         <div className="page-toolbar-group">
-          <div className="page-toolbar-cell" style={{ height: 28 }}>
-            <span className="page-cell-label">LỌC NHANH:</span>
-            <ToolbarSelect
-              value={timeRange}
-              onChange={v => { setTimeRange(v); if (v === 'custom') setDateModalOpen(true); }}
-              options={[
-                { value: 'today', label: 'Hôm nay' },
-                { value: 'yesterday', label: 'Hôm qua' },
-                { value: '7d', label: '7 ngày' },
-                { value: '30d', label: '30 ngày' },
-                { value: 'all', label: 'Tất cả' },
-                { value: 'custom', label: 'Tùy chỉnh' },
-              ]}
-              width={110}
-            />
-            <button className="btn-industrial" style={{ height: 22, width: 22, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.8rem', border: 'none', background: 'transparent', opacity: 0.8 }} title="Chọn ngày" onClick={() => setDateModalOpen(true)}><Calendar size={14} strokeWidth={2} /></button>
-          </div>
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          />
           <div className="page-toolbar-cell" style={{ height: 28 }}>
             <span className="page-cell-label">THIẾT BỊ:</span>
             <ToolbarSelect
@@ -365,8 +519,23 @@ export default function AlertsHistoryPage() {
             <ToolbarSelect
               value={filterType}
               onChange={setFilterType}
-              options={[{ value: '', label: 'Tất cả' }, { value: 'nguoi', label: 'Người' }, { value: 'chay', label: 'Cháy' }, { value: 'diem', label: 'Nhiệt' }]}
+              options={[{ value: '', label: 'Tất cả' }, { value: 'nguoi', label: 'Người' }, { value: 'chay', label: 'Cháy' }, { value: 'diem', label: 'Nhiệt' }, { value: 'pd', label: 'PD' }]}
               width={90}
+            />
+          </div>
+          <div className="page-toolbar-cell" style={{ height: 28 }}>
+            <span className="page-cell-label">HÀNH ĐỘNG:</span>
+            <ToolbarSelect
+              value={filterSource}
+              onChange={setFilterSource}
+              options={[
+                { value: '', label: 'Tất cả' },
+                { value: 'rule_engine', label: 'Quy tắc' },
+                { value: 'ai_detection', label: 'AI' },
+                { value: 'camera', label: 'Camera' },
+                { value: 'manual', label: 'Thủ công' },
+              ]}
+              width={100}
             />
           </div>
           <div className="page-toolbar-cell" style={{ height: 28 }}>
@@ -383,23 +552,51 @@ export default function AlertsHistoryPage() {
             <ToolbarSelect
               value={filterStatus}
               onChange={setFilterStatus}
-              options={[{ value: '', label: 'Tất cả' }, { value: 'open', label: 'Mở' }, { value: 'acked', label: 'Đang XL' }, { value: 'closed', label: 'Đóng' }]}
+              options={[{ value: '', label: 'Tất cả' }, { value: 'open', label: 'Chưa xử lý' }, { value: 'acked', label: 'Đang xử lý' }, { value: 'closed', label: 'Đã xử lý' }]}
               width={90}
             />
           </div>
-          <button 
-            className="btn-industrial" 
-            title="Xuất CSV" 
-            onClick={exportCsv} 
-          >
-            ⬇ CSV
-          </button>
-          <button 
-            className="btn-industrial btn-primary" 
-            onClick={loadAlerts} 
-          >
-            ↺ MỚI
-          </button>
+          <div ref={downloadDropdownRef} style={{ position: 'relative', zIndex: 1000 }}>
+            <button
+              className="btn-industrial btn-primary"
+              title="Xuất dữ liệu"
+              onClick={() => setDownloadDropdownOpen(v => !v)}
+              style={{ height: 28, padding: '0 10px', fontSize: '.72rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              <Download size={14} />
+              <span>XUẤT</span>
+              <ChevronDown size={13} />
+            </button>
+            {downloadDropdownOpen && createPortal(
+              <div
+                ref={downloadMenuRef}
+                className="export-menu"
+                style={{
+                  position: 'fixed',
+                  top: downloadMenuPos.top,
+                  left: downloadMenuPos.left,
+                  width: downloadMenuPos.width,
+                  minWidth: 170,
+                  background: 'var(--admin-panel)',
+                  border: '1px solid var(--admin-border)',
+                  boxShadow: '0 14px 30px rgba(0,0,0,.45)',
+                  zIndex: 99999,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportXlsx(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileSpreadsheet size={14} /> Xuất XLSX
+                </button>
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportCsv(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileText size={14} /> Xuất CSV
+                </button>
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportPdf(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                  <FileText size={14} /> Xuất PDF
+                </button>
+              </div>,
+              document.body
+            )}
+          </div>
         </div>
       </div>
 
@@ -429,6 +626,10 @@ export default function AlertsHistoryPage() {
                 <div style={{ textAlign: 'center', color: 'var(--admin-text-muted)', padding: 40 }}>Không có cảnh báo trong khoảng thời gian này.</div>
               ) : (
                 sortedAlerts.map(a => (
+                  (() => {
+                    const parsed = parseAlertDisplay(a.message);
+                    const maintenanceAlert = isMaintenanceAlert(a.message);
+                    return (
                   <div 
                     key={a.id} 
                     className={`ah-grid-row ${a.id === selectedId ? 'ah-selected' : ''}`}
@@ -452,6 +653,10 @@ export default function AlertsHistoryPage() {
                         <div style={{ position: 'relative', width: 50, height: 36, background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-accent)' }}>
                           <Play size={14} fill="currentColor" />
                         </div>
+                      ) : maintenanceAlert ? (
+                        <div className="ah-media-empty" aria-label="Cảnh báo bảo trì không có hình ảnh">
+                          -
+                        </div>
                       ) : (
                         <div style={{ width: 50, height: 36, background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)', fontSize: '0.45rem', fontWeight: 900 }}>N/A</div>
                       )}
@@ -473,20 +678,21 @@ export default function AlertsHistoryPage() {
                     {/* COL 4: NỘI DUNG */}
                     <div className="ah-msg-cell">
                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                         {a.message.startsWith('[') ? (() => {
-                           const match = a.message.match(/^\[(.*?)\]\s*(.*)$/);
-                           if (match) return (
-                             <div style={{ flex: 1, minWidth: 0 }}>
-                               <div className="ah-msg-label">{match[1]}</div>
-                               <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                 {getAlertSummary(match[2] || '')}
-                               </div>
+                         <div style={{ flex: 1, minWidth: 0 }}>
+                           {parsed.eyebrow && (
+                             <div className="ah-msg-topline">
+                               <span className={`ah-msg-chip ah-msg-chip-${parsed.tone || 'info'}`}>{parsed.eyebrow}</span>
                              </div>
-                           );
-                           return <div className="ah-msg-body" style={{ flex: 1 }}>{getAlertSummary(a.message)}</div>;
-                         })() : (
-                           <div className="ah-msg-body" style={{ flex: 1 }}>{getAlertSummary(a.message)}</div>
-                         )}
+                           )}
+                           <div className="ah-msg-body" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={parsed.headline}>
+                             {parsed.headline}
+                           </div>
+                           {parsed.detail && (
+                             <div className="ah-msg-detail" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={parsed.detail}>
+                               {parsed.detail}
+                             </div>
+                           )}
+                         </div>
                          
                          {a.videoUrl && (
                            <span style={{ 
@@ -520,10 +726,12 @@ export default function AlertsHistoryPage() {
                       ) : a.status === ALERT_STATUS.ACKED ? (
                         <button className="btn-industrial btn-sm" style={{ height: 26, fontSize: '.65rem', padding: '0 10px' }} onClick={(e) => handleCloseAlert(e, a.id)}>Đóng</button>
                       ) : (
-                        <div style={{ width: 14, height: 14, background: 'var(--admin-success)', opacity: .3 }}></div>
+                        <div style={{ color: '#10B981', fontSize: '1rem', fontWeight: 900, lineHeight: 1 }} aria-label="Đã xử lý">✓</div>
                       )}
                     </div>
                   </div>
+                    );
+                  })()
                 ))
               )}
             </div>
@@ -550,56 +758,13 @@ export default function AlertsHistoryPage() {
                 onClose={() => setSelectedId('')} 
                 onAck={() => handleAckClick({ stopPropagation: () => {} } as any, detailData.id)}
                 onCloseAlert={() => handleCloseAlert({ stopPropagation: () => {} } as any, detailData.id)}
-                onRefresh={() => loadDetail(detailData.id, true)}
+                onSendCentral={() => handleSendCentral(detailData.id)}
                 devices={devices}
               />
             )}
           </div>
         </div>
       </div>
-
-      {/* Custom Date Picker Modal */}
-      {dateModalOpen && (
-        <div className="modal-overlay active" onClick={() => setDateModalOpen(false)}>
-          <div className="modal-content" style={{ width: 340 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 style={{ margin: 0, fontSize: '.9rem', fontWeight: 800, letterSpacing: '.5px' }}>CHỌN KHOẢNG THỜI GIAN</h3>
-              <button className="modal-close-btn" onClick={() => setDateModalOpen(false)}></button>
-            </div>
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="form-group">
-                <label style={{ fontSize: '.7rem', fontWeight: 'bold', color: 'var(--admin-text-muted)' }}>TỪ NGÀY:</label>
-                <input 
-                  type="date" 
-                  className="form-input" 
-                  style={{ width: '100%', height: 32, fontSize: '.8rem', fontFamily: 'monospace' }} 
-                  value={tempStartDate} 
-                  onChange={e => setTempStartDate(e.target.value)} 
-                />
-              </div>
-              <div className="form-group">
-                <label style={{ fontSize: '.7rem', fontWeight: 'bold', color: 'var(--admin-text-muted)' }}>ĐẾN NGÀY:</label>
-                <input 
-                  type="date" 
-                  className="form-input" 
-                  style={{ width: '100%', height: 32, fontSize: '.8rem', fontFamily: 'monospace' }} 
-                  value={tempEndDate} 
-                  onChange={e => setTempEndDate(e.target.value)} 
-                />
-              </div>
-            </div>
-            <div className="modal-footer" style={{ display: 'flex', gap: 8 }}>
-              <button className="btn-industrial" style={{ flex: 1 }} onClick={() => setDateModalOpen(false)}>HỦY</button>
-              <button className="btn-industrial btn-primary" style={{ flex: 1 }} onClick={() => {
-                setStartDate(tempStartDate);
-                setEndDate(tempEndDate);
-                setTimeRange('custom');
-                setDateModalOpen(false);
-              }}>ÁP DỤNG</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ACK Modal */}
       {ackModalOpen && (
@@ -630,12 +795,12 @@ export default function AlertsHistoryPage() {
  * Panel chi tiết một cảnh báo: hiển thị ảnh/video bằng chứng,
  * thông tin cảnh báo và timeline lịch sử xử lý.
  */
-function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onRefresh?: () => void, devices?: any[] }) {
+function AlertDetailView({ data, onClose, onAck, onCloseAlert, onSendCentral, devices = [] }: { data: AlertDetail, onClose: () => void, onAck: () => void, onCloseAlert: () => void, onSendCentral: () => void, devices?: any[] }) {
   const isAlarm = data.level === 'alarm';
   const accentColor = isAlarm ? '#EF4444' : '#F59E0B';
   const levelText = isAlarm ? 'BÁO ĐỘNG' : 'CẢNH BÁO';
 
-  const statusLabel: Record<string, string> = { open: 'Chưa xử lý', acked: 'Đang xử lý', closed: 'Đã đóng' };
+  const statusLabel: Record<string, string> = { open: 'Chưa xử lý', acked: 'Đang xử lý', closed: 'Đã xử lý' };
   const sourceLabel: Record<string, string> = { rule_engine: 'Hệ thống quy tắc', ai_detection: 'Phân tích AI', manual: 'Nhập thủ công', camera: 'Giám sát Camera' };
 
   // Phân tích tọa độ vùng từ metadata (hỗ trợ cả Point và ROI)
@@ -698,12 +863,7 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
         <span style={{ fontWeight: 900, fontSize: '0.85rem', color: 'var(--admin-text)', letterSpacing: '1px', textTransform: 'uppercase' }}>{levelText} CHI TIẾT</span>
         <span style={{ fontFamily: 'var(--admin-font-mono)', fontSize: '0.65rem', opacity: 0.5, flex: 1, textAlign: 'right', paddingRight: 12 }}>ID: {data.id.slice(0, 8)}</span>
         
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onRefresh} title="Cập nhật">
-            <RefreshCw size={12} />
-          </button>
-          <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onClose}>✕</button>
-        </div>
+        <button className="btn-industrial" style={{ width: 28, height: 24, padding: 0, border: '1px solid var(--admin-border)', background: 'var(--admin-layer-2)' }} onClick={onClose}>✕</button>
       </div>
 
       <div className="ah-detail-scroll">
@@ -868,7 +1028,7 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
               <div className="ah-info-item highlight" style={{ borderLeft: '4px solid var(--admin-accent)' }}>
                 <span className="ah-info-key" style={{ color: 'var(--admin-accent)' }}>Giá trị đo lường</span>
                 <span className="ah-info-val" style={{ fontSize: '1.2rem', color: accentColor }}>
-                  {data.value.toFixed(2)}
+                  {unit === 'NGƯỜI' ? Math.round(data.value) : data.value.toFixed(2)}
                   <small style={{ fontSize: '0.7rem', marginLeft: 6, opacity: 0.5 }}>{unit}</small>
                 </span>
               </div>
@@ -908,12 +1068,19 @@ function AlertDetailView({ data, onClose, onAck, onCloseAlert, onRefresh, device
         </div>
       </div>
 
-      <div className="ah-actions-footer">
+      <div className="ah-actions-footer" style={{ gap: 8 }}>
+        <button 
+          className="ah-btn-footer" 
+          style={{ background: 'var(--admin-layer-2)', color: 'var(--admin-accent)', border: '1px solid var(--admin-border)', flex: 1 }} 
+          onClick={onSendCentral}
+        >
+          🛜 Gửi trạm tổng
+        </button>
         {data.status !== 'closed' && (
-          <button className="ah-btn-footer ah-btn-footer-danger" onClick={onCloseAlert}>Đóng cảnh báo</button>
+          <button className="ah-btn-footer ah-btn-footer-danger" style={{ flex: 1 }} onClick={onCloseAlert}>Đóng cảnh báo</button>
         )}
         {data.status === 'open' && (
-          <button className="ah-btn-footer ah-btn-footer-primary" onClick={onAck}>Tiếp nhận xử lý</button>
+          <button className="ah-btn-footer ah-btn-footer-primary" style={{ flex: 1 }} onClick={onAck}>Tiếp nhận xử lý</button>
         )}
       </div>
     </div>

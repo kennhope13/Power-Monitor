@@ -4,9 +4,11 @@
 // Điều hướng lọc theo vai trò người dùng (admin / manager / operator)
 // ============================================================
 
-import { useEffect, useState, Suspense, useRef, useCallback } from 'react';
+import { useEffect, useState, Suspense, useRef, useCallback, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '@/services/AuthService';
+import { useAuthStore } from '@/store/authStore';
+import { apiFetch } from '@/services/api/BaseApiService';
 import { useAlertStore, useSensorStore, useStationStore } from '@/store';
 import { ALERT_STATUS } from '@/types/enums';
 import type { AlertItem, SensorPoint } from '@/types/api.types';
@@ -14,12 +16,13 @@ import { setTheme as setGlobalTheme } from '@/utils/theme-manager';
 import { showToast } from '@/utils/toast';
 import { playAlertSound } from '@/utils/sound-utils';
 import { isCentralUser as isCentralUserAccount, MULTISITE_RETURN_TAB_KEY } from '@/utils/centralAccess';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getDisplayStationName, getStoredStationName, hasStoredServerIp } from '@/utils/station-setup';
+import { getRealtimeHub, startRealtimeHub, stopRealtimeHub } from '@/services/realtime.service';
 import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
-  LayoutDashboard, Video, AlertTriangle, LineChart, FileText,
-  Wrench, FileArchive, Map, Radio, Users, Settings, LogOut,
-  ChevronLeft, ChevronRight
+  LayoutDashboard, Video, AlertTriangle, LineChart,
+  Wrench, FileArchive, Map, Radio, Settings, LogOut,
+  ChevronLeft, ChevronRight, Key, Lock
 } from 'lucide-react';
 
 interface NavSubItem { id: string; path: string; label: string }
@@ -29,27 +32,22 @@ interface NavItem { id: string; path: string; icon: React.ReactNode; label: stri
 const CENTRAL_NAV: NavItem[] = [
   { id: 'multisite', path: '/multisite', icon: <Map size={19} strokeWidth={1.5} />, label: 'Tổng quan' },
   { id: 'alerts-history', path: '/alerts-history', icon: <AlertTriangle size={19} strokeWidth={1.5} />, label: 'Nhật ký' },
-  { id: 'reports', path: '/reports', icon: <FileText size={19} strokeWidth={1.5} />, label: 'Báo cáo', roles: ['admin', 'manager'] },
   { id: 'audit-log', path: '/audit-log', icon: <FileArchive size={19} strokeWidth={1.5} />, label: 'Nhật ký hệ thống', roles: ['admin'] },
 ];
 
-const CENTRAL_ADMIN_NAV: NavItem[] = [
-  { id: 'user-management', path: '/user-management', icon: <Users size={19} strokeWidth={1.5} />, label: 'Người dùng', roles: ['admin'] },
-];
+const CENTRAL_ADMIN_NAV: NavItem[] = [];
 
 const CHILD_NAV: NavItem[] = [
   { id: 'dashboard', path: '/dashboard', icon: <LayoutDashboard size={19} strokeWidth={1.5} />, label: 'Tổng quan' },
   { id: 'realtime', path: '/realtime', icon: <Video size={19} strokeWidth={1.5} />, label: 'Trực tiếp' },
-  { id: 'alerts-history', path: '/alerts-history', icon: <AlertTriangle size={19} strokeWidth={1.5} />, label: 'Lịch sử hệ thống' },
+  { id: 'alerts-history', path: '/alerts-history', icon: <AlertTriangle size={19} strokeWidth={1.5} />, label: 'Lịch sử cảnh báo' },
   { id: 'analytics', path: '/analytics', icon: <LineChart size={19} strokeWidth={1.5} />, label: 'Phân tích' },
-  { id: 'reports', path: '/reports', icon: <FileText size={19} strokeWidth={1.5} />, label: 'Báo cáo', roles: ['admin', 'manager'] },
   { id: 'maintenance', path: '/maintenance', icon: <Wrench size={19} strokeWidth={1.5} />, label: 'Bảo trì', roles: ['admin', 'manager'] },
   { id: 'audit-log', path: '/audit-log', icon: <FileArchive size={19} strokeWidth={1.5} />, label: 'Nhật ký hệ thống', roles: ['admin'] },
 ];
 
 const CHILD_ADMIN_NAV: NavItem[] = [
   { id: 'device-management', path: '/device-management', icon: <Radio size={19} strokeWidth={1.5} />, label: 'Thiết bị', roles: ['admin'] },
-  { id: 'user-management', path: '/user-management', icon: <Users size={19} strokeWidth={1.5} />, label: 'Người dùng', roles: ['admin'] },
   { id: 'settings', path: '/settings', icon: <Settings size={19} strokeWidth={1.5} />, label: 'Cài đặt', roles: ['admin'] },
 ];
 
@@ -75,7 +73,8 @@ const isFireAlert = (alert: AlertItem) => {
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const user = authService.getUser();
+  const user = useAuthStore(s => s.user);
+  const [stationConfigVersion, setStationConfigVersion] = useState(0);
 
   // ── Security Check ──
   useEffect(() => {
@@ -84,10 +83,41 @@ export default function AppShell() {
     }
   }, [user, navigate]);
 
+  // ── Session Validity Polling ──
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      try {
+        await apiFetch('/stations');
+      } catch (err) {
+        console.warn('Session validity check failed:', err);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  useEffect(() => {
+    const refreshStationConfig = () => setStationConfigVersion(v => v + 1);
+    window.addEventListener('station-config-updated', refreshStationConfig);
+    window.addEventListener('storage', refreshStationConfig);
+    return () => {
+      window.removeEventListener('station-config-updated', refreshStationConfig);
+      window.removeEventListener('storage', refreshStationConfig);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (isCentralUserAccount(user)) return;
+    useStationStore.getState().fetch(true).catch(() => undefined);
+  }, [user]);
+
   if (!user) return null;
 
   // Trạm tổng = tài khoản 'multi' HOẶC admin không bị giới hạn trạm (không có station_ids)
   const isCentralUser = isCentralUserAccount(user);
+  const headerQuery = new URLSearchParams(location.search);
+  const storedStationName = useMemo(() => getStoredStationName(), [stationConfigVersion]);
 
   // Global admin drill-down: đang xem trạm con từ màn hình đa trạm
   const viewingStationId = useStationStore(s => s.viewingStationId);
@@ -108,12 +138,51 @@ export default function AppShell() {
   // Nav mode: central hoặc child
   const isCentralMode = isCentralUser && !isDrillDown;
   const navItems = isCentralMode ? CENTRAL_NAV : CHILD_NAV;
+  const headerStationLabel = useMemo(() => {
+    if (isDrillDown && drillStation?.name) return drillStation.name;
+    if (isCentralMode) return 'TRẠM ĐIỆN';
+
+    const selectedStationId = headerQuery.get('stationId') || localStorage.getItem('selected_station_id') || '';
+    const matched = stations.find(s => s.id === selectedStationId);
+    return getDisplayStationName(matched?.name, storedStationName) || 'CẦN CẤU HÌNH TRẠM';
+  }, [isDrillDown, drillStation, isCentralMode, stations, location.search, storedStationName]);
+
+  const parsedStationLabel = useMemo(() => {
+    const text = (headerStationLabel || '').trim().toUpperCase();
+    const kvMatch = text.match(/\b(\d+\s*KV)\b/i);
+    const kvLabel = kvMatch && kvMatch[1] ? kvMatch[1].replace(/\s+/g, '').toUpperCase() : '';
+    const cleaned = text
+      .replace(/^(TRẠM BIẾN ÁP|TRẠM)\s+/i, '')
+      .replace(/\b\d+\s*KV\b/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (kvLabel) {
+      const words = cleaned.split(/\s+/).filter(Boolean);
+      return words.length === 2
+        ? { mode: 'split', first: words[0], second: words[1], sub: kvLabel }
+        : { mode: 'single', text: cleaned, sub: kvLabel };
+    }
+
+    if (text.startsWith('TRẠM BIẾN ÁP ')) {
+      return { mode: 'single', text: text.replace(/^TRẠM BIẾN ÁP /, ''), sub: 'TBA' };
+    }
+    return { mode: 'single', text, sub: '' };
+  }, [headerStationLabel]);
+
+  useEffect(() => {
+    if (!user || isCentralUser) return;
+    if (location.pathname.startsWith('/settings')) return;
+    if (!hasStoredServerIp()) {
+      navigate('/settings?setup=1', { replace: true });
+    }
+  }, [user, isCentralUser, location.pathname, navigate]);
 
   // Lọc adminNavItems theo quyền:
-  // - Restricted admin (trạm con): ẩn settings, license
-  // - Global admin (kể cả khi drill-down): giữ nguyên toàn bộ CHILD_ADMIN_NAV
+  // - Restricted admin (khi ở trạm tổng): ẩn settings, license
+  // - Trên trạm con (Power-Monitor): luôn hiển thị đầy đủ menu quản trị cho Admin
   const adminNavItems = (isCentralMode ? CENTRAL_ADMIN_NAV : CHILD_ADMIN_NAV).filter(item => {
-    if (user.is_restricted || (user.station_ids && user.station_ids.length > 0)) {
+    if (isCentralMode && (user.is_restricted || (user.station_ids && user.station_ids.length > 0))) {
       return !['settings', 'license'].includes(item.id);
     }
     return true;
@@ -131,7 +200,7 @@ export default function AppShell() {
     setAlertQueue(q => {
       // Không enqueue trùng alert id
       if (q.some(a => a.id === alert.id)) return q;
-      
+
       const newQueue = [...q, alert];
       // Sắp xếp: Cảnh báo cháy/lửa/khói lên đầu, các cảnh báo khác xếp sau
       return [...newQueue].sort((a, b) => {
@@ -173,18 +242,18 @@ export default function AppShell() {
       if (!Array.isArray(openAlerts)) return;
       const unseen = openAlerts.filter(
         a => a.source === 'rule_engine' &&
-             (a.level === 'alarm' || a.level === 'warning') &&
-             !shownAlertIdsRef.current.has(a.id)
+          (a.level === 'alarm' || a.level === 'warning') &&
+          !shownAlertIdsRef.current.has(a.id)
       );
       // Enqueue từng alert chưa xem, delay nhỏ để tránh spam ngay lúc load
       // Trạm tổng không hiện popup
       if (!isCentralMode) {
         unseen.forEach((a, i) => setTimeout(() => enqueueAlertWithTrack(a), i * 300));
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Khởi tạo SignalR Hub toàn cục để lắng nghe mọi sự kiện trên mọi Tab
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
 
     // 1. Lắng nghe cảnh báo mới từ Rule Engine, Camera, Maintenance
     hub.on('AlertNew', (alert: AlertItem) => {
@@ -192,24 +261,25 @@ export default function AppShell() {
       useAlertStore.getState().prepend(alert);
       fetchAlerts(ALERT_STATUS.OPEN, true);
 
+      const level = (alert.level || '').toLowerCase();
       const isFire = alert.message?.toLowerCase().includes('cháy') || alert.message?.toLowerCase().includes('fire') || alert.message?.toLowerCase().includes('lửa');
-      const isAlarm = alert.level === 'alarm' || alert.level === 'danger' || isFire;
+      const shouldNotify = level === 'alarm' || level === 'warning' || level === 'danger' || isFire;
+      const isAlarm = level === 'alarm' || level === 'danger' || isFire;
 
-      // NẾU LÀ CẢNH BÁO VÀNG (WARNING) HOẶC THẤP HƠN: 
-      // Tắt mọi thông báo âm thanh và hình ảnh để tránh làm phiền liên tục.
-      if (!isAlarm) return;
+      // Chỉ hiển thị popup/toast cho warning + alarm + sự kiện cháy.
+      if (!shouldNotify) return;
 
-      // NẾU LÀ BÁO ĐỘNG ĐỎ (ALARM):
       const isOverview = isCentralMode || location.pathname.includes('multisite');
+      const soundLevel: 'warning' | 'alarm' = isAlarm ? 'alarm' : 'warning';
 
       if (!isOverview) {
-        // Nếu ở trang chi tiết: Hiện popup to và phát tiếng báo động mạnh
-        playAlertSound(isFire ? 'alarm' : 'alarm');
+        // Nếu ở trang chi tiết: hiện popup cho cả warning và alarm
+        playAlertSound(soundLevel);
         enqueueAlertWithTrack(alert);
       } else {
-        // Nếu ở trang Tổng quan: Chỉ hiện toast thông báo ở góc và phát tiếng tít nhẹ
-        showToast(alert.message || 'Báo động đỏ mới', 'error');
-        playAlertSound('warning'); 
+        // Nếu ở trang Tổng quan: hiện toast tương ứng, vẫn có âm thanh nhẹ cho warning
+        showToast(alert.message || (isAlarm ? 'Báo động đỏ mới' : 'Cảnh báo mới'), isAlarm ? 'error' : 'info');
+        playAlertSound(soundLevel);
       }
     });
 
@@ -227,10 +297,10 @@ export default function AppShell() {
       // Chúng ta không gọi setActiveAlert ở đây nữa vì AlertNew sẽ hiển thị Popup 
       // với đầy đủ ảnh và thông tin chi tiết (do backend đã thống nhất gửi chung vào AlertNew)
       if (!evt || !evt.detectionType) return;
-      
+
       // partial_discharge đã có AlertNew (level warning/alarm) nên không cần toast info rời rạc gây spam
       const isCritical = ['fire', 'thermal_hotspot', 'intrusion', 'partial_discharge'].includes(evt.detectionType);
-      
+
       if (!isCritical) {
         showToast(`Camera: ${evt.detectionType.toUpperCase()}`, 'info');
       }
@@ -258,10 +328,36 @@ export default function AppShell() {
       });
     });
 
+    // 5. Lắng nghe cập nhật thông tin tài khoản để đồng bộ realtime không cần reload
+    hub.on('UserStatusChange', (data: { username: string, status: string }) => {
+      const currentUser = useAuthStore.getState().user;
+      if (data && data.username === currentUser?.username) {
+        if (data.status === 'updated') {
+          console.log('[AppShell] User profile updated, performing silent refresh...');
+          authService.refreshSession().then((success) => {
+            if (success) {
+              // Invalidate and refresh store data reactively
+              useStationStore.getState().invalidate();
+              useStationStore.getState().fetch(true);
+              useAlertStore.getState().invalidate();
+              useAlertStore.getState().fetch(ALERT_STATUS.OPEN, true);
+              showToast('Thông tin phân quyền tài khoản đã được cập nhật thành công!', 'info');
+            }
+          });
+        } else if (data.status === 'deactivated') {
+          showToast('Tài khoản của bạn đã bị vô hiệu hóa bởi Quản trị viên.', 'error');
+          setTimeout(() => {
+            authService.logout();
+            navigate('/login');
+          }, 2000);
+        }
+      }
+    });
+
     let isMounted = true;
     const startHub = async () => {
       try {
-        await hub.start();
+        await startRealtimeHub();
         console.log('[AppShell] SignalR Global Connected.');
       } catch (err) {
         console.warn('[AppShell] SignalR Global Connection failed, retrying in 5s...', err);
@@ -274,12 +370,68 @@ export default function AppShell() {
 
     return () => {
       isMounted = false;
-      hub.stop();
+      stopRealtimeHub();
     };
   }, [fetchAlerts, invalidateAlerts]);
 
-  const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changePasswordError, setChangePasswordError] = useState('');
+  const [changePasswordSuccess, setChangePasswordSuccess] = useState('');
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [time, setTime] = useState(new Date().toLocaleTimeString('vi-VN'));
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordError('');
+    setChangePasswordSuccess('');
+
+    if (!oldPassword) {
+      setChangePasswordError('Vui lòng nhập mật khẩu hiện tại');
+      return;
+    }
+    if (!newPassword) {
+      setChangePasswordError('Vui lòng nhập mật khẩu mới');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setChangePasswordError('Mật khẩu mới phải có tối thiểu 6 ký tự');
+      return;
+    }
+    if (newPassword === oldPassword) {
+      setChangePasswordError('Mật khẩu mới không được trùng với mật khẩu cũ');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setChangePasswordError('Mật khẩu xác nhận không khớp');
+      return;
+    }
+
+    setChangePasswordLoading(true);
+    try {
+      const res = await authService.changePassword(oldPassword, newPassword);
+      if (res.success) {
+        setChangePasswordSuccess('Đổi mật khẩu thành công!');
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setShowChangePasswordModal(false);
+          setChangePasswordSuccess('');
+        }, 1500);
+      } else {
+        setChangePasswordError(res.error || 'Đổi mật khẩu thất bại');
+      }
+    } catch (err) {
+      setChangePasswordError('Lỗi kết nối đến máy chủ');
+    } finally {
+      setChangePasswordLoading(false);
+    }
+  };
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showThemeList, setShowThemeList] = useState(false);
   const [popupPos, setPopupPos] = useState({ bottom: 0, left: 0 });
@@ -298,7 +450,7 @@ export default function AppShell() {
   const handleSelectTheme = (newTheme: string) => {
     setThemeState(newTheme);
     setGlobalTheme(newTheme as any);
-    
+
     const themeNames: Record<string, string> = {
       dark: 'Tối Tiêu chuẩn',
       light: 'Trắng Tiêu chuẩn',
@@ -350,10 +502,12 @@ export default function AppShell() {
     };
     window.addEventListener('theme-changed', handleThemeChange);
 
-    // Đồng hồ realtime cập nhật mỗi giây
-    const t = setInterval(() => setTime(new Date().toLocaleTimeString('vi-VN')), 1000);
+    const clockTimer = window.setInterval(() => {
+      setTime(new Date().toLocaleTimeString('vi-VN'));
+    }, 1000);
+
     return () => {
-      clearInterval(t);
+      window.clearInterval(clockTimer);
       window.removeEventListener('theme-changed', handleThemeChange);
     };
   }, []);
@@ -366,8 +520,8 @@ export default function AppShell() {
   };
 
   /** Đăng xuất người dùng, xóa phiên và reload toàn bộ state app. */
-  const handleLogout = () => {
-    authService.logout();
+  const handleLogout = async () => {
+    await authService.logout();
     navigate('/login');
     window.location.reload(); // reset toàn bộ state app
   };
@@ -422,7 +576,7 @@ export default function AppShell() {
 
 
       {/* ── Full-width header (independent of sidebar) ── */}
-      {!isCentralMode && (
+      {!isCentralMode && isDrillDown && (
         <header className="admin-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
             {isDrillDown && (
@@ -455,33 +609,8 @@ export default function AppShell() {
                 <span>Trạm tổng</span>
               </button>
             )}
-            <img
-              alt="StationOS"
-              src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM0NGZmODgiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMDI4NGM3IiAvPjwvbGluZWFyR3JhZGllbnQ+PGZpbHRlciBpZD0iZ2xvdyI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMyIgcmVzdWx0PSJjb2xvcmVkQmx1ciIvPjxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iY29sb3JlZEJsdXIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQ1IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ3JhZCkiIHN0cm9rZS13aWR0aD0iNiIgZmlsdGVyPSJ1cmwoI2dsb3cpIi8+PHBhdGggZD0iTTUwIDE1IEw4MCAzNSBMODAgNjUgTDUwIDg1IEwyMCA2NSBMMjAgMzUgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjMiIG9wYWNpdHk9IjAuNSIvPjxwYXRoIGQ9Ik01NSAyNSBMMzUgNTUgTDUwIDU1IEw0NSA3NSBMNjUgNDUgTDUwIDQ1IFoiIGZpbGw9IiM0NGZmODgiIGZpbHRlcj0idXJsKCNnbG93KSIvPjwvc3ZnPg=="
-              style={{ width: 34, height: 34, flexShrink: 0 }}
-            />
-            <span className="header-title-main">
-              {!isDrillDown && 'HỆ THỐNG GIÁM SÁT'}
-              <span className="header-title-badge">
-                {isDrillDown && drillStation ? drillStation.name : 'TRẠM ĐIỆN'}
-              </span>
-            </span>
-            {!isDrillDown && (
-              <span className="version-badge" style={{
-                background: 'var(--admin-layer-2)',
-                color: 'var(--admin-text-muted)',
-                padding: '3px 8px',
-                borderRadius: '0px',
-                fontSize: '0.65rem',
-                fontWeight: 600,
-                border: '1px solid var(--admin-border-light)',
-                marginLeft: '8px'
-              }}>v{__APP_VERSION__}</span>
-            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexShrink: 0 }}>
-            <div className="header-clock">{time}</div>
-          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexShrink: 0 }} />
         </header>
       )}
 
@@ -493,137 +622,199 @@ export default function AppShell() {
         {!isCentralMode && (
           <div className={`sb-wrap${expanded ? ' expanded' : ''}`}>
             <nav className="sidebar-nav" id="sidebarNav">
-
-            {/* ── Scrollable nav body ── */}
-            <div className="sb-body">
-              <div className="sb-group">
-                <div className={`sb-group__label${expanded ? '' : ' hidden'}`}>ĐIỀU HƯỚNG</div>
-                {renderNav(navItems)}
-              </div>
-
-              {user.role === 'admin' && (
-                <>
-                  <div className="sb-sep" />
-                  <div className="sb-group">
-                    <div className={`sb-group__label${expanded ? '' : ' hidden'}`}>
-                      {isCentralUser ? 'QUẢN TRỊ TỔNG QUAN' : 'QUẢN TRỊ'}
+              <div className="sb-brand">
+                <div className="sb-brand__logo">
+                  <img
+                    alt="StationOS"
+                    className="sb-logo__img"
+                    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM0NGZmODgiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMDI4NGM3IiAvPjwvbGluZWFyR3JhZGllbnQ+PGZpbHRlciBpZD0iZ2xvdyI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMyIgcmVzdWx0PSJjb2xvcmVkQmx1ciIvPjxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iY29sb3JlZEJsdXIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQ1IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ3JhZCkiIHN0cm9rZS13aWR0aD0iNiIgZmlsdGVyPSJ1cmwoI2dsb3cpIi8+PHBhdGggZD0iTTUwIDE1IEw4MCAzNSBMODAgNjUgTDUwIDg1IEwyMCA2NSBMMjAgMzUgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjMiIG9wYWNpdHk9IjAuNSIvPjxwYXRoIGQ9Ik01NSAyNSBMMzUgNTUgTDUwIDU1IEw0NSA3NSBMNjUgNDUgTDUwIDQ1IFoiIGZpbGw9IiM0NGZmODgiIGZpbHRlcj0idXJsKCNnbG93KSIvPjwvc3ZnPg=="
+                  />
+                </div>
+                <div className={`sb-brand__info${expanded ? '' : ' hidden'}`}>
+                  {parsedStationLabel.mode === 'split' ? (
+                    <div className="sb-brand__main-grid">
+                      <span className="sb-brand__main-word sb-brand__main-word--first">{parsedStationLabel.first}</span>
+                      <span className="sb-brand__main-word sb-brand__main-word--second">{parsedStationLabel.second}</span>
+                      {parsedStationLabel.sub && <span className="sb-brand__sub sb-brand__sub--below-second">{parsedStationLabel.sub}</span>}
                     </div>
-                    {renderNav(adminNavItems)}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* ── Bottom actions (pinned) ── */}
-            <div className="sb-bottom">
-              <div className="sb-sep" />
-              
-              {/* Profile & User Menu Combined */}
-              <div className="sb-user-action-wrap" style={{ position: 'relative' }} ref={userMenuRef}>
-                
-                {/* Popover Menu — position:fixed để thoát overflow:hidden của sidebar */}
-                {showUserMenu && (
-                  <div className="sb-user-popover" style={{ position: 'fixed', bottom: popupPos.bottom, left: popupPos.left, top: 'auto', width: 200, padding: '6px 0' }}>
-                    <div 
-                      className="sb-popover-item"
-                      onClick={() => setShowThemeList(!showThemeList)}
-                      style={{ justifyContent: 'space-between', fontWeight: 700, padding: '8px 12px' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>🎨 Giao diện:</span>
-                        <span style={{ color: 'var(--admin-accent)' }}>{THEME_NAMES[theme] || theme}</span>
-                      </div>
-                      <span style={{ 
-                        fontSize: '0.6rem', 
-                        transform: showThemeList ? 'rotate(90deg)' : 'none', 
-                        transition: 'transform 0.15s ease',
-                        opacity: 0.5 
-                      }}>▸</span>
-                    </div>
-
-                    {showThemeList && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 6px', background: 'var(--admin-hover)', borderRadius: 0, margin: '2px 8px' }}>
-                        {[
-                          { value: 'dark', label: '⚫ Tối Tiêu chuẩn' },
-                          { value: 'industrial', label: '🔘 Xám Công nghiệp' },
-                          { value: 'hightech', label: '🔵 Xanh Hiện đại' },
-                          { value: 'cyberpunk', label: '🟣 Tím Neon' },
-                          { value: 'light', label: '⚪ Trắng Tiêu chuẩn' },
-                          { value: 'soft-light', label: '🟡 Sáng Dịu mắt' },
-                          { value: 'silver', label: '🥈 Bạc Tinh tế' },
-                        ].map(t => {
-                          const isActive = theme === t.value;
-                          return (
-                            <div
-                              key={t.value}
-                              onClick={() => handleSelectTheme(t.value)}
-                              className="sb-popover-item"
-                              style={{
-                                fontWeight: isActive ? 800 : 500,
-                                background: isActive ? 'var(--admin-accent)' : undefined,
-                                color: isActive ? '#ffffff' : undefined,
-                                justifyContent: 'space-between',
-                                padding: '5px 8px',
-                                fontSize: '0.7rem',
-                                borderRadius: 0,
-                              }}
-                            >
-                              <span>{t.label}</span>
-                              {isActive && <span style={{ fontSize: '0.6rem' }}>✓</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
-                    <div className="sb-popover-item danger" onClick={() => { setShowLogoutModal(true); setShowUserMenu(false); }} style={{ padding: '8px 12px' }}>
-                      <LogOut size={14} strokeWidth={2} /> <span>Đăng xuất</span>
-                    </div>
-                  </div>
-                )}
-
-                <div
-                  ref={triggerRef}
-                  className={`sb-user-action ${showUserMenu ? 'active' : ''}`}
-                  onClick={() => {
-                    if (!showUserMenu && triggerRef.current) {
-                      const r = triggerRef.current.getBoundingClientRect();
-                      setPopupPos({ bottom: window.innerHeight - r.top + 6, left: r.left });
-                    }
-                    setShowUserMenu(v => !v);
-                  }}
-                  title={!expanded ? 'Tài khoản' : undefined}
-                >
-                  <div className="sb-profile">
-                    <span className="user-avatar">{isCentralUser ? 'Q' : (user.fullname?.[0]?.toUpperCase() || 'A')}</span>
-                    {expanded && (
-                      <div className="sb-profile-info">
-                        <div className="sb-profile-name">{isCentralUser ? 'Quản trị tổng quan' : user.fullname}</div>
-                      </div>
-                    )}
-                    {expanded && (
-                      <ChevronRight 
-                        size={14} 
-                        strokeWidth={2.5} 
-                        style={{ 
-                          opacity: 0.4, 
-                          transform: showUserMenu ? 'rotate(-90deg)' : 'none',
-                          transition: 'transform 0.2s'
-                        }} 
-                      />
-                    )}
-                  </div>
+                  ) : (
+                    <>
+                      <div className="sb-brand__main">{parsedStationLabel.text}</div>
+                      {parsedStationLabel.sub && <span className="sb-brand__sub">{parsedStationLabel.sub}</span>}
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
 
-          </nav>
+              {/* ── Scrollable nav body ── */}
+              <div className="sb-body">
+                <div className="sb-group">
+                  <div
+                    className={`sb-group__label${expanded ? '' : ' hidden'}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-start',
+                      gap: 8
+                    }}
+                  >
+                    <span>ĐIỀU HƯỚNG</span>
+                  </div>
+                  {renderNav(navItems)}
+                </div>
 
-          {/* Toggle chevron — outside nav so overflow:hidden doesn't clip it */}
-          <button className="sb-toggle" onClick={toggle} title={expanded ? 'Thu gọn' : 'Mở rộng'}>
-            {expanded ? <ChevronLeft size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
-          </button>
-        </div>
+                {user.role === 'admin' && (
+                  <>
+                    <div className="sb-sep" />
+                    <div className="sb-group">
+                      {renderNav(adminNavItems)}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* ── Bottom actions (pinned) ── */}
+              <div className="sb-bottom">
+                <div className="sb-sep" />
+
+                {/* Profile & User Menu Combined */}
+                <div className="sb-user-action-wrap" style={{ position: 'relative' }} ref={userMenuRef}>
+
+                  {/* Popover Menu — position:fixed để thoát overflow:hidden của sidebar */}
+                  {showUserMenu && (
+                    <div className="sb-user-popover" style={{ position: 'fixed', bottom: popupPos.bottom, left: popupPos.left, top: 'auto', width: 230, padding: '6px 0' }}>
+                      <div
+                        className="sb-popover-item"
+                        onClick={() => setShowThemeList(!showThemeList)}
+                        style={{ justifyContent: 'space-between', fontWeight: 700, padding: '8px 12px' }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>🎨 Giao diện:</span>
+                          <span style={{ color: 'var(--admin-accent)' }}>{THEME_NAMES[theme] || theme}</span>
+                        </div>
+                        <span style={{
+                          fontSize: '0.6rem',
+                          transform: showThemeList ? 'rotate(90deg)' : 'none',
+                          transition: 'transform 0.15s ease',
+                          opacity: 0.5
+                        }}>▸</span>
+                      </div>
+
+                      {showThemeList && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 6px', background: 'var(--admin-hover)', borderRadius: 0, margin: '2px 8px' }}>
+                          {[
+                            { value: 'dark', label: '⚫ Tối Tiêu chuẩn' },
+                            { value: 'industrial', label: '🔘 Xám Công nghiệp' },
+                            { value: 'hightech', label: '🔵 Xanh Hiện đại' },
+                            { value: 'cyberpunk', label: '🟣 Tím Neon' },
+                            { value: 'light', label: '⚪ Trắng Tiêu chuẩn' },
+                            { value: 'soft-light', label: '🟡 Sáng Dịu mắt' },
+                            { value: 'silver', label: '🥈 Bạc Tinh tế' },
+                          ].map(t => {
+                            const isActive = theme === t.value;
+                            return (
+                              <div
+                                key={t.value}
+                                onClick={() => handleSelectTheme(t.value)}
+                                className="sb-popover-item"
+                                style={{
+                                  fontWeight: isActive ? 800 : 500,
+                                  background: isActive ? 'var(--admin-accent)' : undefined,
+                                  color: isActive ? '#ffffff' : undefined,
+                                  justifyContent: 'space-between',
+                                  padding: '5px 8px',
+                                  fontSize: '0.7rem',
+                                  borderRadius: 0,
+                                }}
+                              >
+                                <span>{t.label}</span>
+                                {isActive && <span style={{ fontSize: '0.6rem' }}>✓</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
+                      {authService.hasPermission('license:manage') && (
+                        <>
+                          <div
+                            className="sb-popover-item"
+                            onClick={() => {
+                              navigate('/license');
+                              setShowUserMenu(false);
+                            }}
+                            style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                          >
+                            <Key size={14} strokeWidth={2} /> <span>Giftcode bản quyền</span>
+                          </div>
+                          <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
+                        </>
+                      )}
+                      <div
+                        className="sb-popover-item"
+                        onClick={() => {
+                          setShowChangePasswordModal(true);
+                          setShowUserMenu(false);
+                          setOldPassword('');
+                          setNewPassword('');
+                          setConfirmPassword('');
+                          setChangePasswordError('');
+                          setChangePasswordSuccess('');
+                        }}
+                        style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <Lock size={14} strokeWidth={2} /> <span>Đổi mật khẩu</span>
+                      </div>
+                      <div className="sb-popover-sep" style={{ margin: '4px 0' }} />
+                      <div className="sb-popover-item danger" onClick={() => { setShowLogoutModal(true); setShowUserMenu(false); }} style={{ padding: '8px 12px' }}>
+                        <LogOut size={14} strokeWidth={2} /> <span>Đăng xuất</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div
+                    ref={triggerRef}
+                    className={`sb-user-action ${showUserMenu ? 'active' : ''}`}
+                    onClick={() => {
+                      if (!showUserMenu && triggerRef.current) {
+                        const r = triggerRef.current.getBoundingClientRect();
+                        setPopupPos({ bottom: window.innerHeight - r.top + 6, left: r.left });
+                      }
+                      setShowUserMenu(v => !v);
+                    }}
+                    title={!expanded ? 'Tài khoản' : undefined}
+                  >
+                    <div className="sb-profile">
+                      <span className="user-avatar">{isCentralUser ? 'Q' : (user.fullname?.[0]?.toUpperCase() || 'A')}</span>
+                      {expanded && (
+                        <div className="sb-profile-info">
+                          <div className="sb-profile-name">{isCentralUser ? 'Quản trị tổng quan' : user.fullname}</div>
+                        </div>
+                      )}
+                      {expanded && (
+                        <ChevronRight
+                          size={14}
+                          strokeWidth={2.5}
+                          style={{
+                            opacity: 0.4,
+                            transform: showUserMenu ? 'rotate(-90deg)' : 'none',
+                            transition: 'transform 0.2s'
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="sb-bottom-time">{time}</div>
+              </div>
+
+            </nav>
+
+            {/* Toggle chevron — outside nav so overflow:hidden doesn't clip it */}
+            <button className="sb-toggle" onClick={toggle} title={expanded ? 'Thu gọn' : 'Mở rộng'}>
+              {expanded ? <ChevronLeft size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
+            </button>
+          </div>
         )}
 
         {/* ── Main view ── */}
@@ -662,6 +853,90 @@ export default function AppShell() {
               <button onClick={() => setShowLogoutModal(false)} className="btn-industrial" style={{ minWidth: 100 }}>Hủy</button>
               <button onClick={handleLogout} className="btn-industrial btn-danger" style={{ minWidth: 100 }}>Đăng xuất</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Change Password modal ── */}
+      {showChangePasswordModal && (
+        <div className="modal-overlay active">
+          <div className="modal-content" style={{ width: 400 }}>
+            <div className="modal-header" style={{ padding: '16px 20px', borderBottom: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Lock size={18} strokeWidth={2} color="var(--admin-accent)" />
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--admin-text)' }}>Đổi mật khẩu tài khoản</h3>
+            </div>
+            <form onSubmit={handleChangePassword}>
+              <div className="modal-body" style={{ padding: '20px' }}>
+                {changePasswordError && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 4, color: 'var(--admin-danger)', fontSize: '0.85rem' }}>
+                    {changePasswordError}
+                  </div>
+                )}
+                {changePasswordSuccess && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(34, 197, 94, 0.1)', border: '1px solid rgba(34, 197, 94, 0.2)', borderRadius: 4, color: 'var(--admin-success, #22c55e)', fontSize: '0.85rem' }}>
+                    {changePasswordSuccess}
+                  </div>
+                )}
+
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Mật khẩu hiện tại <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={oldPassword}
+                    onChange={e => setOldPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Mật khẩu mới <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Xác nhận mật khẩu mới <span style={{ color: 'var(--admin-danger)' }}>*</span></label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+              <div className="modal-footer" style={{ padding: '16px 20px', borderTop: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(false)}
+                  className="btn-industrial"
+                  disabled={changePasswordLoading}
+                  style={{ minWidth: 80 }}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="btn-industrial btn-primary"
+                  disabled={changePasswordLoading}
+                  style={{ minWidth: 100 }}
+                >
+                  {changePasswordLoading ? 'Đang lưu...' : 'Lưu thay đổi'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

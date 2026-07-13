@@ -30,7 +30,7 @@ import { authService } from '@/services/AuthService';
 
 // Bảo vệ route và phân quyền theo vai trò
 const ProtectedRoute = ({ children, roles, denyRestricted }: { children: React.ReactNode, roles?: string[], denyRestricted?: boolean }) => {
-  const user = authService.getUser();
+  const user = useAuthStore(s => s.user);
   
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -112,12 +112,19 @@ function SsoAutoLogin() {
         setSession(user, token);
         localStorage.setItem('station_token', token);
 
-        // Xóa tham số token khỏi URL để bảo mật
+        // Xóa tham số token khỏi URL để bảo mật và chuyển hướng người dùng
+        const nextPath = params.get('next');
         params.delete('token');
         const searchStr = params.toString();
-        const cleanUrl = location.pathname + (searchStr ? `?${searchStr}` : '') + location.hash;
+
+        let targetPath = location.pathname;
+        if (location.pathname === '/login' || location.pathname === '/') {
+          targetPath = nextPath || '/dashboard';
+        }
+
+        const cleanUrl = targetPath + (searchStr ? `?${searchStr}` : '') + location.hash;
         
-        // Cập nhật URL và giữ nguyên trang hiện tại
+        // Cập nhật URL và chuyển hướng người dùng
         window.history.replaceState({}, document.title, cleanUrl);
         navigate(cleanUrl, { replace: true });
       } catch (error) {
@@ -156,8 +163,8 @@ export default function App() {
              <Route path="device-management" element={<ProtectedRoute roles={['admin']}><DeviceManagementPage /></ProtectedRoute>} />
              <Route path="device-management/:deviceId/thermal-config" element={<ProtectedRoute roles={['admin']}><ThermalConfigPage /></ProtectedRoute>} />
              <Route path="user-management" element={<ProtectedRoute roles={['admin']}><UserManagementPage /></ProtectedRoute>} />
-             <Route path="settings" element={<ProtectedRoute roles={['admin']} denyRestricted><SettingsPage /></ProtectedRoute>} />
-             <Route path="license" element={<ProtectedRoute roles={['admin']} denyRestricted><LicensePage /></ProtectedRoute>} />
+             <Route path="settings" element={<ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>} />
+             <Route path="license" element={<ProtectedRoute roles={['admin']}><LicensePage /></ProtectedRoute>} />
              <Route path="*" element={<div style={{color:'var(--admin-text)', padding:20}}>404 - Page not found</div>} />
           </Route>
         </Routes>

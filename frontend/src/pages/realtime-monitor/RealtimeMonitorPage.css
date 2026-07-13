@@ -11,7 +11,8 @@
 
 .nvr-lb {
   background:var(--admin-btn-secondary-bg); border:1px solid var(--admin-btn-secondary-border); color:var(--admin-btn-secondary-text);
-  width:30px; height:30px; border-radius:5px; cursor:pointer;
+  width:30px; height:30px; border-radius:0;
+  cursor:pointer;
   display:flex; align-items:center; justify-content:center;
   transition:all .15s; padding:0; flex-shrink:0;
 }
@@ -27,7 +28,7 @@
 .nvr-back-btn {
   display:none; align-items:center; gap:6px;
   background:var(--admin-tag-success-bg); border:1px solid var(--admin-success); color:var(--admin-success);
-  padding:0 12px; height:28px; border-radius:5px; font-size:11px; font-weight:700;
+  padding:0 12px; height:28px; border-radius:0; font-size:11px; font-weight:700;
   cursor:pointer; transition:background .15s; white-space:nowrap;
 }
 .nvr-back-btn:hover { background:var(--admin-tag-success-bg); opacity: 0.8; }
@@ -138,7 +139,7 @@
 .nvr-ep-fsel { background:var(--admin-bg); border:1px solid var(--admin-border); color:var(--admin-text); padding:3px 6px; border-radius:4px; font-size:10px; height:26px; flex:1; min-width:0; cursor:pointer; }
 .nvr-ep-fdate { background:var(--admin-bg); border:1px solid var(--admin-border); color:var(--admin-text); padding:3px 5px; border-radius:4px; font-size:10px; height:26px; width:100px; flex-shrink:0; }
 .nvr-ep-fsel:focus,.nvr-ep-fdate:focus { outline:none; border-color:var(--admin-accent); }
-.nvr-ep-rbtn { background:transparent; border:1px solid var(--admin-border); color:var(--admin-text-muted); width:26px; height:26px; border-radius:4px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }
+.nvr-ep-rbtn { background:transparent; border:1px solid var(--admin-border); color:var(--admin-text-muted); width:26px; height:26px; border-radius:0; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }
 .nvr-ep-rbtn:hover { border-color:var(--admin-accent); color:var(--admin-accent); }
 
 /* Events list */
@@ -217,4 +218,3 @@
 .nvr-roi-marker:hover span:last-child {
   margin-left: 0 !important;
 }
-

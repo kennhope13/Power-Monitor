@@ -200,7 +200,7 @@ export default function CameraGrid({ sensors, alertsCount, rules = [], camOption
                       position: 'fixed',
                       top: menuPos.top,
                       left: menuPos.left,
-                      background: 'var(--admin-panel)',
+                      background: 'var(--admin-panel, #24272a)',
                       border: '1px solid var(--admin-border)',
                       borderRadius: 0,
                       boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',
@@ -308,12 +308,6 @@ export default function CameraGrid({ sensors, alertsCount, rules = [], camOption
             )}
           </div>
         )}
-        {!isCollapsed && thermalRows.length > 0 && (
-          <div style={{ padding: '5px 10px', borderTop: '1px solid var(--admin-border-light)', background: 'var(--admin-hover)', fontSize: '0.6rem', color: 'var(--admin-text-muted)', display: 'flex', gap: 12 }}>
-            <span>{thermalRows.length} điểm đo</span>
-            {alertsCount > 0 && <span style={{ color: 'var(--admin-warning)' }}>{alertsCount} cảnh báo camera</span>}
-          </div>
-        )}
       </div>
 
       {/* SECTION: PHÓNG ĐIỆN */}
@@ -347,7 +341,7 @@ export default function CameraGrid({ sensors, alertsCount, rules = [], camOption
                   <div key={row.pid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: idx < pdRows.length - 1 ? '1px solid var(--admin-border-light)' : 'none' }}>
                     <div style={{ width: 6, height: 6, borderRadius: 0, background: color, flexShrink: 0 }} />
                     <span style={{ flex: 1, fontSize: '0.68rem', color: 'var(--admin-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color, fontFamily: 'Consolas,monospace', flexShrink: 0 }}>{val !== undefined ? `${val.toFixed(1)} ${unit}` : '--'}</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: color, fontFamily: 'Consolas,monospace', flexShrink: 0 }}>{val === undefined ? '--' : `${val.toFixed(1)} ${unit}`}</span>
                   </div>
                 );
               })

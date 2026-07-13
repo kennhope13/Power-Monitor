@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { stationApi } from '@/services/StationApiService';
 import type { SldUnpinnedDevice, SldPoint } from '@/types/api.types';
@@ -11,6 +12,7 @@ interface Props {
   refreshTick?: number;
   selectedNode: SldPoint | null;
   onClearSelection: () => void;
+  onDone?: () => void;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -53,11 +55,32 @@ const PosBtn = ({ pos, active, onClick }: { pos: 'top'|'bottom'|'left'|'right'; 
  * cấu hình badge tất cả node cùng lúc, kéo thả thiết bị chưa gắn,
  * và chỉnh chi tiết node đang chọn (tên, kích thước, màu, vị trí badge).
  */
-export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedNode, onClearSelection }: Props) {
+export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedNode, onClearSelection, onDone }: Props) {
   const [unpinned, setUnpinned] = useState<SldUnpinnedDevice[]>([]);
+
+  const unpinnedGroups = useMemo(() => {
+    const groups: Record<string, { id: string; name: string; type: string; tags: string[] }> = {};
+    unpinned.forEach(d => {
+      if (!groups[d.id]) groups[d.id] = { id: d.id, name: d.name, type: d.type, tags: [] };
+      const group = groups[d.id];
+      if (group) {
+        if (d.sensorTag) group.tags.push(d.sensorTag);
+        if (!d.sensorTag) group.name = d.name;
+      }
+    });
+    return Object.values(groups);
+  }, [unpinned]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [svgStatus, setSvgStatus] = useState('');
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
+  const confirmResolve = useRef<((v: boolean) => void) | null>(null);
+
+  const showConfirm = (msg: string): Promise<boolean> =>
+    new Promise(resolve => { setConfirmMsg(msg); confirmResolve.current = resolve; });
+
+  const handleConfirmOk = () => { setConfirmMsg(null); confirmResolve.current?.(true); };
+  const handleConfirmCancel = () => { setConfirmMsg(null); confirmResolve.current?.(false); };
 
   // Global badge config
   const [gPos, setGPos] = useState<BadgeConfig['pos']>('top');
@@ -76,7 +99,7 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
   useEffect(() => {
     if (!selectedNode) return;
     setNRadius(selectedNode.r);
-    setNLabel(selectedNode.label || '');
+    setNLabel(selectedNode.label || selectedNode.deviceName || '');
     const cfg = sldRef.current?.getNodeBadgeConfig(selectedNode.id) ?? DEFAULT_BADGE;
     setNPos(cfg.pos);
     setNSize(cfg.size);
@@ -118,10 +141,21 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
     finally { setUploading(false); }
   };
 
+  /** Nhãn xóa theo loại thiết bị */
+  const deleteLabel = (node: SldPoint) => {
+    const t = node.deviceType || '';
+    if (t.startsWith('camera')) return 'Xóa camera';
+    if (t === 'cabinet') return 'Xóa tủ điện';
+    if (t === 'plc_s7') return 'Xóa PLC';
+    if (t === 'sensor_temp') return 'Xóa cảm biến';
+    return 'Xóa thiết bị';
+  };
+
   /** Xóa node đang chọn khỏi sơ đồ sau khi người dùng xác nhận. */
   const handleDeleteNode = async () => {
     if (!selectedNode) return;
-    if (!confirm(`Xóa node "${selectedNode.label || selectedNode.pointId}"?`)) return;
+    const nodeName = selectedNode.label || selectedNode.deviceName || 'điểm đã chọn';
+    if (!await showConfirm(`${deleteLabel(selectedNode)} "${nodeName}" khỏi sơ đồ?`)) return;
     try {
       await sldRef.current?.deleteNode(selectedNode.id);
       loadSldData();
@@ -146,7 +180,7 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
 
   return (
     <div style={{
-      position: 'absolute', top: 10, right: 10, zIndex: 40, width: 270,
+      position: 'absolute', top: 10, left: 10, zIndex: 40, width: 270,
       background: 'var(--admin-overlay)', backdropFilter: 'blur(12px)',
       border: '1px solid rgba(99,102,241,0.5)', borderRadius: 4,
       boxShadow: 'var(--admin-shadow)', maxHeight: 'calc(100% - 50px)',
@@ -155,14 +189,23 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
       {/* Header */}
       <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--admin-border-light)', background: 'var(--admin-hover)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: '.7rem', fontWeight: 900, color: 'var(--admin-accent)', letterSpacing: '.5px' }}>
-          {selectedNode ? `✏ ${selectedNode.label || selectedNode.pointId || 'Node'}` : '✏ CHỈNH SƠ ĐỒ'}
+          {selectedNode ? `✏ ${selectedNode.label || selectedNode.deviceName || selectedNode.pointId || 'Node'}` : '✏ CHỈNH SƠ ĐỒ'}
         </span>
-        {selectedNode && (
-          <button onClick={onClearSelection}
-            style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', fontSize: '.8rem', lineHeight: 1 }}>
-            <X size={14} />
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {selectedNode && (
+            <button onClick={onClearSelection}
+              style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', fontSize: '.8rem', lineHeight: 1 }}>
+              <X size={14} />
+            </button>
+          )}
+          {onDone && (
+            <button onClick={onDone}
+              className="btn-industrial btn-sm btn-primary"
+              style={{ fontSize: '0.62rem', padding: '2px 8px', height: 22 }}>
+              XONG
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -209,13 +252,9 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
             </div>
 
             <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={onClearSelection}
-                className="btn-industrial btn-sm btn-primary" style={{ flex: 1 }}>
-                Xong
-              </button>
               <button onClick={handleDeleteNode}
-                className="btn-industrial btn-sm btn-danger">
-                Xóa node
+                className="btn-industrial btn-sm btn-danger" style={{ flex: 1 }}>
+                {selectedNode ? deleteLabel(selectedNode) : 'Xóa thiết bị'}
               </button>
             </div>
           </>
@@ -240,66 +279,23 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
 
             <div style={{ height: 1, background: 'var(--admin-border-light)' }} />
 
-            {/* Áp dụng tất cả */}
-            <div>
-              <div style={labelStyle}>Thông số tất cả node</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: '.62rem', color: 'var(--admin-text-muted)', minWidth: 56 }}>Node size:</span>
-                  <div style={{ flex: 1 }}>
-                    <Stepper value={gRadius} onChange={handleApplyAllRadius} min={1} max={60} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: '.62rem', color: 'var(--admin-text-muted)', minWidth: 56 }}>Vị trí:</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {(['top','bottom','left','right'] as const).map(p => (
-                      <PosBtn key={p} pos={p} active={gPos === p} onClick={() => setGPos(p)} />
-                    ))}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: '.62rem', color: 'var(--admin-text-muted)', minWidth: 56 }}>Cỡ chữ:</span>
-                  <div style={{ flex: 1 }}>
-                    <Stepper value={gSize} onChange={setGSize} min={6} max={18} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: '.62rem', color: 'var(--admin-text-muted)', minWidth: 56 }}>Màu chữ:</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {BADGE_COLORS.map(c => (
-                      <div key={c} onClick={() => setGColor(c)}
-                        style={{ width: 18, height: 18, borderRadius: 3, background: c, cursor: 'pointer', border: `2px solid ${gColor === c ? 'var(--admin-text)' : 'transparent'}` }} />
-                    ))}
-                  </div>
-                </div>
-                <button onClick={handleApplyAll}
-                  className="btn-industrial btn-sm btn-primary" style={{ width: '100%' }}>
-                  Áp dụng cho tất cả node
-                </button>
-              </div>
-            </div>
-
-            <div style={{ height: 1, background: 'var(--admin-border-light)' }} />
-
             {/* Unpinned */}
-            {unpinned.length > 0 ? (
+            {unpinnedGroups.length > 0 ? (
               <div>
                 <div style={labelStyle}>Thiết bị chưa gắn (Kéo thả vào sơ đồ)</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {unpinned.map(d => (
-                    <div key={d.id + (d.sensorTag || '')} draggable
+                  {unpinnedGroups.map(g => (
+                    <div key={g.id} draggable
                       onDragStart={e => {
-                        e.dataTransfer.setData('device_id', d.id);
-                        e.dataTransfer.setData('device_name', d.name);
-                        if (d.sensorTag) e.dataTransfer.setData('sensor_tag', d.sensorTag);
+                        e.dataTransfer.setData('device_id', g.id);
+                        e.dataTransfer.setData('device_name', g.name);
                         e.dataTransfer.effectAllowed = 'copy';
                       }}
-                      style={{ padding: '6px 8px', fontSize: '.68rem', backgroundColor: 'var(--admin-layer-1)', border: '1px dashed var(--admin-border)', borderRadius: 3, cursor: 'grab', color: 'var(--admin-text)' }}>
-                      <span style={{ fontWeight: 700 }}>{d.name}</span>{' '}
-                      <span style={{ color: 'var(--admin-text-muted)' }}>({d.type})</span>
+                      style={{ padding: '6px 8px', fontSize: '.68rem', backgroundColor: 'var(--admin-layer-1)', border: '1px dashed var(--admin-border)', borderRadius: 0, cursor: 'grab', color: 'var(--admin-text)' }}>
+                      <div style={{ fontWeight: 700 }}>{g.name}</div>
+                      <div style={{ color: 'var(--admin-text-muted)', fontSize: '.6rem', marginTop: 2 }}>
+                        {g.tags.length > 0 ? `${g.tags.length} điểm đo · ` : ''}{g.type}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -313,9 +309,26 @@ export default function SldEditPanel({ stationId, sldRef, refreshTick, selectedN
         )}
       </div>
 
-      <div style={{ padding: '6px 12px', borderTop: '1px solid var(--admin-border-light)', background: 'var(--admin-hover)', fontSize: '.6rem', color: 'var(--admin-text-muted)', flexShrink: 0 }}>
-        {selectedNode ? 'Nhấn ✕ để bỏ chọn node' : 'Kéo node để di chuyển • Click node để chỉnh'}
-      </div>
+      {confirmMsg !== null && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)' }}
+          onClick={handleConfirmCancel}>
+          <div style={{ background: 'var(--admin-panel, #1e2126)', border: '1px solid var(--admin-border)', borderRadius: 0, padding: '24px 28px', minWidth: 300, maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}
+            onClick={e => e.stopPropagation()}>
+            <p style={{ margin: '0 0 20px', fontSize: '.85rem', color: 'var(--admin-text)', lineHeight: 1.5 }}>{confirmMsg}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={handleConfirmCancel}
+                style={{ padding: '6px 16px', fontSize: '.78rem', background: 'rgba(255,255,255,0.08)', border: '1px solid var(--admin-border)', borderRadius: 0, color: 'var(--admin-text)', cursor: 'pointer' }}>
+                Hủy
+              </button>
+              <button onClick={handleConfirmOk}
+                style={{ padding: '6px 16px', fontSize: '.78rem', background: '#EF4444', border: 'none', borderRadius: 0, color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+                Xóa
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

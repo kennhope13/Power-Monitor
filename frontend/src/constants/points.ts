@@ -18,10 +18,12 @@ export const PT_CAM_IDS: readonly string[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'
 
 // Label hiển thị tương ứng với từng point nhiệt độ
 export const TEMP_LABELS: Record<string, string> = {
-  [PT_TEMP_1]: 'Nhiệt độ Pha 1',
-  [PT_TEMP_2]: 'Nhiệt độ Pha 2',
-  [PT_TEMP_3]: 'Nhiệt độ Pha 3',
-  [PT_PD]:     'Phóng điện PD',
+  [PT_TEMP_1]:    'Nhiệt độ Pha 1',
+  [PT_TEMP_2]:    'Nhiệt độ Pha 2',
+  [PT_TEMP_3]:    'Nhiệt độ Pha 3',
+  [PT_PD]:        'Phóng điện (Ratio)',
+  'pd_eppc':      'PD EPPC',
+  'pd_indi':      'PD Chỉ báo',
 };
 
 // Tên hiển thị cho từng điểm đo camera nhiệt

@@ -28,6 +28,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
   
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [showPermissions, setShowPermissions] = useState(false);
+  const [showDefaultAccounts, setShowDefaultAccounts] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -261,7 +262,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
         </div>
       </div>
       
-      <div className="admin-card" style={{ padding: 0, overflow: 'auto', flex: 1, marginTop: 12 }}>
+      <div className="admin-card" style={{ padding: 0, overflow: 'auto', flex: 1 }}>
           <table className="data-table">
             <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
@@ -283,7 +284,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
               ) : (
                 filteredUsers.map(u => {
                   const roleColor = u.role === 'admin' ? 'var(--admin-danger)' : u.role === 'manager' ? '#f59e0b' : 'var(--admin-success)';
-                  const roleLabel = u.role === 'admin' ? 'ADMIN' : u.role === 'manager' ? 'MANAGER' : 'OPERATOR';
+                  const roleLabel = u.role === 'admin' ? 'Quản trị' : u.role === 'manager' ? 'Quản lý' : 'Vận hành';
                   return (
                     <tr key={u.id}>
                       <td>
@@ -298,16 +299,14 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
                       <td style={{ fontSize: '.75rem' }}>{u.email || '—'}</td>
                       <td>
                         <span style={{ 
-                           background: roleColor === 'var(--admin-danger)' ? 'rgba(239,68,68,0.1)' : roleColor === '#f59e0b' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
-                           color: roleColor, padding: '2px 8px', borderRadius: 4, fontSize: '.65rem', fontWeight: 800 
+                           color: roleColor, fontSize: '.75rem', fontWeight: 700 
                         }}>{roleLabel}</span>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                         {u.isActive ? (
-                            <span style={{ fontSize: '.65rem', background: 'rgba(16,185,129,0.1)', color: 'var(--admin-success)', padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>HOẠT ĐỘNG</span>
-                         ) : (
-                            <span style={{ fontSize: '.65rem', background: 'rgba(239,68,68,0.1)', color: 'var(--admin-danger)', padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>VÔ HIỆU</span>
-                         )}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span className="status-dot" style={{ background: u.isActive ? 'var(--admin-success)' : 'var(--admin-danger)', marginRight: 0 }}></span>
+                          <span style={{ fontSize: '.75rem' }}>{u.isActive ? 'Hoạt động' : 'Vô hiệu'}</span>
+                        </div>
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
@@ -324,7 +323,7 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
         </table>
       </div>
 
-      <div className="admin-card" style={{ padding: '12px 20px', marginTop: 12 }}>
+      <div className="admin-card" style={{ padding: '12px 20px' }}>
         <div 
           style={{ 
             display: 'flex', 
@@ -374,6 +373,102 @@ export default function UserManagementPage({ embeddedMode = 'default' }: UserMan
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="admin-card" style={{ padding: '12px 20px' }}>
+        <div 
+          style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+          onClick={() => setShowDefaultAccounts(!showDefaultAccounts)}
+        >
+          <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--admin-text)', textTransform: 'uppercase', fontFamily: 'Consolas, monospace', letterSpacing: '0.5px' }}>
+            3 BẢNG PHÂN QUYỀN CHI TIẾT CÁC TÀI KHOẢN MẶC ĐỊNH {showDefaultAccounts ? '▼' : '►'}
+          </div>
+          <span style={{ fontSize: '0.7rem', color: 'var(--admin-accent)', fontWeight: 800 }}>
+            {showDefaultAccounts ? 'THU GỌN' : 'HIỂN THỊ CHI TIẾT'}
+          </span>
+        </div>
+        
+        {showDefaultAccounts && (
+          <div style={{ marginTop: 12, overflowX: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '18%' }}>Cấp Quản Lý</th>
+                  <th style={{ width: '12%' }}>Tài Khoản</th>
+                  <th style={{ width: '12%' }}>Mật Khẩu</th>
+                  <th style={{ width: '23%' }}>Phạm Vi</th>
+                  <th style={{ width: '35%' }}>Chức Năng Cho Phép</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b style={{ color: 'var(--admin-danger)', fontSize: '.75rem' }}>Admin Toàn Cục</b></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>multi</code></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>Demo@2024</code></td>
+                  <td style={{ fontSize: '.75rem' }}>Toàn bộ hệ thống (Không giới hạn Tỉnh/Trạm).</td>
+                  <td>
+                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: '.72rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <li>Thêm, sửa, xóa các Tỉnh trong hệ thống.</li>
+                      <li>Thêm mới, kết nối, gỡ bỏ Trạm Con khỏi Tỉnh.</li>
+                      <li>Tạo mới, phân quyền Admin cấp dưới (provinceadmin, teamleader, stationadmin).</li>
+                      <li>Kích hoạt, quản lý Giftcode bản quyền toàn cục.</li>
+                      <li>Giám sát camera trực tiếp, biểu đồ đo đạc, xem cảnh báo toàn hệ thống.</li>
+                      <li>Điều khiển thiết bị từ xa tại bất kỳ trạm nào.</li>
+                    </ul>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b style={{ color: '#f59e0b', fontSize: '.75rem' }}>Admin Tỉnh</b></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>provinceadmin</code></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>Province@123</code></td>
+                  <td style={{ fontSize: '.75rem' }}>Chỉ trong Tỉnh được gán (Tây Ninh, Long An...).</td>
+                  <td>
+                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: '.72rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <li>Quản lý danh sách các Trạm Con và Tổ thao tác trực thuộc tỉnh phụ trách.</li>
+                      <li>Tạo tài khoản cấp dưới (Tổ trưởng, Admin Trạm, Nhân viên) trong tỉnh.</li>
+                      <li>Kích hoạt, gia hạn Giftcode bản quyền cho các Trạm Con thuộc tỉnh.</li>
+                      <li>Xem camera, bản đồ số, trạng thái thiết bị và báo cáo tổng hợp thuộc tỉnh.</li>
+                    </ul>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b style={{ color: 'var(--admin-success)', fontSize: '.75rem' }}>Tổ trưởng Tổ thao tác</b></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>teamleader</code></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>TeamLeader@123</code></td>
+                  <td style={{ fontSize: '.75rem' }}>Các trạm do Tổ thao tác phụ trách.</td>
+                  <td>
+                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: '.72rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <li>Giám sát thời gian thực các trạm biến áp được phân công.</li>
+                      <li>Theo dõi camera trực tiếp, tiếp nhận cảnh báo khẩn cấp tại hiện trường.</li>
+                      <li>Điều khiển thiết bị ngoại vi (còi, đèn, camera PTZ) khi xử lý sự cố.</li>
+                      <li>Xem lịch sử sự cố và xuất báo cáo vận hành thuộc tổ.</li>
+                    </ul>
+                  </td>
+                </tr>
+                <tr>
+                  <td><b style={{ color: 'var(--admin-accent)', fontSize: '.75rem' }}>Admin Trạm</b></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>stationadmin</code></td>
+                  <td><code style={{ background: 'var(--admin-layer-2)', padding: '2px 6px', borderRadius: 4, fontSize: '.7rem' }}>Station@123</code></td>
+                  <td style={{ fontSize: '.75rem' }}>Chỉ trong Trạm con được gán.</td>
+                  <td>
+                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: '.72rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <li>Cấu hình camera, cảm biến nhiệt độ, cảm biến PD cục bộ tại trạm con.</li>
+                      <li>Thiết lập ngưỡng luật cảnh báo tự động (nhiệt độ, xâm nhập) tại trạm.</li>
+                      <li>Quản lý nhân sự và gán lịch trực cho nhân viên vận hành tại trạm con.</li>
+                      <li>Xem camera trực tiếp, lịch sử ghi hình và báo cáo hiệu suất thiết bị trạm.</li>
+                    </ul>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -44,7 +44,7 @@ const timeAgo = (iso: string) => {
  * có thể thu gọn và điều hướng đến trang lịch sử chi tiết.
  */
 export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const navigate = useNavigate();
 
   const isFireAlert = (a: AlertItem) => {
@@ -66,7 +66,7 @@ export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
     <div style={{
       display: 'flex', flexDirection: 'column',
       flex: isCollapsed ? '0 0 auto' : (sorted.length === 0 ? '0 0 auto' : '0 1 auto'),
-      maxHeight: '500px',
+      maxHeight: '480px',
       minHeight: 0,
       background: 'var(--admin-overlay)', backdropFilter: 'blur(12px)',
       border: `1px solid ${openCount > 0 ? 'rgba(239,68,68,0.35)' : 'var(--admin-border)'}`,
@@ -75,7 +75,7 @@ export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
       {/* Header */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '3px 4px', borderBottom: '1px solid var(--admin-border-light)',
+        padding: '2px 4px', borderBottom: '1px solid var(--admin-border-light)',
         background: 'var(--admin-hover)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -124,7 +124,7 @@ export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
             <div style={{ overflowY: 'auto', flex: '0 1 auto', padding: '2px 4px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.6rem' }}>
                 <tbody>
-                  {sorted.slice(0, 20).map((a, idx) => {
+                  {sorted.slice(0, 30).map((a, idx) => {
                     const isAlarm = a.level === 'alarm';
                     const cat = getCategory(a.message);
                     
@@ -155,11 +155,11 @@ export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
                         onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = idx % 2 === 0 ? 'transparent' : 'var(--admin-layer-1)'}
                       >
                         {/* Time */}
-                        <td style={{ padding: '2px 2px', color: 'var(--admin-text-muted)', whiteSpace: 'nowrap', textAlign: 'left', width: '70%' }}>
+                        <td style={{ padding: '1px 2px', color: 'var(--admin-text-muted)', whiteSpace: 'nowrap', textAlign: 'left', width: '70%' }}>
                           {timeAgo(a.triggeredAt)}
                         </td>
                         {/* Category Pill */}
-                        <td style={{ padding: '2px 2px', textAlign: 'right', width: '30%' }}>
+                        <td style={{ padding: '1px 2px', textAlign: 'right', width: '30%' }}>
                           <span style={{
                             display: 'inline-block',
                             fontSize: '0.46rem',
@@ -188,7 +188,7 @@ export default function AlertPanel({ alerts, onAlertClick }: AlertPanelProps) {
           <div
             onClick={() => navigate('/alerts-history')}
             style={{
-              padding: '3px 4px', borderTop: '1px solid var(--admin-border-light)',
+              padding: '2px 4px', borderTop: '1px solid var(--admin-border-light)',
               background: 'var(--admin-hover)', textAlign: 'center', cursor: 'pointer', flexShrink: 0,
             }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = '0.7'}

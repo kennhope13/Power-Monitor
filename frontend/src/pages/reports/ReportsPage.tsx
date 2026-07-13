@@ -1,23 +1,19 @@
 // ============================================================
 // ReportsPage.tsx — Báo cáo dữ liệu
 // Tab "Xuất XLSX": chọn cảm biến + khoảng thời gian → xem trước + xuất file
-// Tab "Báo cáo": tạo báo cáo định kỳ (daily/monthly/event), tải về PDF
 // ============================================================
 
 import { useState, useEffect } from 'react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import { stationApi, AlertItem } from '@/services/StationApiService';
 import { useStationStore } from '@/store';
-import { TabId } from './types';
 import ExportTab from './tabs/ExportTab';
-import ReportTab from './tabs/ReportTab';
 
 interface ReportsPageProps {
   embeddedMode?: 'default' | 'central';
 }
 
 export default function ReportsPage({ embeddedMode = 'default' }: ReportsPageProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('export');
   const [stationId, setStationId] = useState('');
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const stations = useStationStore(s => s.stations);
@@ -47,25 +43,15 @@ export default function ReportsPage({ embeddedMode = 'default' }: ReportsPagePro
               width={160}
             />
           </div>
-          <button 
-            onClick={() => setActiveTab('export')} 
-            className={`btn-industrial ${activeTab === 'export' ? 'btn-primary' : ''}`} 
-          >
+          <button className="btn-industrial btn-primary">
             Xuất dữ liệu
-          </button>
-          <button 
-            onClick={() => setActiveTab('report')} 
-            className={`btn-industrial ${activeTab === 'report' ? 'btn-primary' : ''}`} 
-          >
-            Báo cáo phân tích
           </button>
         </div>
       </div>
  
       {/* CONTENT */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'export' && <ExportTab stationId={stationId} alerts={alerts} />}
-        {activeTab === 'report' && <ReportTab stationId={stationId} />}
+        <ExportTab stationId={stationId} alerts={alerts} />
       </div>
     </div>
   );

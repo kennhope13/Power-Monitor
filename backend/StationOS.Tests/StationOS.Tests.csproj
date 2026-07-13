@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -26,6 +26,7 @@
     <ProjectReference Include="..\StationOS.Services\StationOS.Services.csproj" />
     <ProjectReference Include="..\StationOS.Workers\StationOS.Workers.csproj" />
     <ProjectReference Include="..\StationOS.Data\StationOS.Data.csproj" />
+    <ProjectReference Include="..\StationOS.Api\StationOS.Api.csproj" />
   </ItemGroup>
 
 </Project>

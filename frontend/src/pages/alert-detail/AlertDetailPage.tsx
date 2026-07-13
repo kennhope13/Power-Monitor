@@ -12,6 +12,7 @@ import { useDeviceStore } from '@/store';
 import { fmtDateTime } from '@/utils/format';
 import { showToast } from '@/utils/toast';
 import { API_BASE_URL } from '@/utils/env';
+import { confirmDialog } from '@/utils/confirm';
 
 // AlertDetail = dữ liệu cảnh báo + mảng lịch sử thay đổi trạng thái
 type AlertDetail = AlertItem & { history: AlertHistoryEntry[] };
@@ -80,11 +81,11 @@ export default function AlertDetailPage() {
   /** Đóng cảnh báo sau khi người dùng xác nhận qua confirm dialog. */
   const handleClose = async () => {
     if (!alert) return;
-    if (!window.confirm('Xác nhận đóng cảnh báo này?')) return;
+    if (!await confirmDialog({ title: 'Đóng cảnh báo', message: 'Xác nhận đóng cảnh báo này?', confirmText: 'Đóng', danger: false })) return;
 
     try {
       await stationApi.closeAlert(alert.id);
-      showToast('Đã đóng cảnh báo', 'success');
+      showToast('Đã xử lý cảnh báo', 'success');
       loadAlertDetail();
     } catch (e: any) {
       showToast(`Lỗi đóng cảnh báo: ${e.message || e}`, 'error');
@@ -117,7 +118,7 @@ export default function AlertDetailPage() {
   const statusLabel: Record<string, string> = {
     open: 'Chưa xử lý',
     acked: '🟡 Đang xử lý',
-    closed: '🟢 Đã đóng',
+    closed: '🟢 Đã xử lý',
   };
   const sourceLabel: Record<string, string> = {
     rule_engine: 'Quy tắc tự động',

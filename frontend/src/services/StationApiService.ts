@@ -47,6 +47,7 @@ class StationApiService {
   getStations = stationService.getStations.bind(stationService);
   getFirstStationId = stationService.getFirstStationId.bind(stationService);
   createStation = stationService.createStation.bind(stationService);
+  updateStation = stationService.updateStation.bind(stationService);
   deleteStation = stationService.deleteStation.bind(stationService);
 
   // ── Devices ───────────────────────────────────────────────
@@ -62,6 +63,7 @@ class StationApiService {
   testProtocolConnection = deviceService.testProtocolConnection.bind(deviceService);
   discoverHikvision = deviceService.discoverHikvision.bind(deviceService);
   autoConfigure = deviceService.autoConfigure.bind(deviceService);
+  importCabinetTemplate = deviceService.importCabinetTemplate.bind(deviceService);
   getRelated = deviceService.getRelated.bind(deviceService);
 
   // ── ROI Points ────────────────────────────────────────────
@@ -106,6 +108,7 @@ class StationApiService {
   closeAlert = alertService.closeAlert.bind(alertService);
   getAlertDetail = alertService.getAlertDetail.bind(alertService);
   exportAlertsCsv = alertService.exportCsv.bind(alertService);
+  sendAlertCentral = alertService.sendCentral.bind(alertService);
 
   // ── Logs ──────────────────────────────────────────────────
   getAuditLogs = logService.getAuditLogs.bind(logService);
@@ -158,7 +161,9 @@ class StationApiService {
   sendTestEmail = systemService.sendTestEmail.bind(systemService);
   getDetections = systemService.getDetections.bind(systemService);
   getLicenseStatus = systemService.getLicenseStatus.bind(systemService);
+  getLicenseRequest = systemService.getLicenseRequest.bind(systemService);
   activateLicense = systemService.activateLicense.bind(systemService);
+  importLicense = systemService.importLicense.bind(systemService);
 }
 
 export const stationApi = new StationApiService();

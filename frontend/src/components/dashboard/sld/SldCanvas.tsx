@@ -10,6 +10,7 @@ interface SldCanvasProps {
   colorMatrix?: string;
   sensors?: SensorPoint[];
   rules?: Rule[];
+  sensorThresholds?: Record<string, { warn: number | null; alarm: number | null }>;
   selectedNodeId?: string;
   onNodeSelect?: (point: SldPoint | null) => void;
   onPointsChanged?: () => void;
@@ -47,11 +48,12 @@ const SLD_H = 612;
  */
 const DARK_MATRIX = '-0.161 0 0 0 0.220  -0.651 0 0 0 0.741  -0.808 0 0 0 0.973  0 0 0 1 0';
 const LIGHT_MATRIX = '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0';
+const SLD_TOP_OFFSET = 80;
 
 function getTheme() { return document.documentElement.dataset.theme || 'dark'; }
 
 const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
-  ({ stationId, editMode = false, showLabels = false, colorMatrix, sensors = [], rules = [], selectedNodeId, onNodeSelect, onPointsChanged, onNodeDropped }, ref) => {
+  ({ stationId, editMode = false, showLabels = false, colorMatrix, sensors = [], rules = [], sensorThresholds = {}, selectedNodeId, onNodeSelect, onPointsChanged, onNodeDropped }, ref) => {
     const viewportRef = useRef<HTMLDivElement>(null);
 
     const [transform, setTransform] = useState({ vs: 1, vx: 0, vy: 0, vr: 0 });
@@ -100,7 +102,16 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       if (!stationId) return;
       try {
         const data = await stationApi.getSld(stationId);
-        setPoints(data.points || []);
+        // Bỏ node trùng deviceId — giữ cái đầu tiên (thêm sớm nhất)
+        const seen = new Set<string>();
+        const deduped = (data.points || []).filter(p => {
+          const key = p.deviceId?.toLowerCase();
+          if (!key) return true;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setPoints(deduped);
         setSvgUrl(data.svgUrl ?? null);
         // Phục hồi góc xoay đã lưu trong localStorage
         const localVr = localStorage.getItem(`sld_vr_${stationId}`);
@@ -114,7 +125,7 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
     const fitView = useCallback(() => {
       if (!viewportRef.current) return;
       const r = viewportRef.current.getBoundingClientRect();
-      const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 0.96;
+      const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 1.02;
       setTransform(prev => ({ ...prev, vs: s, vx: (r.width - SLD_W * s) / 2, vy: (r.height - SLD_H * s) / 2 }));
     }, []);
 
@@ -178,6 +189,37 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       const rx = Math.cos(rad) * (sldX - cx) - Math.sin(rad) * (sldY - cy) + cx;
       const ry = Math.sin(rad) * (sldX - cx) + Math.cos(rad) * (sldY - cy) + cy;
       return { sx: rx * t.vs + t.vx, sy: ry * t.vs + t.vy };
+    };
+
+    /** Tìm node gần nhất tại vị trí chuột trên viewport để hover ổn định dù SVG bị rotate/scale. */
+    const hitTestPointAtScreenPos = (clientX: number, clientY: number) => {
+      if (!viewportRef.current) return null;
+      const r = viewportRef.current.getBoundingClientRect();
+      const x = clientX - r.left;
+      const y = clientY - r.top;
+
+      let bestId: string | null = null;
+      let bestDist = Infinity;
+
+      for (const p of pointsRef.current) {
+        const isCam = p.deviceType?.startsWith('camera');
+        const baseR = isCam ? Math.max(p.r ?? 8, 5) : (p.r ?? 8);
+        const hitR = Math.max(baseR * transformRef.current.vs * 2.2, 20);
+        const { sx, sy } = toScreenPos(p.x, p.y, transformRef.current);
+        const dist = Math.hypot(x - sx, y - sy);
+        if (dist <= hitR && dist < bestDist) {
+          bestId = p.id;
+          bestDist = dist;
+        }
+      }
+
+      return bestId;
+    };
+
+    const handleViewportMouseMove = (e: React.MouseEvent) => {
+      if (editMode || draggingPointId.current || isPanning.current) return;
+      const nextId = hitTestPointAtScreenPos(e.clientX, e.clientY);
+      setHoveredNodeId(prev => (prev === nextId ? prev : nextId));
     };
 
     useEffect(() => {
@@ -260,17 +302,21 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       e.preventDefault();
       const deviceId = e.dataTransfer.getData('device_id');
       const deviceName = e.dataTransfer.getData('device_name');
-      const sensorTag = e.dataTransfer.getData('sensor_tag') || undefined;
       if (!deviceId) return;
       const r = viewportRef.current.getBoundingClientRect();
       const t = transformRef.current;
-      onNodeDropped?.(Math.round((e.clientX - r.left - t.vx) / t.vs), Math.round((e.clientY - r.top - t.vy) / t.vs), deviceId, deviceName, sensorTag);
+      const baseX = Math.round((e.clientX - r.left - t.vx) / t.vs);
+      const baseY = Math.round((e.clientY - r.top - t.vy) / t.vs);
+      // Luôn tạo 1 node duy nhất per device (không tách ra từng sensor)
+      onNodeDropped?.(baseX, baseY, deviceId, deviceName, deviceId);
     };
 
     /**
      * Trả về màu điểm node theo loại thiết bị và trạng thái kết nối.
      * Camera → xanh accent, offline → đỏ, online → xanh success.
      */
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
     // Tính level trực tiếp từ sensor value + rule config — không qua DB alert.
     // Mỗi lần sensor hoặc rules thay đổi → recompute ngay lập tức.
     const dotLevelByPoint = useMemo(() => {
@@ -290,7 +336,7 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
         const key = `${rule.deviceId.toLowerCase()}|${pointId.toLowerCase()}`;
         const sKey = `${rule.deviceId.toLowerCase()}|${pointId.toLowerCase()}`;
         const sensor = sensorMap.get(sKey);
-        if (!sensor || sensor.value == null) continue;
+        if (!sensor || sensor.value == null || sensor.quality !== 0) continue;
         const val = sensor.value;
 
         const evaluate = (v: number, o: string, t: number) => {
@@ -314,16 +360,75 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       return map;
     }, [rules, sensorMap]);
 
-    const getDotLevel = (deviceId?: string, pointId?: string) => {
-      if (!deviceId || !pointId) return undefined;
-      return dotLevelByPoint.get(`${deviceId.toLowerCase()}|${pointId.toLowerCase()}`);
+    const getThresholdLevel = (deviceId?: string, pointId?: string, value?: number): 'alarm' | 'warning' | undefined => {
+      if (!deviceId || !pointId || value == null) return undefined;
+      const deviceKey = deviceId.toLowerCase();
+      const rawKey = pointId.toLowerCase().trim();
+      const suffixKey = rawKey.includes('_') ? rawKey.split('_').pop() || rawKey : rawKey;
+      const candidates = [
+        `${deviceKey}|${rawKey}`,
+        `${deviceKey}|${suffixKey}`,
+        `${deviceId}_${pointId}`.toLowerCase(),
+      ];
+      let cfg: { warn: number | null; alarm: number | null } | undefined;
+      for (const key of candidates) {
+        cfg = sensorThresholds[key];
+        if (cfg) break;
+      }
+      if (!cfg) return undefined;
+      if (cfg.alarm !== null && value >= cfg.alarm) return 'alarm';
+      if (cfg.warn !== null && value >= cfg.warn) return 'warning';
+      return undefined;
     };
 
-    const getDotColor = (type?: string, _status?: string, deviceId?: string, pointId?: string) => {
-      if (type?.startsWith('camera')) return 'var(--admin-accent)';
-      const level = getDotLevel(deviceId, pointId);
-      if (level === 'alarm')   return 'var(--admin-danger)';
-      if (level === 'warning') return 'var(--admin-warning)';
+    const getDotLevel = (deviceId?: string, pointId?: string, value?: number) => {
+      if (!deviceId || !pointId) return undefined;
+      return getThresholdLevel(deviceId, pointId, value) || dotLevelByPoint.get(`${deviceId.toLowerCase()}|${pointId.toLowerCase()}`);
+    };
+
+    /** Tìm trạng thái worst-case cho toàn bộ device (duyệt tất cả sensor points). */
+    const getDeviceWorstLevel = (deviceId?: string): 'alarm' | 'warning' | undefined => {
+      if (!deviceId) return undefined;
+      const prefix = deviceId.toLowerCase() + '|';
+      let worst: 'alarm' | 'warning' | undefined;
+      dotLevelByPoint.forEach((level, key) => {
+        if (!key.startsWith(prefix)) return;
+        if (UUID_RE.test(key.slice(prefix.length))) return;
+        if (level === 'alarm') worst = 'alarm';
+        else if (level === 'warning' && worst !== 'alarm') worst = 'warning';
+      });
+      // Ngưỡng từ tab thiết bị (camera ROI) — chỉ áp dụng cho đúng thiết bị, bỏ zone UUID
+      sensorMap.forEach(sensor => {
+        if (!sensor.deviceId || sensor.deviceId.toLowerCase() !== deviceId) return;
+        if (UUID_RE.test(sensor.pointId)) return;
+        const level = getThresholdLevel(sensor.deviceId, sensor.pointId, sensor.value);
+        if (level === 'alarm') worst = 'alarm';
+        else if (level === 'warning' && worst !== 'alarm') worst = 'warning';
+      });
+      return worst;
+    };
+
+    const getDotColor = (type?: string, _status?: string, deviceId?: string, _pointId?: string) => {
+      if (type?.startsWith('camera')) {
+        // Camera: chỉ dùng ngưỡng ROI cấu hình trực tiếp, không qua rule system (P1-P20 seeded rules)
+        let worst: 'alarm' | 'warning' | undefined;
+        const did = deviceId?.toLowerCase();
+        if (did) {
+          sensorMap.forEach(sensor => {
+            if (!sensor.deviceId || sensor.deviceId.toLowerCase() !== did) return;
+            if (UUID_RE.test(sensor.pointId)) return;
+            const lv = getThresholdLevel(sensor.deviceId, sensor.pointId, sensor.value);
+            if (lv === 'alarm') worst = 'alarm';
+            else if (lv === 'warning' && worst !== 'alarm') worst = 'warning';
+          });
+        }
+        if (worst === 'alarm')   return 'var(--admin-danger)';
+        if (worst === 'warning') return 'var(--admin-warning)';
+        return 'var(--admin-accent)';
+      }
+      const deviceLevel = getDeviceWorstLevel(deviceId);
+      if (deviceLevel === 'alarm')   return 'var(--admin-danger)';
+      if (deviceLevel === 'warning') return 'var(--admin-warning)';
       return 'var(--admin-success)';
     };
 
@@ -332,7 +437,7 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
      * dựa trên vị trí (top/bottom/left/right), tỉ lệ zoom và kích thước badge.
      */
     const getBadgeOffset = (pos: BadgeConfig['pos'], vs: number, r: number, bw: number, bh: number) => {
-      const c = r * vs + 5;
+      const c = r * vs + 2;
       switch (pos) {
         case 'bottom': return { bx: 0, by: c + bh / 2 };
         case 'left':   return { bx: -(c + bw / 2 + 2), by: 0 };
@@ -341,30 +446,87 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       }
     };
 
-    /** Render tooltip nổi hiển thị tên, giá trị cảm biến và cảnh báo offline của node đang hover. */
+    /** Lấy tất cả sensor readings cho 1 device */
+    const getDeviceSensors = (deviceId?: string): SensorPoint[] => {
+      if (!deviceId) return [];
+      const prefix = deviceId.toLowerCase() + '|';
+      const result: SensorPoint[] = [];
+      sensorMap.forEach((sensor, key) => {
+        if (key.startsWith(prefix)) result.push(sensor);
+      });
+      return result;
+    };
+
+    /** Render tooltip nổi hiển thị TẤT CẢ sensor readings của thiết bị khi hover. */
     const renderTooltip = () => {
       if (!hoveredNodeId || editMode) return null;
       const p = points.find(pt => pt.id === hoveredNodeId);
       if (!p) return null;
       
-      const sensorKey = `${p.deviceId?.toLowerCase()}|${p.pointId?.toLowerCase()}`;
-      const sensor = p.deviceId && p.pointId ? sensorMap.get(sensorKey) : undefined;
+      const allDeviceSensors = getDeviceSensors(p.deviceId);
       const { sx, sy } = toScreenPos(p.x, p.y, transform);
-      
+
+      const TYPE_VI: Record<string, string> = {
+        camera_dual: 'Camera Kép', camera_thermal: 'Camera Nhiệt',
+        camera_cctv: 'Camera CCTV', camera_pd: 'Camera PD',
+        cabinet: 'Tủ điện', plc_s7: 'PLC S7', sensor_temp: 'Cảm biến nhiệt',
+      };
+      const typeLabel = TYPE_VI[p.deviceType ?? ''] || p.deviceType || 'Thiết bị';
+      const nameLabel = p.label || p.deviceName || '';
+
+      // Short-ID pattern: "D1", "D2", "P1", "P2" — 1-2 ký tự + chữ số
+      const SHORT_ID_RE = /^[A-Za-z]{1,2}\d*$/;
+      const dedupeCamera = (sensors: SensorPoint[]): SensorPoint[] => {
+        // Bỏ UUID (zone) và short-ID nếu đã có bản dài hơn với cùng value
+        const longNames = new Set(sensors.filter(s => !UUID_RE.test(s.pointId) && !SHORT_ID_RE.test(s.pointId)).map(s => s.pointId));
+        return sensors.filter(s => {
+          if (UUID_RE.test(s.pointId)) return false;
+          if (SHORT_ID_RE.test(s.pointId) && longNames.size > 0) return false;
+          return true;
+        });
+      };
+      const deviceSensors = p.deviceType?.startsWith('camera')
+        ? dedupeCamera(allDeviceSensors)
+        : allDeviceSensors;
+
       return (
         <div style={{
           position: 'fixed', top: sy + 15, left: sx + 15, zIndex: 100,
           background: 'var(--admin-overlay)', backdropFilter: 'blur(8px)',
-          border: '1px solid var(--admin-accent)', borderRadius: 4, padding: '6px 10px',
+          border: '1px solid var(--admin-accent)', borderRadius: 4, padding: '8px 12px',
           boxShadow: 'var(--admin-shadow)', pointerEvents: 'none',
-          animation: 'tooltipFadeIn 0.15s ease-out'
+          animation: 'tooltipFadeIn 0.15s ease-out', minWidth: 140
         }}>
-          <div style={{ fontSize: '.6rem', color: 'var(--admin-text-muted)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 2 }}>{p.deviceType || 'Thiết bị'}</div>
-          <div style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--admin-text)', marginBottom: 4 }}>{p.label || p.pointId || 'Không có tên'}</div>
+          <div style={{ fontSize: '.6rem', color: 'var(--admin-text-muted)', fontWeight: 800, textTransform: 'uppercase', marginBottom: 2 }}>{typeLabel}</div>
+          {nameLabel && <div style={{ fontSize: '.8rem', fontWeight: 700, color: 'var(--admin-text)', marginBottom: 4 }}>{nameLabel}</div>}
           <div style={{ height: 1, background: 'var(--admin-border-light)', margin: '4px 0' }} />
-          <div style={{ fontSize: '.75rem', fontWeight: 700, color: 'var(--admin-accent)' }}>
-            Giá trị: {sensor ? `${Math.round(sensor.value * 10) / 10}${sensor.unit || ''}` : '--'}
-          </div>
+          {deviceSensors.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {deviceSensors.map(s => {
+                const isOffline = s.quality === 2;
+                const isCamSensor = !!(p.deviceType?.startsWith('camera') || s.unit === '°C' || s.unit === '℃');
+                // Camera/nhiệt: dùng ngưỡng ROI trực tiếp (không qua rule system chung)
+                const level = isOffline ? undefined
+                  : isCamSensor
+                    ? getThresholdLevel(p.deviceId, s.pointId, s.value)
+                    : getDotLevel(p.deviceId, s.pointId, s.value);
+                const indiColor = s.value === 0 ? 'var(--admin-accent)' : s.value === 1 ? 'var(--admin-warning)' : 'var(--admin-danger)';
+                const indiLabel = s.value === 0 ? 'Bình thường' : s.value === 1 ? 'Cảnh báo' : 'Báo động';
+                const color = isOffline ? 'var(--admin-text-muted)' : s.pointId === 'pd_indi' ? indiColor : level === 'alarm' ? 'var(--admin-danger)' : level === 'warning' ? 'var(--admin-warning)' : 'var(--admin-success)';
+                const valStr = isOffline ? '---'
+                  : s.pointId === 'pd_indi' ? indiLabel
+                  : `${Math.round(s.value * 10) / 10}${s.unit || ''}`;
+                return (
+                  <div key={s.pointId} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ fontSize: '.65rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>{s.pointId.replace(/_/g, ' ')}</span>
+                    <span style={{ fontSize: '.7rem', fontWeight: 800, color, fontFamily: 'Consolas, monospace' }}>{valStr}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: '.7rem', color: 'var(--admin-text-muted)' }}>Chưa có dữ liệu</div>
+          )}
           {p.deviceStatus === 'offline' && <div style={{ fontSize: '.6rem', color: 'var(--admin-danger)', marginTop: 4, fontWeight: 700 }}>⚠️ NGOẠI TUYẾN</div>}
         </div>
       );
@@ -372,21 +534,24 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
 
     return (
       <div id="sldViewport" ref={viewportRef}
-        onMouseDown={handleMouseDown} onWheel={handleWheel} onDragOver={handleDragOver} onDrop={handleDrop}
-        style={{ position: 'absolute', inset: 0, overflow: 'hidden', cursor: 'grab', backgroundColor: 'var(--admin-bg)' }}
+        onMouseDown={handleMouseDown} onMouseMove={handleViewportMouseMove} onMouseLeave={() => setHoveredNodeId(null)} onWheel={handleWheel} onDragOver={handleDragOver} onDrop={handleDrop}
+        style={{ position: 'absolute', top: SLD_TOP_OFFSET, left: 0, right: 0, bottom: 0, overflow: 'hidden', cursor: 'grab', backgroundColor: 'var(--admin-bg)', willChange: 'transform' }}
       >
-        <svg id="sld-canvas" style={{ width: '100%', height: '100%', display: 'block', backgroundColor: 'var(--admin-bg)' }} xmlns="http://www.w3.org/2000/svg">
+        <svg id="sld-canvas" style={{ width: '100%', height: '100%', display: 'block', backgroundColor: 'var(--admin-bg)' }} xmlns="http://www.w3.org/2000/svg"
+          shapeRendering="crispEdges" textRendering="geometricPrecision">
           <defs>
-            <filter id="sld-color-filter" colorInterpolationFilters="sRGB">
+            <filter id="sld-color-filter" colorInterpolationFilters="sRGB" x="0" y="0" width="100%" height="100%">
               <feColorMatrix id="sld-color-matrix" type="matrix" values={colorMatrix || (['light','soft-light','silver'].includes(themeId) ? LIGHT_MATRIX : DARK_MATRIX)} />
             </filter>
           </defs>
-          <g id="sld-world" transform={`translate(${transform.vx},${transform.vy}) scale(${transform.vs}) rotate(${transform.vr}, ${SLD_W / 2}, ${SLD_H / 2})`}>
+          <g id="sld-world" transform={`translate(${Math.round(transform.vx)},${Math.round(transform.vy)}) scale(${transform.vs}) rotate(${transform.vr}, ${SLD_W / 2}, ${SLD_H / 2})`}>
             <g id="sld-bg">
               <rect width={SLD_W} height={SLD_H} fill="none" />
               {svgUrl ? (
                 <image href={svgUrl.startsWith('/sld/') ? `${API_BASE_URL}${svgUrl}` : svgUrl}
-                  x="0" y="0" width={SLD_W} height={SLD_H} preserveAspectRatio="xMidYMid meet" filter="url(#sld-color-filter)" />
+                  x="0" y="0" width={SLD_W} height={SLD_H} preserveAspectRatio="xMidYMid meet"
+                  filter="url(#sld-color-filter)"
+                  style={{ imageRendering: 'crisp-edges' } as React.CSSProperties} />
               ) : (
                 <text x={SLD_W / 2} y={SLD_H / 2} textAnchor="middle" fill="var(--admin-border)" fontSize="18" fontFamily="sans-serif">
                   Chưa có sơ đồ — Bật "Chỉnh sơ đồ" và upload file SVG
@@ -395,45 +560,95 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
             </g>
             <g id="dash-dots">
               {points.map(p => {
-                const sensorKey = `${p.deviceId?.toLowerCase()}|${p.pointId?.toLowerCase()}`;
-                const sensor = p.deviceId && p.pointId ? sensorMap.get(sensorKey) : undefined;
+                const deviceSensors = getDeviceSensors(p.deviceId);
                 const cfg = { ...DEFAULT_BADGE, ...(badgeCfgs[p.id] || {}) };
-                const label = sensor ? `${Math.round(sensor.value * 10) / 10}${sensor.unit || ''}` : '--';
+                const isCam = p.deviceType?.startsWith('camera');
+                const camTypeLabel = isCam
+                  ? ({ camera_thermal: 'Nhiệt', camera_pd: 'PD', camera_dual: 'Kép', camera_optical: 'Thường' }[p.deviceType ?? ''] ?? 'Cam')
+                  : null;
+                const label = p.label || (isCam ? camTypeLabel! : deviceSensors.length > 0 ? `${deviceSensors.length} điểm` : '--');
+                const r = isCam ? Math.max(p.r, 5) : p.r;
                 const bh = cfg.size + 6;
                 const bw = Math.max(bh * 2, label.length * cfg.size * 0.62 + 10);
-                const { bx, by } = getBadgeOffset(cfg.pos, transform.vs, p.r, bw, bh);
+                const badgeR = isCam ? r * 0.65 : p.r;
+                const { bx, by } = getBadgeOffset(cfg.pos, transform.vs, badgeR, bw, bh);
                 const isSelected = selectedNodeId === p.id;
                 const dotColor = getDotColor(p.deviceType, p.deviceStatus, p.deviceId, p.pointId);
                 const isAlerted = dotColor !== 'var(--admin-success)' && dotColor !== 'var(--admin-accent)';
                 const badgeTextColor = isAlerted
                   ? dotColor
-                  : sensor ? cfg.color : (['light','soft-light','silver'].includes(themeId) ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)');
+                  : deviceSensors.length > 0 ? cfg.color : (['light','soft-light','silver'].includes(themeId) ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.55)');
+                const pid = (p.pointId || '').toLowerCase();
+                const isThermal = pid.includes('nhiet_do') || pid.startsWith('temp');
+                const isPd = pid === 'phong_dien' || pid === 'pd' || (pid.startsWith('pd') && !isThermal);
+                const isPlcAll = p.deviceType === 'plc_s7' && (pid === (p.deviceId || '').toLowerCase());
+                const pulsing = !isCam && getDeviceWorstLevel(p.deviceId);
+                // Màu icon cố định — không trùng với màu vàng/cam của sơ đồ
+                const iconColor = isAlerted ? dotColor
+                  : isCam ? '#60a5fa'
+                  : isThermal ? '#f87171'
+                  : isPd ? '#a78bfa'
+                  : isPlcAll ? '#34d399'
+                  : dotColor;
+                const hitR = Math.max(r * 2.5, 14);
                 return (
                   <g key={p.id} className="sld-point-g" data-point-id={p.id}
                     transform={`rotate(${-transform.vr}, ${p.x}, ${p.y})`}
                     style={{ cursor: editMode ? 'move' : 'pointer' }}
                     onMouseEnter={() => setHoveredNodeId(p.id)}
-                    onMouseLeave={() => setHoveredNodeId(null)}
                   >
-                    <circle cx={p.x} cy={p.y} r={p.r}
-                      fill={dotColor} fillOpacity="0.85"
-                      stroke={isSelected ? 'rgba(255,255,255,0.9)' : 'none'}
-                      strokeWidth={isSelected ? 2 : 0}
-                      style={getDotLevel(p.deviceId, p.pointId) ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}
+                    {/* Hit circle: onMouseMove dùng distance để tìm đúng node gần nhất, bất kể z-order */}
+                    <circle cx={p.x} cy={p.y} r={hitR} fill="rgba(0,0,0,0.001)"
+                      onMouseMove={editMode ? undefined : (e) => {
+                        const nextId = hitTestPointAtScreenPos(e.clientX, e.clientY);
+                        setHoveredNodeId(prev => prev === nextId ? prev : nextId);
+                      }}
                     />
-                    <g transform={`translate(${p.x + bx / transform.vs}, ${p.y + by / transform.vs}) scale(${1 / transform.vs})`}>
-                      <rect x={-bw / 2} y={-bh / 2} width={bw} height={bh} rx="4"
-                        fill={['light','soft-light','silver'].includes(themeId) ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.38)'}
-                        stroke={isAlerted ? dotColor : (['light','soft-light','silver'].includes(themeId) ? 'rgba(0,0,0,0.15)' : 'none')}
-                        strokeWidth={isAlerted ? 1 : (['light','soft-light','silver'].includes(themeId) ? 0.5 : 0)}
+                    {isCam ? (
+                      /* ── CAMERA icon (outline) ── */
+                      <g>
+                        <g transform={`translate(${p.x - r * 0.72}, ${p.y - r * 0.5}) scale(${r / 7})`}>
+                          <rect x="0" y="1.5" width="9" height="6" rx="1"
+                            fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
+                          <polygon points="9,3 12,1.5 12,7.5 9,6"
+                            fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} strokeLinejoin="round" />
+                        </g>
+                      </g>
+                    ) : isThermal ? (
+                      /* ── THERMAL icon (outline nhiệt kế) ── */
+                      <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
+                        <rect x={p.x - r * 0.18} y={p.y - r * 0.85} width={r * 0.36} height={r * 0.8} rx={r * 0.18}
+                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
+                        <circle cx={p.x} cy={p.y + r * 0.22} r={r * 0.4}
+                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
+                      </g>
+                    ) : isPd ? (
+                      /* ── PD icon (outline tia sét) ── */
+                      <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
+                        <polygon
+                          points={`${p.x + r * 0.25},${p.y - r} ${p.x - r * 0.15},${p.y + r * 0.05} ${p.x + r * 0.15},${p.y + r * 0.05} ${p.x - r * 0.25},${p.y + r}`}
+                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} strokeLinejoin="round" />
+                      </g>
+                    ) : isPlcAll ? (
+                      /* ── PLC chip icon (outline) ── */
+                      <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
+                        <rect x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} rx={r * 0.2}
+                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
+                        {([-0.4, 0.4] as number[]).flatMap(dy => ([-0.4, 0.4] as number[]).map(dx => (
+                          <circle key={`${dx},${dy}`} cx={p.x + r * dx} cy={p.y + r * dy} r={r * 0.15}
+                            fill="none" stroke={iconColor} strokeWidth={0.8} />
+                        )))}
+                      </g>
+                    ) : (
+                      /* ── DEFAULT dot (outline) ── */
+                      <circle cx={p.x} cy={p.y} r={r}
+                        fill="none" stroke={iconColor} strokeWidth={isSelected ? 2 : 1}
+                        style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}
                       />
-                      <text x="0" y={bh / 2 - 2} textAnchor="middle"
-                        fill={badgeTextColor}
-                        fontSize={`${cfg.size}px`} fontWeight="800" style={{ pointerEvents: 'none' }}>{label}</text>
-                    </g>
+                    )}
                     {showLabels && p.label && (
-                      <text x={p.x + p.r + 3} y={p.y + 4} fontSize="7" fontFamily="sans-serif"
-                        fontWeight="700" fill={dotColor} style={{ pointerEvents: 'none' }}>
+                      <text x={p.x} y={p.y - r - 3} textAnchor="middle" fontSize="7" fontFamily="sans-serif"
+                        fontWeight="700" fill={iconColor} style={{ pointerEvents: 'none' }}>
                         {p.label}
                       </text>
                     )}

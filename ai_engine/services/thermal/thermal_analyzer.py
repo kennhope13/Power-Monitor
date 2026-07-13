@@ -103,75 +103,138 @@ class ThermalAnalyzer:
 
     async def process(self) -> None:
         """Đọc nhiệt độ tại các điểm và vùng, annotate frame, gửi alert nếu cần."""
-        # 1. Đọc matrix nhiệt từ camera (cache 1.0 giây để tránh overload camera)
         now = time.time()
-        should_fetch = (now - self._last_matrix_fetch >= 1.0) or (self._cached_matrix is None)
         
+        # Thống nhất chu kỳ truy vấn thiết bị (cả raw matrix và fallback) tối đa mỗi 2.0 giây
+        should_fetch = (now - self._last_matrix_fetch >= 2.0)
+
+        # Khởi tạo các thuộc tính cache nếu chưa có
+        if not hasattr(self, '_use_fallback_only'):
+            self._use_fallback_only = False
+        if not hasattr(self, '_consecutive_matrix_failures'):
+            self._consecutive_matrix_failures = 0
+        if not hasattr(self, '_cached_point_temps'):
+            self._cached_point_temps = {}
+        if not hasattr(self, '_cached_zone_results'):
+            self._cached_zone_results = {}
+
         if should_fetch:
-            matrix_data = await self._read_thermal_matrix()
-            if matrix_data:
-                self._cached_matrix = matrix_data
-                self._last_matrix_fetch = now
+            self._last_matrix_fetch = now
+            point_temps = {}
+            zone_results = {}
+            fetched_ok = False
+
+            # 1. Thử đọc matrix raw trước
+            if not self._use_fallback_only:
+                try:
+                    matrix_data = await self._read_thermal_matrix()
+                    if matrix_data:
+                        self._consecutive_matrix_failures = 0
+                        temperatures, w, h, mapping = matrix_data
+
+                        # Trích xuất nhiệt độ cho points từ raw matrix
+                        for pt in self.points:
+                            px_norm = pt.x
+                            py_norm = pt.y
+                            if mapping:
+                                px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                                py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                                px_norm = max(0.0, min(1.0, px_norm))
+                                py_norm = max(0.0, min(1.0, py_norm))
+
+                            px = int(px_norm * w)
+                            py = int(py_norm * h)
+                            px = max(0, min(px, w - 1))
+                            py = max(0, min(py, h - 1))
+                            idx = py * w + px
+                            val = float(temperatures[idx])
+                            if -50.0 <= val <= 500.0:
+                                point_temps[pt.id] = val
+
+                        # Trích xuất nhiệt độ cho zones từ raw matrix
+                        for zn in self.zones:
+                            if not zn.polygon or len(zn.polygon) < 3:
+                                continue
+                            
+                            # Tạo mask cho polygon trên matrix nhỏ
+                            mapped_polygon = []
+                            for p in zn.polygon:
+                                px_norm = p[0]
+                                py_norm = p[1]
+                                if mapping:
+                                    px_norm = (px_norm - mapping.get("x", 0.0)) / mapping.get("width", 1.0)
+                                    py_norm = (py_norm - mapping.get("y", 0.0)) / mapping.get("height", 1.0)
+                                    px_norm = max(0.0, min(1.0, px_norm))
+                                    py_norm = max(0.0, min(1.0, py_norm))
+                                mapped_polygon.append([int(px_norm * w), int(py_norm * h)])
+
+                            poly_pts = np.array(mapped_polygon, np.int32)
+                            mask = np.zeros((h, w), dtype=np.uint8)
+                            cv2.fillPoly(mask, [poly_pts], 255)
+                            
+                            # Lọc các giá trị nhiệt độ trong vùng và clamp
+                            masked_temps = temperatures.reshape((h, w))[mask == 255]
+                            valid_temps = masked_temps[(masked_temps >= -50.0) & (masked_temps <= 500.0)]
+                            if valid_temps.size > 0:
+                                max_val = float(np.max(valid_temps))
+                                
+                                full_matrix = temperatures.reshape((h, w))
+                                full_matrix_masked = np.where((mask == 255) & (full_matrix >= -50.0) & (full_matrix <= 500.0), full_matrix, -1000.0)
+                                max_idx = np.argmax(full_matrix_masked)
+                                max_y, max_x = divmod(max_idx, w)
+                                
+                                # Convert max back to visible coordinates
+                                vx = float(max_x / w)
+                                vy = float(max_y / h)
+                                if mapping:
+                                    vx = vx * mapping.get("width", 1.0) + mapping.get("x", 0.0)
+                                    vy = vy * mapping.get("height", 1.0) + mapping.get("y", 0.0)
+
+                                zone_results[zn.id] = {
+                                    "max": max_val,
+                                    "x": vx,
+                                    "y": vy
+                                }
+                        fetched_ok = True
+                    else:
+                        self._consecutive_matrix_failures += 1
+                        if self._consecutive_matrix_failures >= 3:
+                            self._use_fallback_only = True
+                            logger.info("[ThermalAnalyzer] Switching to fallback thermometry for %s", self.camera_ip)
+                except Exception as ex:
+                    logger.warning("[ThermalAnalyzer] Matrix read failed for %s: %s", self.camera_ip, ex)
+                    self._consecutive_matrix_failures += 1
+                    if self._consecutive_matrix_failures >= 3:
+                        self._use_fallback_only = True
+
+            # 2. Dự phòng/fallback nếu matrix raw thất bại hoặc không dùng
+            if not fetched_ok:
+                try:
+                    fallback_res = await self._read_temperatures_fallback()
+                    if fallback_res:
+                        point_temps, zone_results = fallback_res
+                        fetched_ok = True
+                except Exception as ex:
+                    logger.warning("[ThermalAnalyzer] Fallback read failed for %s: %s", self.camera_ip, ex)
+
+            # 3. Lưu cache & Ingest
+            if fetched_ok:
+                self._cached_point_temps = point_temps
+                self._cached_zone_results = zone_results
+                await self._ingest_measurements(point_temps, zone_results)
             else:
-                matrix_data = self._cached_matrix
+                point_temps = self._cached_point_temps
+                zone_results = self._cached_zone_results
         else:
-            matrix_data = self._cached_matrix
-        
-        point_temps = {}
-        zone_results = {}
+            point_temps = self._cached_point_temps
+            zone_results = self._cached_zone_results
 
-        if matrix_data:
-            floats, w, h = matrix_data
+        if not point_temps and not zone_results:
+            return
 
-            # 2. Trích xuất nhiệt độ cho points
-            for pt in self.points:
-                px = int(pt.x * w)
-                py = int(pt.y * h)
-                px = max(0, min(px, w - 1))
-                py = max(0, min(py, h - 1))
-                idx = py * w + px
-                point_temps[pt.id] = float(floats[idx])
-
-            # 3. Trích xuất nhiệt độ cho zones (Max temp trong vùng)
-            for zn in self.zones:
-                if not zn.polygon or len(zn.polygon) < 3:
-                    continue
-                
-                # Tạo mask cho polygon trên matrix nhỏ
-                poly_pts = np.array([[int(p[0]*w), int(p[1]*h)] for p in zn.polygon], np.int32)
-                mask = np.zeros((h, w), dtype=np.uint8)
-                cv2.fillPoly(mask, [poly_pts], 255)
-                
-                # Lọc các giá trị nhiệt độ trong vùng
-                masked_floats = floats.reshape((h, w))[mask == 255]
-                if masked_floats.size > 0:
-                    max_val = float(np.max(masked_floats))
-                    
-                    full_matrix = floats.reshape((h, w))
-                    full_matrix_masked = np.where(mask == 255, full_matrix, -1000.0)
-                    max_idx = np.argmax(full_matrix_masked)
-                    max_y, max_x = divmod(max_idx, w)
-                    
-                    zone_results[zn.id] = {
-                        "max": max_val,
-                        "x": float(max_x / w),
-                        "y": float(max_y / h)
-                    }
-        else:
-            # Dự phòng cho camera không hỗ trợ đọc matrix raw (ví dụ: Camera 152)
-            fallback_res = await self._read_temperatures_fallback()
-            if fallback_res:
-                point_temps, zone_results = fallback_res
-            else:
-                return
-
-        # Lưu cache nhiệt độ thời gian thực
+        # Lưu cache nhiệt độ thời gian thực cho HUD và API đọc
         self.last_point_temps = point_temps
         self.last_zone_results = zone_results
-
-        # 4. Gửi nhiệt độ thực tế về backend (chỉ gửi khi vừa fetch matrix mới để tránh quá tải backend)
-        if should_fetch:
-            await self._ingest_measurements(point_temps, zone_results)
 
         # 4.3 Đẩy dữ liệu sang Jetson đối tác mỗi 5 phút
         now = time.time()
@@ -261,14 +324,20 @@ class ThermalAnalyzer:
                 await client.post(f"{cfg.backend_url}/api/v1/measurements/ingest", json=payload)
         except Exception: pass
 
-    async def _read_thermal_matrix(self) -> tuple[np.ndarray, int, int] | None:
+    async def _read_thermal_matrix(self) -> tuple[np.ndarray, int, int, dict | None] | None:
         if not self.points and not self.zones: return None
         now = time.time()
         if now < self._auth_cooldown_until: return None
         if not hasattr(self, '_http_client'):
             self._http_client = httpx.AsyncClient(timeout=5.0)
         client = self._http_client
-        for ch in [2, 1]:
+
+        if hasattr(self, '_working_channel') and self._working_channel:
+            channels = [self._working_channel]
+        else:
+            channels = [2, 1]
+
+        for ch in channels:
             url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/{ch}/thermometry/jpegPicWithAppendData?format=json"
             try:
                 resp = await client.get(url, auth=httpx.DigestAuth(self.username, self.password))
@@ -277,6 +346,7 @@ class ThermalAnalyzer:
                     if self._consecutive_auth_failures >= 3: self._auth_cooldown_until = now + 300
                     break
                 if resp.status_code == 200:
+                    self._working_channel = ch
                     self._consecutive_auth_failures = 0
                     content = resp.content
                     boundary = b'--boundary'
@@ -284,35 +354,97 @@ class ThermalAnalyzer:
                     if "boundary=" in ct: boundary = f"--{ct.split('boundary=')[-1].strip()}".encode('ascii')
                     parts = content.split(boundary)
                     w, h, data_len = 256, 192, 196608
+                    mapping = None
                     for part in parts:
                         if b'application/json' in part:
                             h_end = part.find(b'\r\n\r\n')
                             if h_end != -1:
                                 import json
                                 info = json.loads(part[h_end+4:].decode('utf-8', errors='ignore').strip()).get("JpegPictureWithAppendData", {})
-                                w, h = info.get("jpegPicWidth", 256), info.get("jpegPicHeight", 192)
+                                w = info.get("thermalPicWidth") or info.get("jpegPicWidth") or 256
+                                h = info.get("thermalPicHeight") or info.get("jpegPicHeight") or 192
                                 data_len = info.get("p2pDataLen") or (w * h * 4)
+                                mapping = info.get("VisibleValidRect")
                     for part in parts:
                         if b'application/octet-stream' in part:
                             h_end = part.find(b'\r\n\r\n')
                             if h_end != -1:
                                 matrix_bytes = part[h_end+4:][:data_len]
-                                if len(matrix_bytes) >= w * h * 4:
-                                    return np.frombuffer(matrix_bytes, dtype=np.float32), w, h
+                                raw_matrix = self._decode_thermal_matrix(matrix_bytes, int(w), int(h))
+                                if raw_matrix is not None:
+                                    return raw_matrix, int(w), int(h), mapping
                     break
             except Exception: pass
         return None
+
+    def _decode_thermal_matrix(self, matrix_bytes: bytes, w: int, h: int) -> np.ndarray | None:
+        """Decode Hikvision append-data thermal matrix.
+
+        Different Hikvision thermal models expose p2p data as either 2-byte
+        centi-degrees or 4-byte floats. Picking the wrong format yields values
+        around 300C for normal scenes, so score candidate decodes by plausibility.
+        """
+        pixels = w * h
+        candidates: list[np.ndarray] = []
+
+        if len(matrix_bytes) >= pixels * 4:
+            chunk4 = matrix_bytes[:pixels * 4]
+            candidates.extend([
+                np.frombuffer(chunk4, dtype='<f4').astype(np.float32),
+                np.frombuffer(chunk4, dtype='>f4').astype(np.float32),
+                np.frombuffer(chunk4, dtype='<i4').astype(np.float32) / 100.0,
+                np.frombuffer(chunk4, dtype='>i4').astype(np.float32) / 100.0,
+            ])
+
+        if len(matrix_bytes) >= pixels * 2:
+            chunk2 = matrix_bytes[:pixels * 2]
+            candidates.extend([
+                np.frombuffer(chunk2, dtype='<i2').astype(np.float32) / 100.0,
+                np.frombuffer(chunk2, dtype='>i2').astype(np.float32) / 100.0,
+            ])
+
+        best = None
+        best_score = -1.0
+        for arr in candidates:
+            if arr.size != pixels:
+                continue
+            finite = arr[np.isfinite(arr)]
+            if finite.size < pixels * 0.95:
+                continue
+            physical = finite[(finite >= -40.0) & (finite <= 200.0)]
+            if physical.size == 0:
+                continue
+
+            valid_ratio = physical.size / finite.size
+            median = float(np.median(physical))
+            p95 = float(np.percentile(physical, 95))
+            center_penalty = abs(median - 35.0) / 200.0
+            high_penalty = max(0.0, p95 - 120.0) / 200.0
+            score = valid_ratio - center_penalty - high_penalty
+
+            if score > best_score:
+                best_score = score
+                best = arr
+
+        return best
 
     async def _fetch_rule_id_to_name(self) -> dict[int, str]:
         mapping = {}
         if not hasattr(self, '_http_client'):
             self._http_client = httpx.AsyncClient(timeout=5.0)
         client = self._http_client
-        for ch in [2, 1]:
+
+        if hasattr(self, '_working_channel') and self._working_channel:
+            channels = [self._working_channel]
+        else:
+            channels = [2, 1]
+
+        for ch in channels:
             url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/{ch}/thermometry/realTimeList"
             try:
                 resp = await client.get(url, auth=httpx.DigestAuth(self.username, self.password))
                 if resp.status_code == 200:
+                    self._working_channel = ch
                     import xml.etree.ElementTree as ET
                     root = ET.fromstring(resp.content)
                     for r in root.iter():
@@ -347,11 +479,17 @@ class ThermalAnalyzer:
         point_temps = {}
         zone_results = {}
 
-        for ch in [2, 1]:
+        if hasattr(self, '_working_channel') and self._working_channel:
+            channels = [self._working_channel]
+        else:
+            channels = [2, 1]
+
+        for ch in channels:
             url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/{ch}/thermometry/1/rulesTemperatureInfo?format=json"
             try:
                 resp = await client.get(url, auth=httpx.DigestAuth(self.username, self.password))
                 if resp.status_code == 200:
+                    self._working_channel = ch
                     data = resp.json()
                     rules_info = data.get("ThermometryRulesTemperatureInfoList", {}).get("ThermometryRulesTemperatureInfo", [])
                     for rule in rules_info:

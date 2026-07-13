@@ -167,6 +167,14 @@ public class DeviceService
             }
             catch { /* go2rtc chưa sẵn sàng, bỏ qua */ }
 
+            // Nếu camera config có "ffmpeg_transcode": true → wrap URL để transcode H265→H264 qua FFmpeg
+            // Cần thiết khi camera phát H265/HEVC vì WebRTC browsers không hỗ trợ H265 natively
+            var useFfmpeg = config.GetValueOrDefault("ffmpeg_transcode") is bool b && b
+                         || config.GetValueOrDefault("ffmpeg_transcode")?.ToString()?.ToLower() == "true";
+
+            string WrapStream(string rtspUrl) =>
+                useFfmpeg ? $"ffmpeg:{rtspUrl}#video=h264" : rtspUrl;
+
             if (device.Type == "camera_dual")
             {
                 // Đăng ký cả 2 luồng: quang học và nhiệt
@@ -179,7 +187,7 @@ public class DeviceService
                 var rtspThermalUrl = $"rtsp://{username}:{encodedPassword}@{ip}:554{thermalPath}";
 
                 existingStreams[opticalId] = rtspOpticalUrl;
-                existingStreams[thermalId] = rtspThermalUrl;
+                existingStreams[thermalId] = WrapStream(rtspThermalUrl);
 
                 // Thêm sub-stream cho luồng quang học nếu có
                 var subOpticalPath = DeriveHikvisionSubPath(opticalPath);
@@ -189,8 +197,8 @@ public class DeviceService
                     existingStreams[subOpticalId] = $"rtsp://{username}:{encodedPassword}@{ip}:554{subOpticalPath}";
                 }
 
-                _logger.LogInformation("[go2rtc] Đăng ký camera_dual: {OptId} ({OptPath}) + {ThId} ({ThPath})",
-                    opticalId, opticalPath, thermalId, thermalPath);
+                _logger.LogInformation("[go2rtc] Đăng ký camera_dual: {OptId} ({OptPath}) + {ThId} ({ThPath}){Ffmpeg}",
+                    opticalId, opticalPath, thermalId, thermalPath, useFfmpeg ? " [ffmpeg transcode]" : "");
             }
             else if (device.Type == "camera_thermal")
             {
@@ -204,9 +212,10 @@ public class DeviceService
                                ?? $"cam_{ip?.Replace(".", "_")}_thermal";
                 var rtspThermalUrl = $"rtsp://{username}:{encodedPassword}@{ip}:554{thermalPath}";
 
-                existingStreams[thermalId] = rtspThermalUrl;
+                existingStreams[thermalId] = WrapStream(rtspThermalUrl);
 
-                _logger.LogInformation("[go2rtc] Đăng ký camera_thermal: {ThId} ({ThPath})", thermalId, thermalPath);
+                _logger.LogInformation("[go2rtc] Đăng ký camera_thermal: {ThId} ({ThPath}){Ffmpeg}",
+                    thermalId, thermalPath, useFfmpeg ? " [ffmpeg transcode]" : "");
             }
             else
             {
@@ -214,7 +223,7 @@ public class DeviceService
                 var streamId = config.GetValueOrDefault("go2rtc_id")?.ToString() ?? device.Id.ToString()[..8];
                 var rtspUrl = $"rtsp://{username}:{encodedPassword}@{ip}:554{rtspPath}";
 
-                existingStreams[streamId] = rtspUrl;
+                existingStreams[streamId] = WrapStream(rtspUrl);
 
                 var subRtspPath = DeriveHikvisionSubPath(rtspPath);
                 if (subRtspPath != null)
@@ -223,7 +232,8 @@ public class DeviceService
                     existingStreams[subStreamId] = $"rtsp://{username}:{encodedPassword}@{ip}:554{subRtspPath}";
                 }
 
-                _logger.LogInformation("[go2rtc] Đăng ký stream {StreamId} -> {RtspPath}", streamId, rtspPath);
+                _logger.LogInformation("[go2rtc] Đăng ký stream {StreamId} -> {RtspPath}{Ffmpeg}",
+                    streamId, rtspPath, useFfmpeg ? " [ffmpeg transcode]" : "");
             }
 
             // Bước 3: DELETE rồi PUT lại để đảm bảo credentials cũ được ghi đè

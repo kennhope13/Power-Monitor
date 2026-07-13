@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -87,6 +88,7 @@ public static class DependencyInjection
         services.AddHostedService<MqttSubscriberWorker>();
         services.AddHostedService<Iec104Worker>();
         services.AddHostedService<CloudSyncWorker>();
+        services.AddHostedService<CentralSyncWorker>();
         services.AddHostedService<DeviceHealthCheckWorker>();
         services.AddHostedService<StationOS.Workers.Recording.RtspRecorderWorker>();
 
@@ -122,7 +124,7 @@ public static class DependencyInjection
                 {
                     ValidateIssuer = true,
                     ValidateAudience = true,
-                    ValidateLifetime = true,
+                    ValidateLifetime = false,
                     ValidateIssuerSigningKey = true,
                     ValidIssuers = new[] { configuration["Jwt:Issuer"], "StationOS", "StationMonitor" },
                     ValidAudiences = new[] { configuration["Jwt:Audience"], "StationOSApp", "StationMonitorApp" },
@@ -140,6 +142,46 @@ public static class DependencyInjection
                             ctx.HttpContext.Request.Path.StartsWithSegments("/api/v1/reports")))
                             ctx.Token = token;
                         return Task.CompletedTask;
+                    },
+                    OnTokenValidated = async ctx =>
+                    {
+                        var sessionId = ctx.Principal?.FindFirst("sessionId")?.Value;
+                        var userId = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                        
+                        if (string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(userId))
+                        {
+                            var jwtToken = ctx.SecurityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken;
+                            var rawToken = jwtToken?.RawData;
+                            if (!string.IsNullOrEmpty(rawToken))
+                            {
+                                var hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawToken));
+                                sessionId = "legacy_" + Convert.ToHexString(hashBytes)[..16];
+                            }
+                            else
+                            {
+                                sessionId = "legacy_" + userId;
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(userId))
+                        {
+                            var licenseService = ctx.HttpContext.RequestServices.GetRequiredService<LicenseService>();
+                            var expiresAt = ctx.SecurityToken?.ValidTo ?? DateTime.UtcNow.AddDays(3650);
+                            
+                            if (!licenseService.IsSessionActive(sessionId))
+                            {
+                                bool registered = await licenseService.TryRegisterOnRequestAsync(sessionId, userId, expiresAt);
+                                if (!registered)
+                                {
+                                    ctx.Fail("Session is no longer active (kicked out or limit exceeded)");
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                licenseService.RegisterActiveSession(sessionId, userId, expiresAt);
+                            }
+                        }
                     }
                 };
             });

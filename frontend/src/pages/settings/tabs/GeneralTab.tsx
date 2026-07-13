@@ -12,6 +12,7 @@
 import { useState, useEffect } from 'react';
 import { stationApi } from '@/services/StationApiService';
 import { showToast } from '@/utils/toast';
+import { getDisplayStationName, getStoredStationName } from '@/utils/station-setup';
 
 export default function GeneralTab() {
   const [plcPoll, setPlcPoll] = useState('5');
@@ -25,12 +26,18 @@ export default function GeneralTab() {
   const [timezone, setTimezone] = useState('Asia/Ho_Chi_Minh');
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
+  const [serverIp, setServerIp] = useState('');
+
+  // Thông tin trạm cục bộ
+  const [stationId, setStationId] = useState<string | null>(null);
+  const [stationName, setStationName] = useState('');
 
   // Trạng thái kiểm tra lỗi (Validation Errors)
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadSettings();
+    setServerIp(localStorage.getItem('server_ip') || '');
   }, []);
 
   const loadSettings = () => {
@@ -52,6 +59,15 @@ export default function GeneralTab() {
       })
       .catch(() => showToast('Không thể tải cài đặt từ máy chủ', 'error'))
       .finally(() => setLoading(false));
+
+    stationApi.getStations().then(stations => {
+      if (stations && stations.length > 0 && stations[0]) {
+        setStationId(stations[0].id);
+        setStationName(getDisplayStationName(stations[0].name, getStoredStationName()));
+      } else {
+        setStationName(getStoredStationName());
+      }
+    }).catch(() => console.error('Lỗi tải thông tin trạm'));
   };
 
   // Kiểm tra tính hợp lệ của tham số thời gian thực (Live Validation)
@@ -78,6 +94,12 @@ export default function GeneralTab() {
       }
     } else {
       switch (name) {
+        case 'stationName':
+          if (!value.trim()) return 'Tên trạm không được để trống';
+          break;
+        case 'serverIp':
+          if (!value.trim()) return 'IP máy trạm không được để trống';
+          break;
         case 'email':
           if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Định dạng Email không hợp lệ';
           break;
@@ -144,7 +166,7 @@ export default function GeneralTab() {
   const handleSave = async () => {
     // Chạy kiểm tra lỗi cho tất cả các trường
     const newErrors: Record<string, string> = {};
-    const checks = { plcPoll, dbSave, camRecord, healthCheck, email, phone };
+    const checks = { serverIp, stationName, plcPoll, dbSave, camRecord, healthCheck, email, phone };
     Object.entries(checks).forEach(([key, val]) => {
       const err = validateField(key, val);
       if (err) newErrors[key] = err;
@@ -158,6 +180,13 @@ export default function GeneralTab() {
 
     setSaveStatus('Đang lưu cấu hình...');
     try {
+      const previousServerIp = localStorage.getItem('server_ip') || '';
+      const trimmedServerIp = serverIp.trim();
+      const trimmedStationName = stationName.trim();
+
+      localStorage.setItem('server_ip', trimmedServerIp);
+      localStorage.setItem('station_name', trimmedStationName);
+
       await Promise.all([
         stationApi.updateSetting('plc_poll_interval_s', plcPoll),
         stationApi.updateSetting('db_save_interval_s', dbSave),
@@ -168,7 +197,13 @@ export default function GeneralTab() {
         stationApi.updateSetting('enable_alert_email', String(enableEmail)),
         stationApi.updateSetting('enable_alert_sms', String(enableSms)),
         stationApi.updateSetting('timezone', timezone),
+        ...(stationId && trimmedStationName ? [stationApi.updateStation(stationId, trimmedStationName)] : [])
       ]);
+      if (previousServerIp.trim() !== trimmedServerIp) {
+        window.location.reload();
+        return;
+      }
+      window.dispatchEvent(new Event('station-config-updated'));
       setSaveStatus('Đã lưu thành công');
       showToast('Cập nhật thông số hệ thống thành công!', 'success');
       setTimeout(() => setSaveStatus(''), 4000);
@@ -283,7 +318,39 @@ export default function GeneralTab() {
         
         {/* Cột 1: Dữ liệu & Ghi hình */}
         <div className="setting-section" style={{ borderRadius: 0 }}>
-          <div className="section-header">DỮ LIỆU & GHI HÌNH</div>
+          <div className="section-header">THÔNG TIN & DỮ LIỆU</div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, marginBottom: 6, textTransform: 'uppercase' }}>
+              IP máy trạm / Master Station
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              style={{ width: '100%', boxSizing: 'border-box', borderRadius: 0, borderColor: errors.serverIp ? 'var(--admin-danger)' : 'var(--admin-border)' }}
+              placeholder="Ví dụ: 192.168.1.100"
+              value={serverIp}
+              onChange={e => handleFieldChange('serverIp', e.target.value, setServerIp)}
+            />
+            {errors.serverIp && <div className="err-label">✕ {errors.serverIp}</div>}
+            <div className="hint-text">IP này dùng để trạm tổng kết nối và lấy dữ liệu từ trạm hiện tại.</div>
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, marginBottom: 6, textTransform: 'uppercase' }}>
+              Tên Trạm / Dự án
+            </label>
+            <input 
+              type="text" 
+              className="form-input" 
+              style={{ width: '100%', boxSizing: 'border-box', borderRadius: 0, borderColor: errors.stationName ? 'var(--admin-danger)' : 'var(--admin-border)' }}
+              placeholder="Ví dụ: Trạm 110kV Long An" 
+              value={stationName} 
+              onChange={e => handleFieldChange('stationName', e.target.value, setStationName)} 
+            />
+            {errors.stationName && <div className="err-label">✕ {errors.stationName}</div>}
+            <div className="hint-text">Tên trạm hiển thị trên tiêu đề và báo cáo.</div>
+          </div>
           
           <div className="form-group" style={{ margin: 0 }}>
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: 800, marginBottom: 6, textTransform: 'uppercase' }}>

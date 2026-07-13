@@ -6,6 +6,8 @@
 // ============================================================
 
 import { apiFetch, apiMutate } from './BaseApiService';
+import { authService } from '../AuthService';
+import { API_BASE_URL } from '@/utils/env';
 import type { UserItem, SmtpConfig, SyncStatus } from '@/types/api.types';
 
 export class SystemService {
@@ -86,9 +88,34 @@ export class SystemService {
     return apiFetch('/license/status');
   }
 
+  /** Thông tin fingerprint để tạo file .lic. */
+  async getLicenseRequest(): Promise<any> {
+    return apiFetch('/license/request');
+  }
+
   /** Kích hoạt license bằng key. */
   async activateLicense(key: string): Promise<any> {
     return apiMutate('POST', '/license/activate', { key });
+  }
+
+  /** Import file .lic. */
+  async importLicense(file: File): Promise<any> {
+    const token = authService.getToken();
+    const form = new FormData();
+    form.append('file', file, file.name);
+
+    const res = await fetch(`${API_BASE_URL}/api/v1/license/import`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `POST /license/import → ${res.status}`);
+    }
+
+    return res.json();
   }
 }
 

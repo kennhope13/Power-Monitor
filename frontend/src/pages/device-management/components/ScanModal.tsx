@@ -2,7 +2,7 @@
 // ScanModal.tsx — Modal khám phá thiết bị mạng
 // Bao gồm: Quét LAN, ONVIF, Test kết nối thủ công + Auto-thêm Hikvision
 // ============================================================
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { stationApi } from '@/services/StationApiService';
 import { Camera, Thermometer, Circle, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 
@@ -15,6 +15,7 @@ type Props = {
 
 export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: Props) {
   const [scanTab, setScanTab] = useState(0);
+  const [canCreateNewDevice, setCanCreateNewDevice] = useState(false);
 
   // LAN Scan
   const [scanSubnet, setScanSubnet] = useState('192.168.10');
@@ -36,6 +37,21 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
   const [autoConfigTarget, setAutoConfigTarget] = useState<{ ip: string } | null>(null);
   const [autoConfigCreds, setAutoConfigCreds] = useState({ username: 'admin', password: '' });
   const [isAutoConfiguring, setIsAutoConfiguring] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    stationApi.getLicenseStatus()
+      .then(data => {
+        if (!cancelled) setCanCreateNewDevice(data?.activated === true && data?.isValid === true);
+      })
+      .catch(() => {
+        if (!cancelled) setCanCreateNewDevice(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const runLanScan = async () => {
     setIsScanning(true); setScanResults(null);
@@ -60,6 +76,10 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
   };
 
   const runAutoConfig = async () => {
+    if (!canCreateNewDevice) {
+      alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+      return;
+    }
     if (!stationId || !autoConfigTarget) return;
     setIsAutoConfiguring(true);
     try {
@@ -119,7 +139,13 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               {f.protocol === 'hikvision' && (
-                                <button className="btn-industrial btn-sm btn-primary" onClick={() => setAutoConfigTarget({ ip: f.ip })} title="Tự động tạo tất cả luồng cho camera này">Auto-thêm</button>
+                                <button className="btn-industrial btn-sm btn-primary" onClick={() => {
+                                  if (!canCreateNewDevice) {
+                                    alert('Cần nhập và kích hoạt license trước khi thêm thiết bị mới.');
+                                    return;
+                                  }
+                                  setAutoConfigTarget({ ip: f.ip });
+                                }} disabled={!canCreateNewDevice} title="Tự động tạo tất cả luồng cho camera này">Auto-thêm</button>
                               )}
                               <span style={{ fontSize: '.75rem', color: f.isOnline || f.isReachable ? 'var(--admin-success)' : 'var(--admin-danger)' }}>
                                 {f.isOnline || f.isReachable ? <Circle size={12} fill="var(--admin-success)" color="var(--admin-success)" /> : <Circle size={12} fill="var(--admin-text-muted)" color="var(--admin-text-muted)" />}
@@ -198,6 +224,7 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
               <button className="modal-close-btn" onClick={() => setAutoConfigTarget(null)}><X size={20} /></button>
             </div>
             <div className="modal-body">
+
               <div style={{ marginBottom: 14, padding: '8px 12px', background: 'var(--admin-layer-2)', border: '1px solid var(--admin-border)', fontSize: '.8rem', color: 'var(--admin-text-muted)' }}>
                 IP: <b style={{ color: 'var(--admin-text)' }}>{autoConfigTarget.ip}</b> — Hệ thống sẽ tự detect capabilities qua ISAPI và tạo đúng số bản ghi.
               </div>
@@ -212,7 +239,7 @@ export default function ScanModal({ open, stationId, onClose, onDeviceAdded }: P
             </div>
             <div className="modal-footer">
               <button className="btn-industrial" onClick={() => setAutoConfigTarget(null)}>Hủy</button>
-              <button className="btn-industrial btn-primary" disabled={isAutoConfiguring} onClick={runAutoConfig}>
+              <button className="btn-industrial btn-primary" disabled={isAutoConfiguring || !canCreateNewDevice} onClick={runAutoConfig}>
                 {isAutoConfiguring ? '⏳ Đang xử lý...' : 'Tự động cấu hình'}
               </button>
             </div>

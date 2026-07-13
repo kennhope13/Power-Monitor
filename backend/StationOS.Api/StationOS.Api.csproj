@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\StationOS.Data\StationOS.Data.csproj" />
@@ -24,6 +24,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>WinExe</OutputType>
   </PropertyGroup>
 
   <!-- Loai tru thu muc AI khoi qua trinh compilation de tranh xung dot voi demo SDK -->
@@ -32,6 +33,11 @@
     <Content Remove="AI\**" />
     <EmbeddedResource Remove="AI\**" />
     <None Remove="AI\**" />
+  </ItemGroup>
+
+  <!-- Khong copy cac file media/detections/videos/reports local khi publish -->
+  <ItemGroup>
+    <Content Update="wwwroot\media\**;wwwroot\detections\**;wwwroot\videos\**;wwwroot\reports\**" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
 </Project>

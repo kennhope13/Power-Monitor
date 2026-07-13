@@ -4,7 +4,7 @@ import { stationApi } from '../../../services/StationApiService';
 import { CameraDevice } from '../../../types/api.types';
 import { authService } from '../../../services/AuthService';
 import { GO2RTC_URL } from '../../../utils/env';
-import { createRealtimeHub } from '../../../services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '../../../services/realtime.service';
 import { confirmDialog } from '@/utils/confirm';
 
 type VVR = { x:number, y:number, width:number, height:number };
@@ -13,7 +13,7 @@ const EMPTY_FORM = {
   open: false, isNew: true, type: 'marker' as 'marker'|'roi',
   id: '', name: '', shortName: '',
   tx: '', ty: '', tx1: '', ty1: '', tx2: '', ty2: '',
-  preAlarm: '50', alarm: '70', markerSize: '28', labelPos: 'top',
+  preAlarm: '50', alarm: '70', markerSize: '10', labelPos: 'top',
   fontSize: '11', borderWidth: '0.5'
 };
 
@@ -24,6 +24,8 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
   const did = dev.id;
   const [markers, setMarkers] = useState<any[]>([]);
   const [rois, setRois] = useState<any[]>([]);
+  const [selectedMarkerIds, setSelectedMarkerIds] = useState<string[]>([]);
+  const [selectedRoiIds, setSelectedRoiIds] = useState<string[]>([]);
   const mksRef = useRef(markers); mksRef.current = markers;
   const roisRef = useRef(rois); roisRef.current = rois;
   const [vvr, setVvr] = useState<VVR>(() => {
@@ -45,9 +47,11 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
   const [hoverPos, setHoverPos] = useState<{nx:number,ny:number}|null>(null);
 
   const [activeSideTab, setActiveSideTab] = useState<'marker'|'roi'>('marker');
+  const [showVvr, setShowVvr] = useState(true);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const cursorTimer = useRef<any>(null);
+
 
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [overlayOpacity, setOverlayOpacity] = useState<number>(0);
@@ -119,7 +123,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
           id:p.id, name:p.name, shortName:p.pointId,
           tx:p.tx||0.5, ty:p.ty||0.5, ox:p.ox||0.5, oy:p.oy||0.5,
           preAlarm:p.warningThreshold||50, alarm:p.alarmThreshold||70,
-          markerSize:p.sortOrder||28, labelPos:(p as any).description||'top',
+          markerSize:p.sortOrder||10, labelPos:(p as any).description||'top',
           temp: prevTemps[p.id] ?? null
         }));
       });
@@ -144,9 +148,16 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const markerIds = new Set(markers.map(m => m.id));
+    const roiIds = new Set(rois.map(r => r.id));
+    setSelectedMarkerIds(prev => prev.filter(id => markerIds.has(id)));
+    setSelectedRoiIds(prev => prev.filter(id => roiIds.has(id)));
+  }, [markers, rois]);
+
   // Lắng nghe SignalR SensorUpdate — cùng nguồn với realtime page
   useEffect(() => {
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
     hub.on('SensorUpdate', (data: any[]) => {
       if (!Array.isArray(data)) return;
       const mine = data.filter(d => d.deviceId === did || d.deviceId?.toLowerCase() === did.toLowerCase());
@@ -163,8 +174,8 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
         return upd?.max != null ? { ...r, maxTemp: upd.max } : r;
       }));
     });
-    hub.start().catch(() => {});
-    return () => { hub.stop(); };
+    startRealtimeHub().catch(() => {});
+    return () => { hub.off('SensorUpdate'); };
   }, [did]);
 
   useEffect(() => {
@@ -315,7 +326,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
       open: true, isNew: true, type: 'marker',
       name: `Điểm ${idx}`, shortName: `D${idx}`,
       tx: tx.toFixed(4), ty: ty.toFixed(4),
-      preAlarm: '50', alarm: '70', markerSize: '28'
+      preAlarm: '50', alarm: '70', markerSize: '10'
     });
     setDrawMode('none');
   };
@@ -409,7 +420,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
         const payload = {
           name:form.name, pointId:form.shortName, 
           tx, ty, ox:cox, oy:coy, x:tx*100, y:ty*100, 
-          sortOrder:parseInt(form.markerSize)||28, 
+          sortOrder:parseInt(form.markerSize)||10, 
           warningThreshold:parseFloat(form.preAlarm)||50, alarmThreshold:parseFloat(form.alarm)||70
         };
 
@@ -463,56 +474,127 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
     }
   };
 
+  const toggleMarkerSelection = (id: string) => {
+    setSelectedMarkerIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const toggleRoiSelection = (id: string) => {
+    setSelectedRoiIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const selectAllMarkers = () => {
+    setSelectedMarkerIds(markers.map(m => m.id));
+  };
+
+  const selectAllRois = () => {
+    setSelectedRoiIds(rois.map(r => r.id));
+  };
+
+  const bulkDeleteMarkers = async () => {
+    if (selectedMarkerIds.length === 0) return;
+    if (!await confirmDialog({
+      title: 'Xóa hàng loạt điểm đo',
+      message: `Xóa ${selectedMarkerIds.length} điểm đo đã chọn? Thao tác này không thể hoàn tác.`,
+      confirmText: 'Xóa đã chọn',
+      danger: true,
+    })) return;
+
+    try {
+      await Promise.all(selectedMarkerIds.map(id => stationApi.deleteRoiPoint(did, id)));
+      setSelectedMarkerIds([]);
+      await load();
+      syncAI();
+    } catch (err: any) {
+      console.error("[ThermalConfigTab] Bulk delete markers failed:", err);
+      alert("Xóa hàng loạt điểm đo thất bại: " + (err.message || err));
+    }
+  };
+
+  const bulkDeleteRois = async () => {
+    if (selectedRoiIds.length === 0) return;
+    if (!await confirmDialog({
+      title: 'Xóa hàng loạt vùng đo',
+      message: `Xóa ${selectedRoiIds.length} vùng đo đã chọn? Thao tác này không thể hoàn tác.`,
+      confirmText: 'Xóa đã chọn',
+      danger: true,
+    })) return;
+
+    try {
+      await Promise.all(selectedRoiIds.map(id => stationApi.deleteBoundary(id)));
+      setSelectedRoiIds([]);
+      await load();
+      syncAI();
+    } catch (err: any) {
+      console.error("[ThermalConfigTab] Bulk delete ROIs failed:", err);
+      alert("Xóa hàng loạt vùng đo thất bại: " + (err.message || err));
+    }
+  };
+
   return (
     <div style={{ display:'flex', height:'100%', overflow:'hidden', background:'var(--admin-bg)' }}>
       {/* ── Camera area ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
 
         {/* Toolbar & View Tabs */}
-        <div style={{ display:'flex', alignItems:'center', gap:12, padding:'6px 12px', background:'var(--admin-layer-1)', borderBottom:'1px solid var(--admin-border)', flexShrink:0 }}>
-          
-          <div style={{ display:'flex', border:'1px solid var(--admin-border)', borderRadius: 0, padding: 0, overflow: 'hidden' }}>
-            <button 
-              className={`btn-industrial btn-sm ${viewMode==='op'?'btn-primary':''}`} 
-              style={{ border: 'none', borderRadius: 0, height: 28, padding: '0 12px' }}
+        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 10px', background:'var(--admin-layer-1)', borderBottom:'1px solid var(--admin-border)', flexShrink:0, minHeight:36 }}>
+
+          <div style={{ display:'flex', border:'1px solid var(--admin-border)', overflow:'hidden', flexShrink:0 }}>
+            <button
+              className={`btn-industrial btn-sm ${viewMode==='op'?'btn-primary':''}`}
+              style={{ border:'none', borderRadius:0, height:26, padding:'0 10px', fontSize:11, whiteSpace:'nowrap' }}
               onClick={() => setViewMode('op')}
             >
-              ẢNH QUANG HỌC
+              QUANG HỌC
             </button>
-            <button 
-              className={`btn-industrial btn-sm ${viewMode==='th'?'btn-primary':''}`} 
-              style={{ border: 'none', borderLeft: '1px solid var(--admin-border)', borderRadius: 0, height: 28, padding: '0 12px' }}
+            <button
+              className={`btn-industrial btn-sm ${viewMode==='th'?'btn-primary':''}`}
+              style={{ border:'none', borderLeft:'1px solid var(--admin-border)', borderRadius:0, height:26, padding:'0 10px', fontSize:11, whiteSpace:'nowrap' }}
               onClick={() => setViewMode('th')}
             >
-              ẢNH NHIỆT ĐỘ
+              NHIỆT ĐỘ
             </button>
           </div>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--admin-text-muted)' }}>
-            <span>💡 Cuộn chuột để phóng to/thu nhỏ, nhấn giữ kéo để di chuyển</span>
-            <span style={{ fontFamily: 'monospace', fontWeight: 'bold', background: 'var(--admin-layer-2)', padding: '2px 8px', border: '1px solid var(--admin-border)' }}>Zoom: {zoomLevel}%</span>
-          </div>
+          {viewMode === 'op' && (
+            <button
+              className="btn-industrial btn-sm"
+              style={{ height:26, padding:'0 10px', fontSize:11, whiteSpace:'nowrap', flexShrink:0, background: showVvr ? 'var(--admin-accent)' : 'transparent', border:'1px solid var(--admin-border)', color: showVvr ? '#fff' : 'var(--admin-text-muted)' }}
+              onClick={() => setShowVvr(v => !v)}
+            >
+              Khung VVR
+            </button>
+          )}
+
+          <span style={{ marginLeft:'auto', fontSize:11, color:'var(--admin-text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', minWidth:0 }}>
+            💡 Cuộn chuột phóng to · Giữ kéo để di chuyển
+          </span>
+          <span style={{ fontFamily:'monospace', fontSize:11, fontWeight:'bold', background:'var(--admin-layer-2)', padding:'2px 8px', border:'1px solid var(--admin-border)', flexShrink:0 }}>
+            {zoomLevel}%
+          </span>
 
         </div>
 
-        {/* video-container */}
-        <div style={{ flex:1, position:'relative', background:'#000', overflow:'auto' }} ref={containerRef}>
+        {/* video-container — flex:1 fills remaining height; inner video div is vertically centered via margin:auto */}
+        <div style={{ flex:1, display:'flex', flexDirection:'column', position:'relative', background:'#000', overflow:'auto' }} ref={containerRef}>
           <div style={{
             position:'relative',
             width:`${zoomLevel}%`,
             aspectRatio:'16/9',
-            transformOrigin:'top left'
+            transformOrigin:'top left',
+            marginTop:'auto',
+            marginBottom:'auto',
+            flexShrink:0
           }}>
             {/* Base stream */}
             {viewMode === 'op' && opSrc && (
               <iframe 
-                src={`/camera-stream.html?src=${encodeURIComponent(opSrc)}&mode=webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
+                src={`/camera-stream.html?src=${encodeURIComponent(opSrc)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
                 style={{ position:'absolute', inset:0, width:'100%', height:'100%', border:'none', pointerEvents:'none', zIndex:1 }} 
               />
             )}
             {viewMode === 'th' && thSrc && (
               <iframe 
-                src={`/camera-stream.html?src=${encodeURIComponent(thSrc)}&mode=webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
+                src={`/camera-stream.html?src=${encodeURIComponent(thSrc)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
                 style={{ position:'absolute', inset:0, width:'100%', height:'100%', border:'none', pointerEvents:'none', zIndex:1 }} 
               />
             )}
@@ -520,7 +602,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
             {/* Overlay stream (blended) */}
             {viewMode === 'op' && thSrc && overlayOpacity > 0 && (
               <iframe 
-                src={`/camera-stream.html?src=${encodeURIComponent(thSrc)}&mode=webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
+                src={`/camera-stream.html?src=${encodeURIComponent(thSrc)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
                 style={{ 
                   position:'absolute', 
                   inset:0, 
@@ -535,7 +617,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
             )}
             {viewMode === 'th' && opSrc && overlayOpacity > 0 && (
               <iframe 
-                src={`/camera-stream.html?src=${encodeURIComponent(opSrc)}&mode=webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
+                src={`/camera-stream.html?src=${encodeURIComponent(opSrc)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} 
                 style={{ 
                   position:'absolute', 
                   inset:0, 
@@ -550,9 +632,9 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
             )}
 
             {/* Overlay boundaries */}
-            {viewMode === 'op' && (
-              <div style={{ position:'absolute', left:pct(vvr.x), top:pct(vvr.y), width:pct(vvr.width), height:pct(vvr.height), border:'1px dashed rgba(255,255,255,0.3)', pointerEvents:'none', zIndex:5 }}>
-                <div style={{ position:'absolute', top:-20, left:0, color:'#fff', fontSize:10, opacity:0.5 }}>Khung nhiệt (VVR)</div>
+            {viewMode === 'op' && showVvr && (
+              <div style={{ position:'absolute', left:pct(vvr.x), top:pct(vvr.y), width:pct(vvr.width), height:pct(vvr.height), border:'3px dashed rgba(0,0,0,0.85)', pointerEvents:'none', zIndex:5 }}>
+                <div style={{ position:'absolute', top:-16, left:0, background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:10, padding:'1px 4px' }}>VVR</div>
               </div>
             )}
 
@@ -592,7 +674,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                 const nx = viewMode==='th' ? m.tx : dynOx;
                 const ny = viewMode==='th' ? m.ty : dynOy;
                 const c = clr(m.temp, m.preAlarm, m.alarm);
-                const armLen = m.markerSize || 28;
+                const armLen = m.markerSize || 10;
                 const labelOffset = Math.round(armLen / 2) + 5;
                 
                 // Chỉ cho phép tương tác (kéo) nếu đang mở đúng form sửa cho điểm này
@@ -625,7 +707,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
               {form.open && form.isNew && form.type === 'marker' ? (() => {
                  const tx = parseFloat(form.tx), ty = parseFloat(form.ty);
                  const {ox, oy} = viewMode === 'th' ? {ox:tx, oy:ty} : t2o(tx, ty, vvr);
-                 const armLen = parseInt(form.markerSize) || 28;
+                 const armLen = parseInt(form.markerSize) || 10;
                  return (
                   <div style={{ position:'absolute', left:pct(ox), top:pct(oy), transform:'translate(-50%,-50%)', zIndex:25, cursor: 'move', pointerEvents: 'auto' }}
                        onMouseDown={e=>{ if(e.button===0){ e.stopPropagation(); dragMkRef.current = '__new_marker__'; }}}>
@@ -711,7 +793,7 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                   <div className="form-group" style={{ marginBottom: 0 }}><label>Mã định danh (ID)</label><input className="form-input" value={form.shortName} onChange={e=>setForm(f=>({...f,shortName:e.target.value}))} placeholder="VD: P1, P2..." /></div>
                   
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                    <div className="form-group" style={{ marginBottom: 0 }}><label>Cỡ dấu (+)</label><input className="form-input" type="number" min="12" max="60" step="2" value={form.markerSize} onChange={e=>setForm(f=>({...f,markerSize:e.target.value}))} /></div>
+                    <div className="form-group" style={{ marginBottom: 0 }}><label>Cỡ dấu (+)</label><input className="form-input" type="number" min="10" max="60" step="2" value={form.markerSize} onChange={e=>setForm(f=>({...f,markerSize:e.target.value}))} /></div>
                     <div className="form-group" style={{ marginBottom: 0 }}><label>Vị trí nhãn</label>
                       <select className="form-input" value={form.labelPos} onChange={e=>setForm(f=>({...f,labelPos:e.target.value}))}>
                         <option value="top">Trên</option>
@@ -801,8 +883,33 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                   <button className="btn-industrial" style={{ width:'100%', height:30, background:'rgba(59,130,246,0.1)', border:'1px dashed var(--admin-accent)', color:'var(--admin-accent)', fontWeight:800, fontSize:'.7rem' }} onClick={()=>setDrawMode(drawMode==='point'?'none':'point')}>
                     {drawMode==='point' ? 'HỦY CHẤM ĐIỂM' : '+ THÊM ĐIỂM ĐO'}
                   </button>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button
+                      className="btn-industrial btn-sm"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={selectAllMarkers}
+                      disabled={markers.length === 0}
+                    >
+                      Chọn tất cả
+                    </button>
+                    <button
+                      className="btn-industrial btn-sm btn-danger"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={bulkDeleteMarkers}
+                      disabled={selectedMarkerIds.length === 0}
+                    >
+                      Xóa đã chọn
+                    </button>
+                  </div>
                   {markers.map(m => (
                     <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background:'var(--admin-layer-2)', border:'1px solid var(--admin-border)', borderRadius:0 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedMarkerIds.includes(m.id)}
+                        onChange={() => toggleMarkerSelection(m.id)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ accentColor: 'var(--admin-accent)', cursor: 'pointer' }}
+                      />
                       <div style={{ width:8, height:8, borderRadius:'50%', background:clr(m.temp,m.preAlarm,m.alarm) }} />
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:'.75rem', fontWeight:700, color:'var(--admin-text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.name}</div>
@@ -823,10 +930,35 @@ export default function ThermalConfigTab({ device: dev }: { device:CameraDevice,
                   <button className="btn-industrial" style={{ width:'100%', height:30, background:'rgba(59,130,246,0.1)', border:'1px dashed var(--admin-accent)', color:'var(--admin-accent)', fontWeight:800, fontSize:'.7rem' }} onClick={()=>setDrawMode(drawMode==='rect'?'none':'rect')}>
                     {drawMode==='rect' ? 'HỦY VẼ VÙNG' : '⬜ VẼ VÙNG ĐO MỚI'}
                   </button>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button
+                      className="btn-industrial btn-sm"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={selectAllRois}
+                      disabled={rois.length === 0}
+                    >
+                      Chọn tất cả
+                    </button>
+                    <button
+                      className="btn-industrial btn-sm btn-danger"
+                      style={{ flex:1, height:28, fontSize:'.68rem' }}
+                      onClick={bulkDeleteRois}
+                      disabled={selectedRoiIds.length === 0}
+                    >
+                      Xóa đã chọn
+                    </button>
+                  </div>
                   {rois.map(r => {
                     const c = clr(r.maxTemp, r.preAlarm, r.alarm);
                     return (
                       <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 10px', background:'var(--admin-layer-2)', border:'1px solid var(--admin-border)', borderRadius:0 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRoiIds.includes(r.id)}
+                          onChange={() => toggleRoiSelection(r.id)}
+                          onClick={e => e.stopPropagation()}
+                          style={{ accentColor: 'var(--admin-accent)', cursor: 'pointer' }}
+                        />
                         <div style={{ width:8, height:8, background:c+'44', border:`1px solid ${c}` }} />
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontSize:'.75rem', fontWeight:700, color:'var(--admin-text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</div>

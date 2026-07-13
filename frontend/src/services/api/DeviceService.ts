@@ -5,7 +5,8 @@
 // Export: deviceService (singleton), dùng qua StationApiService facade
 // ============================================================
 
-import { apiFetch, apiMutate } from './BaseApiService';
+import { apiFetch, apiMutate, API_BASE } from './BaseApiService';
+import { authService } from '../AuthService';
 import type { Device, CameraDevice, RoiPoint, Boundary } from '@/types/api.types';
 import { AI_ENGINE_URL } from '@/utils/env';
 
@@ -17,6 +18,7 @@ export class DeviceService {
     const raw = await apiFetch<any[]>(url);
     return raw.map(d => ({
       ...d,
+      stationId: d.stationId ?? stationId ?? '',
       config: typeof d.config === 'string' ? JSON.parse(d.config) : (d.config ?? {})
     })) as Device[];
   }
@@ -49,10 +51,10 @@ export class DeviceService {
     return apiFetch(`/devices/${id}/credentials`);
   }
 
-  /** Lấy danh sách camera (lọc devices theo type=camera). */
+  /** Lấy danh sách camera, bao gồm cả `camera_pd` và các biến thể `camera_*`. */
   async getCameras(stationId: string): Promise<CameraDevice[]> {
-    const devices = await this.getDevices(stationId, 'camera');
-    return devices as CameraDevice[];
+    const devices = await this.getDevices(stationId);
+    return devices.filter(d => (d.type || '').toLowerCase().startsWith('camera')) as CameraDevice[];
   }
 
   /** Quét subnet để phát hiện thiết bị mạng. Ví dụ subnet: "192.168.1.0/24". */
@@ -81,6 +83,95 @@ export class DeviceService {
     capabilities: any;
   }> {
     return apiMutate('POST', '/devices/auto-configure', { stationId, ip, username, password, namePrefix });
+  }
+
+  /** Import danh sách tủ điện từ file CSV/Excel. */
+  async importCabinetTemplate(data: {
+    stationId: string;
+    ip: string;
+    cabinetName?: string;
+    file: File;
+    rack?: number;
+    slot?: number;
+    db?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    created: Array<{ deviceId: string; name: string; points: number }>;
+    updated: Array<{ deviceId: string; name: string; points: number }>;
+    totalGroups: number;
+  }> {
+    const token = authService.getToken();
+    const form = new FormData();
+    form.append('stationId', data.stationId);
+    form.append('ip', data.ip);
+    if (data.cabinetName) form.append('CabinetName', data.cabinetName);
+    form.append('rack', String(data.rack ?? 0));
+    form.append('slot', String(data.slot ?? 1));
+    if (data.db !== undefined && data.db !== null) form.append('db', String(data.db));
+    form.append('file', data.file);
+
+    const res = await fetch(`${API_BASE}/cabinet-import`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+
+    if (!res.ok) {
+      throw new Error(await this.readFriendlyImportError(res));
+    }
+
+    return res.json();
+  }
+
+  private async readFriendlyImportError(res: Response): Promise<string> {
+    const fallback = `Import thất bại (${res.status})`;
+    const raw = await res.text().catch(() => '');
+    if (!raw.trim()) return fallback;
+
+    const cleaned = raw.trim();
+    const extractFromValidation = (obj: any): string | null => {
+      const errors = obj?.errors;
+      if (!errors || typeof errors !== 'object') return null;
+
+      const messages: string[] = [];
+      for (const value of Object.values(errors as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            if (typeof item === 'string' && item.trim()) messages.push(item.trim());
+          }
+        } else if (typeof value === 'string' && value.trim()) {
+          messages.push(value.trim());
+        }
+      }
+      return messages.length > 0 ? (messages[0] || null) : null;
+    };
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (typeof parsed === 'string') return parsed;
+      const validationMsg = extractFromValidation(parsed);
+      if (validationMsg) return validationMsg;
+
+      const message =
+        (typeof parsed?.message === 'string' && parsed.message.trim()) ||
+        (typeof parsed?.title === 'string' && parsed.title.trim() && parsed.title !== 'One or more validation errors occurred.'
+          ? parsed.title.trim()
+          : '') ||
+        (typeof parsed?.error === 'string' && parsed.error.trim()) ||
+        (typeof parsed?.detail === 'string' && parsed.detail.trim()) ||
+        '';
+
+      if (message) return message;
+    } catch {
+      // Nếu body không phải JSON, rơi xuống sanitize text bên dưới.
+    }
+
+    if (cleaned.startsWith('{') || cleaned.startsWith('[')) {
+      return fallback;
+    }
+
+    return cleaned.replace(/\s+/g, ' ').trim() || fallback;
   }
 
   // ── ROI Points (điểm chấm nhiệt trên camera nhiệt) ────────────

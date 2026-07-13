@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 interface DashboardToolbarProps {
   stationName: string;
+  showStationName?: boolean;
   isEditMode: boolean;
   onToggleEditMode: () => void;
   showLabels: boolean;
@@ -20,6 +21,7 @@ interface DashboardToolbarProps {
 export default function DashboardToolbar(props: DashboardToolbarProps) {
   const {
     stationName,
+    showStationName = true,
     isEditMode,
     onToggleEditMode,
     onFit,
@@ -38,7 +40,7 @@ export default function DashboardToolbar(props: DashboardToolbarProps) {
       id="sldToolbar"
       className={isEditMode ? 'edit-mode-active' : ''}
       style={{
-        position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 30,
+        position: 'absolute', top: 10, left: 10, zIndex: 30,
         display: 'flex', flexDirection: 'column', gap: 6,
         background: 'var(--admin-overlay)', backdropFilter: 'blur(12px)',
         border: '1px solid var(--admin-border)', borderRadius: 0, padding: '6px 14px',
@@ -49,31 +51,35 @@ export default function DashboardToolbar(props: DashboardToolbarProps) {
     >
       {/* Title & Toggle Row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--admin-text)', whiteSpace: 'nowrap' }}>
-          {stationName.toUpperCase() || 'SƠ ĐỒ TRẠM'}
-        </span>
+        {showStationName && (
+          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--admin-text)', whiteSpace: 'nowrap' }}>
+            {stationName.toUpperCase() || 'SƠ ĐỒ TRẠM'}
+          </span>
+        )}
 
         <div style={{ display: 'flex', gap: 6 }}>
-          <button 
-            onClick={onToggleEditMode} 
-            className={`btn-industrial btn-sm ${isEditMode ? 'btn-primary' : ''}`}
-            style={{ fontSize: '0.65rem', padding: '2px 8px', height: 24, position: 'relative' }}
-          >
-            {isEditMode ? 'XONG' : 'CHỈNH SƠ ĐỒ'}
-            {!isEditMode && unpinnedCount > 0 && (
-              <span style={{
-                position: 'absolute', top: -5, right: -5,
-                background: 'var(--admin-danger)', color: '#fff',
-                fontSize: 9, fontWeight: 900,
-                width: 14, height: 14, borderRadius: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 0 5px var(--admin-danger)',
-                animation: 'pulse 1.5s infinite'
-              }}>
-                {unpinnedCount}
-              </span>
-            )}
-          </button>
+          {!isEditMode && (
+            <button
+              onClick={onToggleEditMode}
+              className="btn-industrial btn-sm"
+              style={{ fontSize: '0.65rem', padding: '2px 8px', height: 24, position: 'relative' }}
+            >
+              CHỈNH SƠ ĐỒ
+              {unpinnedCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: -5, right: -5,
+                  background: 'var(--admin-danger)', color: '#fff',
+                  fontSize: 9, fontWeight: 900,
+                  width: 14, height: 14, borderRadius: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 0 5px var(--admin-danger)',
+                  animation: 'pulse 1.5s infinite'
+                }}>
+                  {unpinnedCount}
+                </span>
+              )}
+            </button>
+          )}
 
           <button
             onClick={() => setIsOpen(!isOpen)}

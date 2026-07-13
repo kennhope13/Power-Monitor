@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace StationOS.Data.Entities;
 
@@ -16,6 +16,8 @@ public class User
     /// <summary>true = user phải đổi password trước khi dùng tiếp.
     /// Set true cho admin seed mặc định, và mỗi khi admin reset password user khác.</summary>
     public bool MustChangePassword { get; set; } = false;
+
+    public string[]? Permissions { get; set; }
 
     public DateTime? LastPasswordChangedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }

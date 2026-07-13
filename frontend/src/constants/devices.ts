@@ -16,7 +16,7 @@ export const DEV_CAM_TYPES = [DEV_CAM_CCTV, DEV_CAM_THERMAL, DEV_CAM_PD, DEV_CAM
 // Label hiển thị cho từng loại thiết bị
 export const DEVICE_TYPE_LABELS: Record<string, string> = {
   [DEV_PLC_S7]:        'PLC S7-1200/1500',
-  [DEV_CABINET]:       'Tủ điện (3 Nhiệt, 1 PD)',
+  [DEV_CABINET]:       'PLC S7 - tủ điện cảm biến',
   [DEV_CAM_CCTV]:      'Camera CCTV',
   [DEV_CAM_THERMAL]:   'Camera Nhiệt',
   [DEV_CAM_PD]:        'Camera Phóng điện',

@@ -134,7 +134,7 @@ export default function RichAlertModal({ alert, onClose, queueCount = 0 }: RichA
               <span style={{ padding: '1px 6px', background: 'var(--admin-layer-2)', color: 'var(--admin-text)' }}>
                 {new Date(alert.triggeredAt).toLocaleTimeString('vi-VN')}
               </span>
-              <span style={{ opacity: 0.5 }}>{alert.source.toUpperCase()}</span>
+              <span style={{ opacity: 0.5 }}>{(alert.source ?? '').toUpperCase()}</span>
             </div>
             <div style={{ 
               fontSize: '0.95rem', fontWeight: 900, color: 'var(--admin-text)', 

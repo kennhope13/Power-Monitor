@@ -8,8 +8,9 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { stationApi, Station, Device } from '@/services/StationApiService';
 import { authService } from '@/services/AuthService';
 import { isCentralUser } from '@/utils/centralAccess';
-import { fmtDateTime, fmtTimeRange } from '@/utils/format';
+import { fmtDateTime } from '@/utils/format';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
+import DateRangePicker from '@/components/ui/DateRangePicker';
 import './AuditLogPage.css';
 
 type TabId = 'all' | 'audit' | 'login';
@@ -33,11 +34,26 @@ interface LogItem {
 
 export default function AuditLogPage({ embeddedMode = 'default', stationIdOverride = null }: AuditLogPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>('all');
-  const [timeRange, setTimeRange] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [filterAction, setFilterAction] = useState('');
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<LogItem[]>([]);       // log đã gộp + chuẩn hóa
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loginLogs, setLoginLogs] = useState<any[]>([]);
+  const [selectedDetail, setSelectedDetail] = useState<{
+    entityType: string | null | undefined;
+    entityId?: string | null | undefined;
+    action: string;
+    oldValue: string | null | undefined;
+    newValue: string | null | undefined;
+    title: string;
+    who?: string;
+    stationName?: string;
+    ts?: string;
+    ipAddress?: string;
+    raw?: any;
+  } | null>(null);
 
   const currentUser = authService.getUser();
   const isCentralMode = isCentralUser(currentUser);
@@ -46,15 +62,51 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
   const [devicesList, setDevicesList] = useState<Device[]>([]);
   const [filterStation, setFilterStation] = useState<string>(stationIdOverride || '');
 
-  // Theo dõi dòng nào đang mở rộng để xem raw JSON
-  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+  const openDetail = useCallback((detail: {
+    entityType: string | null | undefined;
+    entityId?: string | null | undefined;
+    action: string;
+    oldValue: string | null | undefined;
+    newValue: string | null | undefined;
+    title: string;
+    who?: string;
+    stationName?: string;
+    ts?: string;
+    ipAddress?: string;
+    raw?: any;
+  }) => {
+    setSelectedDetail(detail);
+  }, []);
 
-  // Tính khoảng thời gian from/to từ preset (today/7d/...) — memo tránh tính lại
-  const dates = useMemo(() => fmtTimeRange(timeRange), [timeRange]);
+  const closeDetail = useCallback(() => {
+    setSelectedDetail(null);
+  }, []);
 
-  const toggleExpand = (id: string) => {
-    setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  const withTimeout = useCallback(async <T,>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race<T>([
+        promise,
+        new Promise<T>(resolve => {
+          timer = setTimeout(() => {
+            console.warn(`[AuditLogPage] ${label} timeout after ${ms}ms`);
+            resolve(fallback);
+          }, ms);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDetail) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeDetail();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeDetail, selectedDetail]);
 
   // Chuyển entityType từ API sang nhãn tiếng Việt
   const entityLabel = (type: string | null): string => {
@@ -64,21 +116,51 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
       alert: 'Cảnh báo',
       user: 'Người dùng',
       settings: 'Cấu hình',
-      maintenance: 'Bảo trì'
+      maintenance: 'Bảo trì',
+      measurement: 'Điểm đo',
+      station: 'Trạm',
+      boundary: 'Vùng giám sát',
+      sensor: 'Cảm biến',
     };
     return type ? (map[type] ?? type) : '—';
   };
 
+  const actionLabel = (action: string): string => {
+    const map: Record<string, string> = {
+      create: 'Tạo mới',
+      update: 'Cập nhật',
+      delete: 'Xóa',
+      login:  'Đăng nhập',
+      logout: 'Đăng xuất',
+      failed: 'Thất bại',
+    };
+    return map[action?.toLowerCase()] ?? action;
+  };
+
   const getStationLabel = (stationName?: string | null) => stationName || 'Trung tâm đa trạm';
 
-  // Format chuỗi JSON từ oldValue/newValue để hiển thị dễ đọc
-  const prettyFormat = (raw: string | null): string => {
-    if (!raw) return '(trống)';
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
+  const buildDetailNarrative = (detail: {
+    action: string;
+    entityType?: string | null;
+    entityId?: string | null;
+    who?: string;
+    stationName?: string;
+  }) => {
+    const actor = detail.who || 'Người dùng';
+    const action = actionLabel(detail.action).toLowerCase();
+    const entity = entityLabel(detail.entityType ?? null).toLowerCase();
+    const station = detail.stationName || 'Trung tâm đa trạm';
+
+    if (detail.action?.toLowerCase() === 'login') {
+      return `${actor} đã đăng nhập tại ${station}.`;
     }
+    if (detail.action?.toLowerCase() === 'logout') {
+      return `${actor} đã đăng xuất tại ${station}.`;
+    }
+    if (detail.action?.toLowerCase() === 'failed') {
+      return `${actor} có một lần thao tác thất bại tại ${station}.`;
+    }
+    return `${actor} đã ${action} ${entity} tại ${station}.`;
   };
 
   const parseJson = (str: string | null | undefined) => {
@@ -107,6 +189,26 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     return map;
   }, [devicesList]);
 
+  const matchesActionFilter = useCallback((action: string) => {
+    if (!filterAction) return true;
+    return action?.toLowerCase() === filterAction.toLowerCase();
+  }, [filterAction]);
+
+  const filteredLogs = useMemo(() => {
+    if (!filterAction) return logs;
+    return logs.filter(m => matchesActionFilter(m.action));
+  }, [logs, matchesActionFilter, filterAction]);
+
+  const filteredAuditLogs = useMemo(() => {
+    if (!filterAction) return auditLogs;
+    return auditLogs.filter(l => matchesActionFilter(l.action));
+  }, [auditLogs, matchesActionFilter, filterAction]);
+
+  const filteredLoginLogs = useMemo(() => {
+    if (!filterAction) return loginLogs;
+    return loginLogs.filter(l => matchesActionFilter(l.action));
+  }, [loginLogs, matchesActionFilter, filterAction]);
+
   const getHumanReadableChanges = (
     entityType: string | null | undefined,
     action: string,
@@ -116,10 +218,56 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     const oldVal = parseJson(oldValStr);
     const newVal = parseJson(newValStr);
 
+    const ignoredKeys = new Set([
+      'id', 'idguid', 'createdat', 'updatedat', 'passwordhash',
+      'password', 'concurrencystamp', 'securitystamp', 'normalizedemail',
+      'normalizedusername', 'emailconfirmed', 'phonenumberconfirmed',
+      'twofactorenabled', 'lockoutend', 'lockoutenabled', 'accessfailedcount',
+      'station', 'device', 'rules', 'sensorreadings', 'alerts', 'sldpoints',
+      'maintenancetasks', 'ruletriggerlogs', 'roipoints', 'boundaries'
+    ]);
+
+    const entity = (entityType ?? '').toLowerCase();
+    const isPointLikeEntity = ['point', 'measurement', 'roipoint', 'sldpoint'].some(token => entity.includes(token));
+    const geometryKeys = new Set(['x', 'y', 'r']);
+
+    const formatGeometry = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return '(trống)';
+      const parts: string[] = [];
+      if (obj.x !== undefined && obj.x !== null) parts.push(`X: ${obj.x}`);
+      if (obj.y !== undefined && obj.y !== null) parts.push(`Y: ${obj.y}`);
+      if (obj.r !== undefined && obj.r !== null) parts.push(`Bán kính: ${obj.r}px`);
+      return parts.length ? parts.join(' | ') : '(trống)';
+    };
+
+    const buildNamedRows = (obj: any) => {
+      if (!obj || typeof obj !== 'object') return [] as Array<[string, any]>;
+      const rows: Array<[string, any]> = [];
+
+      if (isPointLikeEntity) {
+        const geometry = formatGeometry(obj);
+        if (geometry !== '(trống)') {
+          rows.push(['geometry', geometry]);
+        }
+      }
+
+      Object.entries(obj).forEach(([k, v]) => {
+        const key = k.toLowerCase();
+        if (ignoredKeys.has(key) || geometryKeys.has(key)) return;
+        rows.push([k, v]);
+      });
+
+      return rows;
+    };
+
     const translateKey = (k: string): string => {
       const keys: Record<string, string> = {
-        name: 'Tên quy tắc',
+        name: 'Tên quy tắc / Tên điểm',
+        label: 'Tên hiển thị',
         pointId: 'Mã điểm đo',
+        r: 'Bán kính vùng chấm (px)',
+        x: 'Tọa độ X',
+        y: 'Tọa độ Y',
         alarmThreshold: 'Ngưỡng báo động (°C)',
         preAlarmThreshold: 'Ngưỡng cảnh báo (°C)',
         warningThreshold: 'Ngưỡng cảnh báo (°C)',
@@ -147,28 +295,93 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
         checklist: 'Danh mục kiểm tra',
         condition: 'Điều kiện giám sát',
         actions: 'Tác động hệ thống',
+        thresholdsJson: 'Cấu hình ngưỡng',
+        thresholdsjson: 'Cấu hình ngưỡng',
         ruleSet: 'Nhóm quy tắc',
         point: 'Điểm đo giám sát',
         op: 'Phép toán so sánh',
         preAlarm: 'Ngưỡng Cảnh báo (Vàng)',
-        alarm: 'Ngưỡng Nguy hiểm (Đỏ)',
+        alarm: 'Nguy hiểm (Đỏ)',
         doAlert: 'Gửi cảnh báo thời gian thực',
         doHealth: 'Trừ điểm sức khỏe',
         doMaintenance: 'Lập phiếu bảo trì tự động',
         penalty: 'Điểm sức khỏe trừ',
         maintType: 'Loại bảo trì lập lịch',
-        maintDays: 'Thời hạn hoàn thành bảo trì (ngày)'
+        maintDays: 'Thời hạn hoàn thành bảo trì (ngày)',
+        ox: 'Tọa độ X (Quang học)',
+        oy: 'Tọa độ Y (Quang học)',
+        tx: 'Tọa độ X (Ảnh nhiệt)',
+        ty: 'Tọa độ Y (Ảnh nhiệt)',
+        sortOrder: 'Thứ tự hiển thị',
+        color: 'Màu sắc hiển thị'
       };
       return keys[k] ?? k;
     };
 
     const translateValue = (k: string, v: any): React.ReactNode => {
+      const renderCompactObject = (obj: any, title = 'Dữ liệu cấu trúc') => {
+        if (!obj || typeof obj !== 'object') return '—';
+        const entries = Object.entries(obj).filter(([, value]) => value !== null && value !== undefined);
+        if (entries.length === 0) return '—';
+        return (
+          <div className="audit-object-preview">
+            <div className="audit-object-preview__title">{title}</div>
+            {entries.slice(0, 6).map(([key, value]) => (
+              <div key={key} className="audit-object-preview__row">
+                <span>{translateKey(key)}</span>
+                <strong>{typeof value === 'object' && value !== null ? (Array.isArray(value) ? `Danh sách ${value.length} mục` : `${Object.keys(value).length} trường`) : String(value)}</strong>
+              </div>
+            ))}
+            {entries.length > 6 && (
+              <div className="audit-object-preview__more">+{entries.length - 6} trường khác</div>
+            )}
+          </div>
+        );
+      };
+
+      const renderThresholdsJson = (value: any) => {
+        const parsed = typeof value === 'string' ? parseJson(value) : value;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+        const displayName = parsed.fullName || parsed.label || parsed.name || 'Cấu hình ngưỡng';
+        const warnValue = parsed.warn ?? parsed.warning ?? parsed.preAlarm ?? parsed.pre_alarm ?? parsed.prealarm ?? '—';
+        const alarmValue = parsed.alarm ?? parsed.high ?? parsed.threshold ?? '—';
+        const fontSize = parsed.fontSize ?? parsed.fontsize;
+        const labelPos = parsed.labelPos ?? parsed.labelPosition;
+        const strokeWidth = parsed.strokeWidth ?? parsed.strokewidth;
+
+        const summaryBits: string[] = [
+          `Cảnh báo ${warnValue}`,
+          `Báo động ${alarmValue}`,
+        ];
+        if (labelPos !== undefined && labelPos !== null) summaryBits.push(`Nhãn ${labelPos}`);
+        if (fontSize !== undefined && fontSize !== null) summaryBits.push(`Cỡ ${fontSize}`);
+        if (strokeWidth !== undefined && strokeWidth !== null) summaryBits.push(`Nét ${strokeWidth}`);
+
+        return (
+          <div className="audit-threshold-preview">
+            <div className="audit-threshold-preview__name">{displayName}</div>
+            <div className="audit-threshold-preview__summary">
+              {summaryBits.map(bit => (
+                <span key={bit} className="audit-threshold-preview__chip">
+                  {bit}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
       if (v === null || v === undefined) return '(trống)';
       if (typeof v === 'boolean') return v ? 'Đang bật / Hoạt động' : 'Tắt / Ngừng hoạt động';
+      if (k === 'label' && typeof v === 'string' && !v.trim()) return 'Chưa đặt tên';
       if (k === 'role') {
         if (v === 'admin') return 'Quản trị viên hệ thống';
         if (v === 'manager') return 'Quản lý trạm con';
         if (v === 'operator') return 'Nhân viên vận hành';
+      }
+      if ((k === 'x' || k === 'y' || k === 'r') && (typeof v === 'number' || typeof v === 'string')) {
+        return `${v}`;
       }
       if (k === 'severityLevel' || k === 'level') {
         if (v === 'alarm') return 'Nguy hiểm (Alarm)';
@@ -237,6 +450,10 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           );
         }
       }
+      if (k.toLowerCase() === 'thresholdsjson') {
+        const summary = renderThresholdsJson(v);
+        if (summary) return summary;
+      }
       if (k === 'thresholds' && typeof v === 'string') {
         const parsedTh = parseJson(v);
         if (parsedTh) {
@@ -265,14 +482,77 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
         }
       }
       if (Array.isArray(v)) {
-        return v.join(', ');
+        if (v.length === 0) return '(trống)';
+        const hasObjects = v.some(item => typeof item === 'object' && item !== null);
+        if (!hasObjects) return v.join(', ');
+        return <span>Danh sách gồm {v.length} mục</span>;
+      }
+      if (typeof v === 'object' && v !== null) {
+        return renderCompactObject(v, translateKey(k));
       }
       return String(v);
+    };
+
+    const extractThresholdConfig = (value: any) => {
+      const parsed = typeof value === 'string' ? parseJson(value) : value;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      return {
+        name: parsed.fullName || parsed.label || parsed.name || 'Cấu hình ngưỡng',
+        warn: parsed.warn ?? parsed.warning ?? parsed.preAlarm ?? parsed.pre_alarm ?? parsed.prealarm,
+        alarm: parsed.alarm ?? parsed.high ?? parsed.threshold,
+        labelPos: parsed.labelPos ?? parsed.labelPosition,
+        fontSize: parsed.fontSize ?? parsed.fontsize,
+        strokeWidth: parsed.strokeWidth ?? parsed.strokewidth,
+      };
+    };
+
+    const renderThresholdDiff = (oldValue: any, newValue: any) => {
+      const oldCfg = extractThresholdConfig(oldValue);
+      const newCfg = extractThresholdConfig(newValue);
+      if (!oldCfg || !newCfg) return null;
+
+      const fields: Array<{ label: string; oldV: any; newV: any }> = [
+        { label: 'Cảnh báo', oldV: oldCfg.warn, newV: newCfg.warn },
+        { label: 'Báo động', oldV: oldCfg.alarm, newV: newCfg.alarm },
+        { label: 'Nhãn', oldV: oldCfg.labelPos, newV: newCfg.labelPos },
+        { label: 'Cỡ chữ', oldV: oldCfg.fontSize, newV: newCfg.fontSize },
+        { label: 'Độ dày nét', oldV: oldCfg.strokeWidth, newV: newCfg.strokeWidth },
+      ].filter(item => item.oldV !== item.newV);
+
+      const nameChanged = oldCfg.name !== newCfg.name;
+
+      if (fields.length === 0 && !nameChanged) {
+        return <span style={{ color: 'var(--admin-text-muted)' }}>Không có thay đổi thực tế trong cấu hình ngưỡng.</span>;
+      }
+
+      return (
+        <div className="audit-change-diff">
+          <div className="audit-change-diff__title">{newCfg.name}</div>
+          {nameChanged && (
+            <div className="audit-change-diff__row">
+              <span className="audit-change-diff__label">Tên hiển thị</span>
+              <span className="audit-change-diff__value">
+                <i>{String(oldCfg.name)}</i> → <b>{String(newCfg.name)}</b>
+              </span>
+            </div>
+          )}
+          {fields.map(field => (
+            <div key={field.label} className="audit-change-diff__row">
+              <span className="audit-change-diff__label">{field.label}</span>
+              <span className="audit-change-diff__value">
+                <i>{field.oldV === undefined || field.oldV === null ? '—' : String(field.oldV)}</i> → <b>{field.newV === undefined || field.newV === null ? '—' : String(field.newV)}</b>
+              </span>
+            </div>
+          ))}
+        </div>
+      );
     };
 
     // Trường hợp tạo mới (create) hoặc không có oldValue
     if (action.toLowerCase() === 'create' || !oldVal) {
       if (!newVal) return <span style={{ color: 'var(--admin-text-muted)' }}>Không có thông tin chi tiết.</span>;
+
+      const filteredNewVal = buildNamedRows(newVal);
 
       return (
         <table className="detail-changes-table">
@@ -282,11 +562,11 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </tr>
           </thead>
           <tbody>
-            {Object.entries(newVal).map(([k, v]) => {
-              if (v === null || v === undefined || (typeof v === 'object' && !Array.isArray(v))) return null;
+            {filteredNewVal.map(([k, v]) => {
+              if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
-                  <td className="detail-key">{translateKey(k)}</td>
+                  <td className="detail-key">{k === 'geometry' ? 'Vị trí' : translateKey(k)}</td>
                   <td className="detail-val-new">{translateValue(k, v)}</td>
                 </tr>
               );
@@ -300,6 +580,8 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     if (action.toLowerCase() === 'delete' || !newVal) {
       if (!oldVal) return <span style={{ color: 'var(--admin-text-muted)' }}>Không có thông tin chi tiết.</span>;
 
+      const filteredOldVal = buildNamedRows(oldVal);
+
       return (
         <table className="detail-changes-table">
           <thead>
@@ -308,11 +590,11 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </tr>
           </thead>
           <tbody>
-            {Object.entries(oldVal).map(([k, v]) => {
-              if (v === null || v === undefined || (typeof v === 'object' && !Array.isArray(v))) return null;
+            {filteredOldVal.map(([k, v]) => {
+              if (v === null || v === undefined) return null;
               return (
                 <tr key={k}>
-                  <td className="detail-key">{translateKey(k)}</td>
+                  <td className="detail-key">{k === 'geometry' ? 'Vị trí' : translateKey(k)}</td>
                   <td className="detail-val-old" style={{ textDecoration: 'none' }}>{translateValue(k, v)}</td>
                 </tr>
               );
@@ -325,8 +607,12 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     // Trường hợp cập nhật (update)
     const changes: { key: string; oldV: any; newV: any }[] = [];
     const allKeys = Array.from(new Set([...Object.keys(oldVal), ...Object.keys(newVal)]));
+    const geometryChanged = isPointLikeEntity && ['x', 'y', 'r'].some(k => oldVal[k] !== newVal[k]);
 
     for (const k of allKeys) {
+      if (ignoredKeys.has(k.toLowerCase())) continue;
+      if (isPointLikeEntity && geometryKeys.has(k.toLowerCase())) continue;
+
       if ((oldVal[k] && typeof oldVal[k] === 'object') || (newVal[k] && typeof newVal[k] === 'object')) {
         if (JSON.stringify(oldVal[k]) !== JSON.stringify(newVal[k])) {
           changes.push({ key: k, oldV: JSON.stringify(oldVal[k]), newV: JSON.stringify(newVal[k]) });
@@ -338,29 +624,51 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
       }
     }
 
+    if (geometryChanged) {
+      changes.unshift({
+        key: 'geometry',
+        oldV: formatGeometry(oldVal),
+        newV: formatGeometry(newVal),
+      });
+    }
+
     if (changes.length === 0) {
       return <span style={{ color: 'var(--admin-text-muted)' }}>Cập nhật các thuộc tính hệ thống.</span>;
     }
 
     return (
-      <table className="detail-changes-table">
-        <thead>
-          <tr>
-            <th>Thuộc tính thay đổi</th>
-            <th>Giá trị cũ</th>
-            <th>Giá trị mới</th>
-          </tr>
-        </thead>
-        <tbody>
-          {changes.map(c => (
-            <tr key={c.key}>
-              <td className="detail-key">{translateKey(c.key)}</td>
-              <td className="detail-val-old">{translateValue(c.key, c.oldV)}</td>
-              <td className="detail-val-new">{translateValue(c.key, c.newV)}</td>
+      <div style={{ display: 'grid', gap: 12 }}>
+        <table className="detail-changes-table">
+          <thead>
+            <tr>
+              <th>Thuộc tính thay đổi</th>
+              <th>Giá trị cũ</th>
+              <th>Giá trị mới</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {changes.map(c => {
+              if (c.key.toLowerCase() === 'thresholdsjson') {
+                return (
+                  <tr key={c.key}>
+                    <td className="detail-key">{translateKey(c.key)}</td>
+                    <td className="detail-val-new" colSpan={2}>
+                      {renderThresholdDiff(c.oldV, c.newV)}
+                    </td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={c.key}>
+                  <td className="detail-key">{c.key === 'geometry' ? 'Vị trí' : translateKey(c.key)}</td>
+                  <td className="detail-val-old">{translateValue(c.key, c.oldV)}</td>
+                  <td className="detail-val-new">{translateValue(c.key, c.newV)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     );
   };
 
@@ -377,17 +685,16 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    setExpandedIds({});
     
-    const from = dates.from ? new Date(dates.from).toISOString() : undefined;
-    const to = dates.to ? new Date(dates.to + 'T23:59:59').toISOString() : undefined;
+    const from = startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined;
+    const to = endDate ? new Date(endDate + 'T23:59:59').toISOString() : undefined;
     const params = { from, to, limit: 100, stationId: filterStation || undefined };
 
     try {
       if (activeTab === 'all') {
         const [audit, logins] = await Promise.all([
-          stationApi.getAuditLogs(params),
-          stationApi.getLoginLogs(params)
+          withTimeout(stationApi.getAuditLogs(params), 12000, [], 'getAuditLogs(all)'),
+          withTimeout(stationApi.getLoginLogs(params), 12000, [], 'getLoginLogs(all)')
         ]);
 
         const merged: LogItem[] = [
@@ -412,10 +719,14 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
 
         setLogs(merged);
       } else if (activeTab === 'audit') {
-        const data = await stationApi.getAuditLogs({ ...params, limit: 200 });
+        const data = await withTimeout(stationApi.getAuditLogs({
+          ...params,
+          limit: 200,
+          action: filterAction || undefined,
+        }), 12000, [], 'getAuditLogs(audit)');
         setAuditLogs(data);
       } else if (activeTab === 'login') {
-        const data = await stationApi.getLoginLogs(params);
+        const data = await withTimeout(stationApi.getLoginLogs(params), 12000, [], 'getLoginLogs(login)');
         setLoginLogs(data);
       }
     } catch (e) {
@@ -423,7 +734,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     } finally {
       setLoading(false);
     }
-  }, [activeTab, dates, filterStation]);
+  }, [activeTab, startDate, endDate, filterStation, filterAction]);
 
   useEffect(() => {
     loadData();
@@ -436,9 +747,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           <th className="col-time">Thời gian</th>
           <th className="col-type">Loại</th>
           {isCentralMode && <th className="col-station">Trạm</th>}
-          <th>Hành động / Sự kiện</th>
-          <th className="col-who">Đối tượng</th>
-          <th className="col-view">Xem</th>
+          <th className="col-event">Hành động / Sự kiện</th>
         </tr>
       );
     }
@@ -448,9 +757,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           <th className="col-time">Thời gian</th>
           <th className="col-action">Hành động</th>
           {isCentralMode && <th className="col-station">Trạm</th>}
-          <th>Đối tượng tác động</th>
           <th className="col-who">Người thực hiện</th>
-          <th className="col-view">Xem</th>
         </tr>
       );
     }
@@ -477,89 +784,85 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
   };
 
   const getRecordCount = () => {
-    if (activeTab === 'all') return logs.length;
-    if (activeTab === 'audit') return auditLogs.length;
-    return loginLogs.length;
+    if (activeTab === 'all') return filteredLogs.length;
+    if (activeTab === 'audit') return filteredAuditLogs.length;
+    return filteredLoginLogs.length;
   };
 
   const renderAllRows = (items: LogItem[], keyPrefix = 'all') => items.map((m, idx) => {
-    const rowId = `${keyPrefix}-${idx}`;
     const hasDetail = m.type === 'audit';
-    const isExpanded = !!expandedIds[rowId];
+    const eventText = m.type === 'audit' ? actionLabel(m.action) : m.info;
 
     return (
-      <React.Fragment key={rowId}>
-        <tr>
+      <tr
+        key={`${keyPrefix}-${idx}`}
+        className={hasDetail ? 'audit-row-clickable' : undefined}
+        onClick={hasDetail ? () => openDetail({
+          entityType: m.raw?.entityType,
+          entityId: m.raw?.entityId,
+          action: m.raw?.action,
+          oldValue: m.raw?.oldValue,
+          newValue: m.raw?.newValue,
+          title: `${actionLabel(m.raw?.action)} · ${entityLabel(m.raw?.entityType ?? null)}`,
+          who: m.who,
+          stationName: m.stationName,
+          ts: m.ts,
+          ipAddress: m.raw?.ipAddress,
+          raw: m.raw
+        }) : undefined}
+      >
           <td className="col-time" style={{ color: 'var(--admin-text-muted)', fontFamily: 'monospace' }}>
             {fmtDateTime(m.ts)}
           </td>
           <td className="col-type">
-            <span className={`tag-all tag-${m.type}`}>{m.type.toUpperCase()}</span>
+            <span className={`tag-all tag-${m.type}`} title={m.type === 'audit' ? 'Hành động hệ thống' : 'Đăng nhập'}>
+              {m.type === 'audit' ? 'THAO TÁC' : m.type === 'login' ? 'ĐĂNG NHẬP' : m.type.toUpperCase()}
+            </span>
           </td>
           {isCentralMode && (
             <td className="col-station" style={{ color: 'var(--admin-text-muted)', fontWeight: 500 }}>
               {getStationLabel(m.stationName)}
             </td>
           )}
-          <td style={{ fontWeight: 600 }}>
-            {m.info} <small style={{ color: 'var(--admin-text-muted)', fontWeight: 'normal' }}>({m.action})</small>
+          <td className="col-event" style={{ fontWeight: 600 }}>
+            {eventText}
           </td>
-          <td className="col-who">{m.who || 'system'}</td>
-          <td className="col-view" style={{ textAlign: 'center' }}>
-            {hasDetail ? (
-              <button className="expanding-btn" onClick={() => toggleExpand(rowId)}>
-                {isExpanded ? '▲' : '▼'}
-              </button>
-            ) : '—'}
-          </td>
-        </tr>
-        {hasDetail && isExpanded && (
-          <tr className="audit-detail-row">
-            <td colSpan={isCentralMode ? 6 : 5} style={{ padding: 16 }}>
-              {getHumanReadableChanges(m.raw.entityType, m.raw.action, m.raw.oldValue, m.raw.newValue)}
-            </td>
-          </tr>
-        )}
-      </React.Fragment>
+      </tr>
     );
   });
 
   const renderAuditRows = (items: any[], keyPrefix = 'audit') => items.map((l, idx) => {
-    const rowId = `${keyPrefix}-${idx}`;
-    const isExpanded = !!expandedIds[rowId];
     return (
-      <React.Fragment key={rowId}>
-        <tr>
+      <tr
+        key={`${keyPrefix}-${idx}`}
+        className="audit-row-clickable"
+        onClick={() => openDetail({
+          entityType: l.entityType,
+          entityId: l.entityId,
+          action: l.action,
+          oldValue: l.oldValue,
+          newValue: l.newValue,
+          title: `${actionLabel(l.action)} · ${entityLabel(l.entityType ?? null)}`,
+          who: l.fullName || l.username || 'system',
+          stationName: l.stationName,
+          ts: l.ts,
+          ipAddress: l.ipAddress,
+          raw: l
+        })}
+      >
           <td className="col-time" style={{ color: 'var(--admin-text-muted)' }}>
             {fmtDateTime(l.ts)}
           </td>
           <td className="col-action">
-            <b>{l.action.toUpperCase()}</b>
+            <b>{actionLabel(l.action)}</b>
           </td>
           {isCentralMode && (
             <td className="col-station" style={{ color: 'var(--admin-text-muted)', fontWeight: 500 }}>
               {getStationLabel(l.stationName)}
             </td>
           )}
-          <td>
-            {entityLabel(l.entityType)}{' '}
-            <small style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem' }}>{l.entityId?.slice(0, 8) || ''}</small>
-          </td>
           <td className="col-who">{l.fullName || l.username || 'system'}</td>
-          <td className="col-view" style={{ textAlign: 'center' }}>
-            <button className="expanding-btn" onClick={() => toggleExpand(rowId)}>
-              {isExpanded ? '▲' : '▼'}
-            </button>
-          </td>
-        </tr>
-        {isExpanded && (
-          <tr className="audit-detail-row">
-            <td colSpan={isCentralMode ? 6 : 5} style={{ padding: 16 }}>
-              {getHumanReadableChanges(l.entityType, l.action, l.oldValue, l.newValue)}
-            </td>
-          </tr>
-        )}
-      </React.Fragment>
+      </tr>
     );
   });
 
@@ -606,16 +909,16 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
       return Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
     }
 
-    if (activeTab === 'all') return groupItems(logs);
-    if (activeTab === 'audit') return groupItems(auditLogs);
-    if (activeTab === 'login') return groupItems(loginLogs);
-    return groupItems(loginLogs);
-  }, [activeTab, auditLogs, loginLogs, logs, shouldGroupByStation]);
+    if (activeTab === 'all') return groupItems(filteredLogs);
+    if (activeTab === 'audit') return groupItems(filteredAuditLogs);
+    if (activeTab === 'login') return groupItems(filteredLoginLogs);
+    return groupItems(filteredLoginLogs);
+  }, [activeTab, filteredAuditLogs, filteredLoginLogs, filteredLogs, shouldGroupByStation]);
 
   const renderEmptyState = () => {
-    const colSpan = activeTab === 'all' || activeTab === 'audit'
-      ? (isCentralMode ? 6 : 5)
-      : (isCentralMode ? 5 : 4);
+    const colSpan = activeTab === 'login'
+      ? (isCentralMode ? 5 : 4)
+      : (isCentralMode ? 4 : 3);
 
     let message = 'Không có dữ liệu.';
     if (activeTab === 'all') message = 'Không có dữ liệu tổng hợp.';
@@ -635,7 +938,7 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     if (loading) {
       return (
         <tr>
-          <td colSpan={isCentralMode ? 6 : 5} style={{ textAlign: 'center', padding: 60, color: 'var(--admin-text-muted)' }}>
+          <td colSpan={activeTab === 'login' ? (isCentralMode ? 5 : 4) : (isCentralMode ? 4 : 3)} style={{ textAlign: 'center', padding: 60, color: 'var(--admin-text-muted)' }}>
             Đang tải dữ liệu...
           </td>
         </tr>
@@ -645,19 +948,19 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
     const items = groupItems;
 
     if (activeTab === 'all') {
-      const source = items || logs;
+      const source = items || filteredLogs;
       if (source.length === 0) return renderEmptyState();
       return renderAllRows(source, groupKey || 'all');
     }
 
     if (activeTab === 'audit') {
-      const source = items || auditLogs;
+      const source = items || filteredAuditLogs;
       if (source.length === 0) return renderEmptyState();
       return renderAuditRows(source, groupKey || 'audit');
     }
 
     if (activeTab === 'login') {
-      const source = items || loginLogs;
+      const source = items || filteredLoginLogs;
       if (source.length === 0) return renderEmptyState();
       return renderLoginRows(source);
     }
@@ -684,6 +987,12 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </div>
           )}
 
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          />
+
           <div className="page-toolbar-cell" style={{ height: 28 }}>
             <span className="page-cell-label">LOẠI:</span>
             <ToolbarSelect
@@ -699,33 +1008,27 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
           </div>
 
           <div className="page-toolbar-cell" style={{ height: 28 }}>
-            <span className="page-cell-label">THỜI GIAN:</span>
+            <span className="page-cell-label">HÀNH ĐỘNG:</span>
             <ToolbarSelect
-              value={timeRange}
-              onChange={setTimeRange}
+              value={filterAction}
+              onChange={setFilterAction}
               options={[
-                { value: 'today', label: 'Hôm nay' },
-                { value: 'yesterday', label: 'Hôm qua' },
-                { value: '7d', label: '7 ngày qua' },
-                { value: '30d', label: '30 ngày qua' },
-                { value: 'all', label: 'Tất cả lịch sử' },
+                { value: '', label: 'Tất cả' },
+                { value: 'create', label: 'Tạo mới' },
+                { value: 'update', label: 'Cập nhật' },
+                { value: 'delete', label: 'Xóa' },
+                { value: 'login', label: 'Đăng nhập' },
+                { value: 'logout', label: 'Đăng xuất' },
+                { value: 'failed', label: 'Thất bại' },
               ]}
               width={110}
             />
           </div>
-
-          <button 
-            className="btn-industrial btn-primary" 
-            style={{ height: 28, padding: '0 12px', fontSize: '.72rem', fontWeight: 800 }}
-            onClick={loadData}
-          >
-            ↻ LÀM MỚI
-          </button>
         </div>
       </div>
 
-      <div className="admin-card" style={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, overflowY: 'auto', padding: shouldGroupByStation ? 12 : 0 }}>
+      <div className="admin-card" style={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', minHeight: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: shouldGroupByStation ? 12 : 0 }}>
           {shouldGroupByStation ? (
             groupedStations.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -771,6 +1074,62 @@ export default function AuditLogPage({ embeddedMode = 'default', stationIdOverri
             </table>
           )}
         </div>
+
+        {selectedDetail && (
+          <aside className="audit-inline-detail">
+            <div className="audit-detail-drawer-header" style={{ borderBottom: '1px solid var(--admin-border-subtle, #1a2235)' }}>
+              <div>
+                <div className="audit-detail-drawer-kicker">CHI TIẾT NHẬT KÝ</div>
+                <div className="audit-detail-drawer-title">{selectedDetail.title}</div>
+              </div>
+              <button className="audit-detail-close" onClick={closeDetail} aria-label="Đóng chi tiết">×</button>
+            </div>
+
+            <div className="audit-detail-drawer-body">
+              <div className="audit-detail-story">
+                <div className="audit-detail-story__headline">{buildDetailNarrative(selectedDetail)}</div>
+                <div className="audit-detail-story__subline">
+                  Ghi nhận lúc {selectedDetail.ts ? fmtDateTime(selectedDetail.ts) : '—'}{selectedDetail.ipAddress ? ` · IP ${selectedDetail.ipAddress}` : ''}
+                </div>
+              </div>
+
+              <div className="audit-detail-grid">
+                <div className="audit-detail-card">
+                  <span>Người thực hiện</span>
+                  <strong>{selectedDetail.who || '—'}</strong>
+                </div>
+                <div className="audit-detail-card">
+                  <span>Trạm</span>
+                  <strong>{selectedDetail.stationName || 'Trung tâm đa trạm'}</strong>
+                </div>
+                <div className="audit-detail-card">
+                  <span>Hành động</span>
+                  <strong>{actionLabel(selectedDetail.action)}</strong>
+                </div>
+                <div className="audit-detail-card">
+                  <span>Đối tượng</span>
+                  <strong>{entityLabel(selectedDetail.entityType ?? null)}</strong>
+                </div>
+                <div className="audit-detail-card">
+                  <span>Địa chỉ IP</span>
+                  <strong>{selectedDetail.ipAddress || '—'}</strong>
+                </div>
+              </div>
+
+              <div className="audit-detail-section">
+                <div className="audit-detail-section-title">NGƯỜI DÙNG ĐÃ LÀM GÌ</div>
+                <div className="audit-detail-content">
+                  {getHumanReadableChanges(
+                    selectedDetail.entityType,
+                    selectedDetail.action,
+                    selectedDetail.oldValue,
+                    selectedDetail.newValue
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+        )}
       </div>
 
       <div className="audit-footer" style={{ marginTop: 8 }}>

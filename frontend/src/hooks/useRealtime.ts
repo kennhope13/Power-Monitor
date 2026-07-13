@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { createRealtimeHub } from '@/services/realtime.service';
+import { getRealtimeHub, startRealtimeHub } from '@/services/realtime.service';
 import { HubConnection } from '@microsoft/signalr';
 
 interface RealtimeHandlers {
@@ -13,7 +13,7 @@ export function useRealtime(handlers: RealtimeHandlers, dependencies: any[] = []
   const hubRef = useRef<HubConnection | null>(null);
 
   useEffect(() => {
-    const hub = createRealtimeHub();
+    const hub = getRealtimeHub();
     hubRef.current = hub;
 
     if (handlers.onSensorUpdate) {
@@ -29,7 +29,7 @@ export function useRealtime(handlers: RealtimeHandlers, dependencies: any[] = []
     let isMounted = true;
     const startHub = async () => {
       try {
-        await hub.start();
+        await startRealtimeHub();
       } catch (err) {
         console.warn('[useRealtime] SignalR Connection failed, retrying in 5s...', err);
         if (isMounted) {
@@ -41,7 +41,15 @@ export function useRealtime(handlers: RealtimeHandlers, dependencies: any[] = []
 
     return () => {
       isMounted = false;
-      hub.stop();
+      if (handlers.onSensorUpdate) {
+        hub.off('SensorUpdate', handlers.onSensorUpdate);
+      }
+      if (handlers.onAlertNew) {
+        hub.off('AlertNew', handlers.onAlertNew);
+      }
+      if (handlers.onAlertUpdated) {
+        hub.off('AlertUpdated', handlers.onAlertUpdated);
+      }
       hubRef.current = null;
     };
   }, dependencies);

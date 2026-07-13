@@ -4,23 +4,21 @@
 // Nhận cập nhật realtime qua SignalR (SensorUpdate, AlertNew, AlertUpdated)
 // ============================================================
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { SensorPoint, stationApi } from '@/services/StationApiService';
+import { SensorPoint, stationApi, Rule } from '@/services/StationApiService';
 import { useStationStore, useDeviceStore, useAlertStore, useSensorStore } from '@/store';
 import { ALERT_STATUS, DEVICE_STATUS } from '@/types/enums';
 import { useRealtime } from '@/hooks/useRealtime';
-import { PT_PD } from '@/constants/points';
 import { DEV_PLC_S7, DEV_CAM_TYPES } from '@/constants/devices';
 import type { AlertItem } from '@/types/api.types';
 
 import SldCanvas, { SldCanvasRef } from '@/components/dashboard/sld/SldCanvas';
 import SldEditPanel from '@/components/dashboard/sld/SldEditPanel';
-import KpiCards from '@/components/dashboard/kpi/KpiCards';
-import CameraGrid, { CameraSensor } from '@/components/dashboard/camera/CameraGrid';
 import DashboardToolbar from '@/components/dashboard/toolbar/DashboardToolbar';
 import CameraLiveViewer from '@/components/dashboard/camera/CameraLiveViewer';
 import AlertPanel from '@/components/dashboard/alerts/AlertPanel';
+import { confirmDialog } from '@/utils/confirm';
 
 /**
  * Trang tổng quan chính — hiển thị SLD, KPI, camera live và cảnh báo.
@@ -29,9 +27,10 @@ import AlertPanel from '@/components/dashboard/alerts/AlertPanel';
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Ưu tiên stationId từ URL (?stationId=...), nếu không có thì tự fetch trạm đầu tiên
+  // Ưu tiên stationId từ URL (?stationId=...), nếu không có thì thử stationCode, cuối cùng fetch trạm đầu tiên
   const [stationId, setStationId] = useState(searchParams.get('stationId') ?? '');
   const [stationName, setStationName] = useState(searchParams.get('stationName') ?? '');
+  const urlStationCode = searchParams.get('stationCode') ?? '';
   const [isEditMode, setIsEditMode] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [filters, setFilters] = useState({ thermal: true, pd: true, camera: true });
@@ -43,10 +42,14 @@ export default function DashboardPage() {
 
   const sldRef = useRef<SldCanvasRef>(null);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
+  const [selectedCabinet, setSelectedCabinet] = useState<any | null>(null);
   const [sldColorMatrix, setSldColorMatrix] = useState<string | undefined>(undefined);
   const [sldRefreshTick, setSldRefreshTick] = useState(0);
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [sensorThresholds, setSensorThresholds] = useState<Record<string, { warn: number | null; alarm: number | null }>>({});
   const [unpinnedCount, setUnpinnedCount] = useState(0);
   const [pointNamesMap, setPointNamesMap] = useState<Record<string, string>>({});
+  const sldFallbackTriedRef = useRef<string | null>(null);
 
   // ── Global stores ─────────────────────────────────────────────
   const stations = useStationStore(s => s.stations);
@@ -75,18 +78,6 @@ export default function DashboardPage() {
     [devices]
   );
 
-  const camAlertsCount = useMemo(() => {
-    const camDeviceIds = new Set(devices
-      .filter(d => DEV_CAM_TYPES.some(t => d.type?.includes(t)))
-      .map(d => d.id.toLowerCase()));
-
-    return alerts.filter(a => {
-      if (a.status !== ALERT_STATUS.OPEN && a.status !== ALERT_STATUS.ACKED) return false;
-      const did = (a.deviceId || '').toLowerCase();
-      // Nếu alert thuộc về device là camera -> đếm vào camAlertsCount
-      return camDeviceIds.has(did);
-    }).length;
-  }, [alerts, devices]);
 
 
   const liveCameraSrc = useMemo(() => {
@@ -95,6 +86,50 @@ export default function DashboardPage() {
     const cfg = (cam as any).config || {};
     return (cfg.go2rtc_optical || cfg.go2rtc_id || cfg.go2rtc_thermal) as string | undefined;
   }, [devices]);
+
+  const refreshDashboardData = useCallback(() => {
+    if (!stationId) return;
+    fetchSensors(stationId);
+    fetchDevices(stationId);
+    fetchAlerts(ALERT_STATUS.OPEN);
+    stationApi.getRules()
+      .then(allRules => {
+        const sid = stationId.toLowerCase();
+        setRules(allRules.filter(r => (r.stationId || '').toLowerCase() === sid));
+      })
+      .catch(() => setRules([]));
+
+    stationApi.getSld(stationId)
+      .then(async data => {
+        if (data.svgUrl) {
+          setUnpinnedCount(data.unpinned?.length || 0);
+          return;
+        }
+
+        // Nếu trạm hiện tại chưa có SLD active, tự dò trạm khác có sơ đồ
+        if (sldFallbackTriedRef.current === stationId) return;
+        sldFallbackTriedRef.current = stationId;
+
+        const stationList = stations.length > 0 ? stations : await fetchStations();
+        const otherStations = stationList.filter(s => s.id !== stationId);
+
+        for (const s of otherStations) {
+          try {
+            const candidate = await stationApi.getSld(s.id);
+            if (!candidate.svgUrl) continue;
+
+            setStationId(s.id);
+            setStationName(s.name);
+            localStorage.setItem('selected_station_id', s.id);
+            setUnpinnedCount(candidate.unpinned?.length || 0);
+            return;
+          } catch {
+            continue;
+          }
+        }
+      })
+      .catch(() => {});
+  }, [stationId, fetchSensors, fetchDevices, fetchAlerts, fetchStations, stations]);
 
 
   // ── Resolve stationId nếu chưa có ──────────────────────────────
@@ -106,13 +141,29 @@ export default function DashboardPage() {
       localStorage.setItem('selected_station_id', stationId);
       return;
     }
+
+    // Nếu có stationCode từ URL, tìm station tương ứng theo code
+    if (urlStationCode) {
+      fetchStations().then(() => {
+        const found = useStationStore.getState().stations.find(
+          (s: any) => s.code?.toLowerCase() === urlStationCode.toLowerCase()
+        );
+        if (found) {
+          setStationId(found.id);
+          setStationName(found.name);
+          localStorage.setItem('selected_station_id', found.id);
+        }
+      }).catch(() => {});
+      return;
+    }
+
     getFirstStationId().then(id => { 
       if (id) {
         setStationId(id);
         localStorage.setItem('selected_station_id', id);
       } 
     }).catch(() => { });
-  }, [stationId, getFirstStationId]);
+  }, [stationId, urlStationCode, getFirstStationId, fetchStations]);
 
   /** Lưu camera đang chọn vào state và localStorage để giữ lại sau khi tải lại trang. */
   const handleCamChange = (srcId: string) => {
@@ -131,16 +182,21 @@ export default function DashboardPage() {
 
   // ── Fetch data khi stationId thay đổi ─────────────────────────
   useEffect(() => {
-    if (!stationId) return;
-    fetchSensors(stationId);
-    fetchDevices(stationId);
-    fetchAlerts(ALERT_STATUS.OPEN);
+    refreshDashboardData();
+  }, [stationId, refreshDashboardData, sldRefreshTick]);
 
-    // Fetch SLD status to show unpinned badge
-    stationApi.getSld(stationId).then(data => {
-      setUnpinnedCount(data.unpinned?.length || 0);
-    }).catch(() => {});
-  }, [stationId, fetchSensors, fetchDevices, fetchAlerts, sldRefreshTick]);
+  useEffect(() => {
+    const onFocus = () => refreshDashboardData();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refreshDashboardData();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [refreshDashboardData]);
 
   // Fetch friendly names for points (Thermal ROI & PD Regions)
   useEffect(() => {
@@ -150,6 +206,18 @@ export default function DashboardPage() {
 
     const fetchAllNames = async () => {
       const newMap: Record<string, string> = {};
+      const nextThresholds: Record<string, { warn: number | null; alarm: number | null }> = {};
+      const setThresholdCfg = (
+        deviceId: string,
+        cfg: { warn: number | null; alarm: number | null },
+        aliases: Array<string | null | undefined>
+      ) => {
+        aliases.forEach(alias => {
+          const normalized = (alias || '').trim().toLowerCase();
+          if (!normalized) return;
+          nextThresholds[`${deviceId}|${normalized}`] = cfg;
+        });
+      };
       await Promise.all(cams.map(async (cam) => {
         try {
           const [pts, rois] = await Promise.all([
@@ -158,12 +226,22 @@ export default function DashboardPage() {
           ]);
           pts.forEach(p => {
             if (p.pointId) newMap[`${cam.id}_${p.pointId}`.toUpperCase()] = p.label || p.name || '';
+            const cfg = {
+              warn: p.warningThreshold || p.preAlarmThreshold || null,
+              alarm: p.alarmThreshold || null,
+            };
+            setThresholdCfg(cam.id, cfg, [p.pointId, p.name, p.label, p.id]);
           });
           rois.forEach(r => {
             let descriptiveName = r.name;
             try {
               const t = JSON.parse(r.thresholds || '{}');
               if (t.fullName) descriptiveName = t.fullName;
+              const cfg = {
+                warn: t.warning || t.preAlarm || null,
+                alarm: t.alarm || null,
+              };
+              setThresholdCfg(cam.id, cfg, [r.name, r.id, t.fullName]);
             } catch {}
             
             newMap[`${cam.id}_${r.id}`.toUpperCase()] = descriptiveName;
@@ -172,6 +250,7 @@ export default function DashboardPage() {
         } catch {}
       }));
       setPointNamesMap(newMap);
+      setSensorThresholds(nextThresholds);
     };
     fetchAllNames();
   }, [stationId, devices]);
@@ -228,6 +307,33 @@ export default function DashboardPage() {
   // Xoay sơ đồ SLD 90 độ
   const handleRotate = () => sldRef.current?.rotateView();
 
+  useEffect(() => {
+    if (!isEditMode || !selectedNode) return;
+
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingField = tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable;
+      if (isTypingField) return;
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
+      const name = selectedNode.label || selectedNode.pointId || 'Node';
+      if (!await confirmDialog({ title: 'Xóa node', message: `Xóa node "${name}"?`, confirmText: 'Xóa', danger: true })) return;
+
+      try {
+        await sldRef.current?.deleteNode(selectedNode.id);
+        setSelectedNode(null);
+        setSldRefreshTick(t => t + 1);
+      } catch (err) {
+        console.error('[DashboardPage] Delete selected node failed:', err);
+        alert('Xóa node thất bại');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isEditMode, selectedNode]);
+
   /** Chuyển mã màu hex thành feColorMatrix SVG để tô màu lại sơ đồ SLD. */
   const handleColorChange = (hex: string) => {
     const R = parseInt(hex.slice(1, 3), 16) / 255;
@@ -239,21 +345,52 @@ export default function DashboardPage() {
   };
 
   const camOptionsGroups = useMemo(() => {
-    const groups: Record<string, { id: string, label: string }[]> = { 'Khác': [] };
-    devices.filter(d => DEV_CAM_TYPES.some(t => d.type?.includes(t))).forEach(cam => {
+    const groups: Record<string, { id: string, label: string, title: string }[]> = { 'Khác': [] };
+    const cameras = devices.filter(d => DEV_CAM_TYPES.some(t => d.type?.includes(t)))
+      .filter(cam => cam.type !== 'camera_pd' && !cam.name.toUpperCase().includes('PD') && !cam.name.toUpperCase().includes('PHÓNG ĐIỆN'));
+    const nameCounts = cameras.reduce<Record<string, number>>((acc, cam) => {
+      const key = cam.name.trim().toLowerCase();
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const shortId = (id?: string) => (id ? id.slice(-4).toUpperCase() : '');
+    const shortText = (text: string, max = 22) => {
+      const cleaned = text.replace(/\s+/g, ' ').trim();
+      return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+    };
+    cameras.forEach(cam => {
       // Bỏ qua hoàn toàn các camera chuyên đo phóng điện (PD)
-      if (cam.type === 'camera_pd' || cam.name.toUpperCase().includes('PD') || cam.name.toUpperCase().includes('PHÓNG ĐIỆN')) return;
-
       const cfg = (cam as any).config || {};
       const zone = cfg.zone?.trim() || 'Khác';
       if (!groups[zone]) groups[zone] = [];
+      const duplicateName = (nameCounts[cam.name.trim().toLowerCase()] || 0) > 1;
+      const kindLabel = cam.type === 'camera_dual'
+        ? null
+        : cam.type === 'camera_thermal'
+          ? 'Nhiệt'
+          : 'Quang';
 
       if (cam.type === 'camera_dual') {
-        if (cfg.go2rtc_optical) groups[zone].push({ id: cfg.go2rtc_optical, label: `${cam.name} (Quang)` });
-        if (cfg.go2rtc_thermal) groups[zone].push({ id: cfg.go2rtc_thermal, label: `${cam.name} (Nhiệt)` });
+        const fullBase = duplicateName ? `${cam.name} · ${zone}` : cam.name;
+        if (cfg.go2rtc_optical) {
+          const title = `${fullBase} (Quang)${duplicateName ? ` · ${shortId(cfg.go2rtc_optical)}` : ''}`;
+          groups[zone].push({ id: cfg.go2rtc_optical, label: shortText(title), title });
+        }
+        if (cfg.go2rtc_thermal) {
+          const title = `${fullBase} (Nhiệt)${duplicateName ? ` · ${shortId(cfg.go2rtc_thermal)}` : ''}`;
+          groups[zone].push({ id: cfg.go2rtc_thermal, label: shortText(title), title });
+        }
       } else {
         const streamId = cfg.go2rtc_id || cfg.go2rtc_thermal || cfg.go2rtc_optical;
-        if (streamId) groups[zone].push({ id: streamId, label: cam.name });
+        if (streamId) {
+          const baseLabel = duplicateName ? `${cam.name} · ${zone}` : cam.name;
+          const title = duplicateName || kindLabel ? `${baseLabel}${kindLabel ? ` (${kindLabel})` : ''}${duplicateName ? ` · ${shortId(streamId)}` : ''}` : cam.name;
+          groups[zone].push({
+            id: streamId,
+            label: shortText(title),
+            title,
+          });
+        }
       }
     });
     return groups;
@@ -270,66 +407,6 @@ export default function DashboardPage() {
     return alerts.some(alert => findCameraStreamForDevice(alert, devices) === activeCameraSrc);
   }, [alerts, devices, activeCameraSrc]);
 
-  const cameraSensors: CameraSensor[] = useMemo(() => {
-    const activeCamDevice = devices.find(d => {
-      const cfg = (d as any).config || {};
-      return cfg.go2rtc_optical === activeCameraSrc || 
-             cfg.go2rtc_thermal === activeCameraSrc || 
-             cfg.go2rtc_id === activeCameraSrc;
-    });
-
-    const result: CameraSensor[] = [];
-
-    // 1. Thêm các điểm đo của camera đang chọn
-    if (activeCamDevice) {
-      sensors
-        .filter(s => s.deviceId.toLowerCase() === activeCamDevice.id.toLowerCase())
-        .forEach(s => {
-          const rawPid = s.pointId.toUpperCase();
-          const uniqueKey = `${s.deviceId}_${rawPid}`.toUpperCase();
-          result.push({
-            pid: uniqueKey,
-            value: s.value,
-            unit: s.unit,
-            deviceName: activeCamDevice.name || '',
-            pointName: pointNamesMap[uniqueKey]
-          });
-        });
-    }
-
-    // 2. Thêm TẤT CẢ các điểm đo Phóng điện (PD) từ toàn bộ trạm (nếu chưa có)
-    // Để mục ĐIỂM PHÓNG ĐIỆN luôn hiển thị cảnh báo dù đang xem camera nào
-    sensors.forEach(s => {
-      const rawPid = s.pointId.toUpperCase();
-      const dev = devices.find(d => d.id.toLowerCase() === s.deviceId.toLowerCase());
-      const devName = dev?.name || '';
-      
-      const isPd = rawPid === PT_PD.toUpperCase() || 
-                   rawPid === 'PD' ||
-                   rawPid.startsWith('PD_') || 
-                   rawPid.includes('_PD') ||
-                   rawPid.includes('PHONG_DIEN') ||
-                   dev?.type === 'camera_pd' ||
-                   devName.toUpperCase().includes('PD') ||
-                   devName.toUpperCase().includes('PHÓNG ĐIỆN');
-
-      if (isPd) {
-        const uniquePid = `${s.deviceId}_${rawPid}`.toUpperCase();
-        if (!result.some(r => r.pid === uniquePid)) {
-
-          result.push({
-            pid: uniquePid,
-            value: s.value,
-            unit: s.unit,
-            deviceName: devName,
-            pointName: pointNamesMap[uniquePid]
-          });
-        }
-      }
-    });
-
-    return result;
-  }, [sensors, devices, activeCameraSrc, pointNamesMap]);
 
   return (
     <div className="dashboard-page new-dash-theme" style={{ position: 'relative', overflow: 'hidden', height: '100%', background: 'var(--admin-bg)' }}>
@@ -341,13 +418,35 @@ export default function DashboardPage() {
         showLabels={showLabels}
         colorMatrix={sldColorMatrix}
         sensors={sensors}
+        rules={rules}
+        sensorThresholds={sensorThresholds}
         selectedNodeId={selectedNode?.id}
-        onNodeSelect={setSelectedNode}
+        onNodeSelect={(point) => {
+          setSelectedNode(point);
+          if (!point) { setSelectedCabinet(null); return; }
+          const dev = devices.find(d => d.id.toLowerCase() === (point.deviceId ?? '').toLowerCase());
+          if (!dev) return;
+          if (point.deviceType?.startsWith('camera')) {
+            const cfg = (dev as any).config || {};
+            const streamId = cfg.go2rtc_optical || cfg.go2rtc_id || cfg.go2rtc_thermal;
+            if (streamId) handleCamChange(streamId);
+            setSelectedCabinet(null);
+          } else if (dev.type === DEV_PLC_S7 || dev.type === 'cabinet') {
+            setSelectedCabinet(dev);
+          } else {
+            setSelectedCabinet(null);
+          }
+        }}
         onNodeDropped={async (x, y, deviceId, _deviceName, pointId) => {
           try {
+            const dev = devices.find(d => d.id.toLowerCase() === deviceId.toLowerCase());
+            const isCam = dev && DEV_CAM_TYPES.some(t => dev.type?.includes(t));
+            // Ngăn thêm trùng: nếu thiết bị đã có node trên sơ đồ thì bỏ qua
+            const existing = sldRef.current?.getPoints() ?? [];
+            if (existing.some(p => p.deviceId?.toLowerCase() === deviceId.toLowerCase())) return;
             const newNode = await stationApi.addSldPoint(stationId, {
-              x, y, r: 8,
-              label: '', // Để trống để user tự nhập tên theo ý muốn
+              x, y, r: isCam ? 10 : 8,
+              label: '',
               deviceId: deviceId,
               pointId: pointId
             });
@@ -363,6 +462,7 @@ export default function DashboardPage() {
 
       <DashboardToolbar
         stationName={stationName || 'StationOS'}
+        showStationName={false}
         isEditMode={isEditMode}
         onToggleEditMode={() => setIsEditMode(!isEditMode)}
         showLabels={showLabels}
@@ -375,19 +475,139 @@ export default function DashboardPage() {
         unpinnedCount={unpinnedCount}
       />
 
-      {/* Left column: KPI + camera grid — ẩn khi đang chỉnh sơ đồ */}
-      {!isEditMode && (
-        <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 30, width: '20%', minWidth: 220, maxWidth: 270, display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 'calc(100% - 50px)', overflowY: 'auto' }}>
-          <KpiCards plcOnline={plcOnline} devices={devices} sensors={sensors} />
-          <CameraGrid
-              sensors={cameraSensors}
-              alertsCount={camAlertsCount}
-              camOptionsGroups={camOptionsGroups}
-              activeCameraSrc={activeCameraSrc}
-              onCamChange={handleCamChange}
-            />
-        </div>
-      )}
+
+      {/* Panel chi tiết tủ điện — góc trên trái khi click node PLC */}
+      {!isEditMode && selectedCabinet && (() => {
+        const cabSensors = sensors.filter(s => s.deviceId.toLowerCase() === selectedCabinet.id.toLowerCase());
+        const getSensor = (ids: string[]) => cabSensors.find(s => ids.includes(s.pointId));
+        const t1Sensor = getSensor(['nhiet_do_pha_1', 'temp_1']);
+        const t2Sensor = getSensor(['nhiet_do_pha_2', 'temp_2']);
+        const t3Sensor = getSensor(['nhiet_do_pha_3', 'temp_3']);
+        const pdSensor = getSensor(['phong_dien', 'pd']);
+        // quality=0: thật | quality=1: simulation cũ (bỏ qua) | quality=2: offline
+        const sensorVal = (s: typeof t1Sensor) =>
+          (!s || s.quality !== 0 || s.value == null) ? undefined : (s.value as number);
+        const t1 = sensorVal(t1Sensor);
+        const t2 = sensorVal(t2Sensor);
+        const t3 = sensorVal(t3Sensor);
+        const pd = sensorVal(pdSensor);
+        const isOffline = selectedCabinet.status === 'offline';
+        const fmt = (v: number | undefined) => v !== undefined ? `${Math.round(v * 10) / 10}` : '---';
+        const fmtPd = (v: number | undefined) => v === undefined ? '---' : `${Math.round(v)}`;
+        const normalize = (id?: string) => (id || '').trim().toLowerCase();
+        const evaluate = (v: number, op: string, t: number) => {
+          if (op === '>') return v > t;
+          if (op === '>=') return v >= t;
+          if (op === '<') return v < t;
+          if (op === '<=') return v <= t;
+          if (op === '==') return Math.abs(v - t) < 0.001;
+          return false;
+        };
+        const getCabinetThresholdLevel = (pointId?: string, value?: number): 'alarm' | 'warning' | undefined => {
+          if (!pointId || value == null) return undefined;
+          const deviceId = selectedCabinet.id.toLowerCase();
+          const pid = normalize(pointId);
+          const suffix = pid.includes('_') ? pid.split('_').pop() || pid : pid;
+          let worst: 'alarm' | 'warning' | undefined;
+          for (const rule of rules) {
+            if (!rule.enabled || !rule.deviceId || rule.deviceId.toLowerCase() !== deviceId) continue;
+            let cond: any;
+            try { cond = JSON.parse(rule.condition); } catch { continue; }
+            const rulePoint = normalize(cond.point);
+            if (!rulePoint || (rulePoint !== pid && rulePoint !== suffix)) continue;
+
+            // Format mới: alarm/pre_alarm trực tiếp
+            let alarmVal: number | null = cond.alarm != null ? Number(cond.alarm) : null;
+            let warnVal: number | null = cond.pre_alarm != null ? Number(cond.pre_alarm) : null;
+            // Format cũ: value + actions.level
+            if (alarmVal == null && warnVal == null && cond.value != null) {
+              let acts: any[] = [];
+              try { acts = JSON.parse(rule.actions || '[]'); } catch { /* */ }
+              const alert = acts.find((a: any) => a.type === 'alert' && a.level);
+              if (alert?.level === 'alarm') alarmVal = Number(cond.value);
+              else if (alert?.level === 'warning') warnVal = Number(cond.value);
+            }
+            if (alarmVal == null && warnVal == null) continue;
+
+            // Đánh giá từng rule độc lập (nhất quán với dotLevelByPoint trong SldCanvas)
+            const op = cond.op ?? '>';
+            const alarmHit = alarmVal != null && evaluate(value, op, alarmVal);
+            const warnHit  = warnVal  != null && evaluate(value, op, warnVal);
+            if (alarmHit) { worst = 'alarm'; break; }
+            if (warnHit && worst !== 'alarm') worst = 'warning';
+          }
+          return worst;
+        };
+        const tempColor = (pointId: string, v: number | undefined) => {
+          if (v === undefined) return 'var(--admin-text-muted)';
+          const level = getCabinetThresholdLevel(pointId, v);
+          if (level === 'alarm') return 'var(--admin-danger)';
+          if (level === 'warning') return 'var(--admin-warning)';
+          return 'var(--admin-success)';
+        };
+        const pdColor = (pointId: string, v: number | undefined) => {
+          if (v === undefined) return 'var(--admin-text-muted)';
+          const level = getCabinetThresholdLevel(pointId, v);
+          if (level === 'alarm') return 'var(--admin-danger)';
+          if (level === 'warning') return 'var(--admin-warning)';
+          return 'var(--admin-success)';
+        };
+        const extraColor = (s: typeof cabSensors[0]) => {
+          if (s.quality !== 0 || s.value == null) return 'var(--admin-text-muted)';
+          if (s.pointId === 'pd_indi') return s.value === 0 ? 'var(--admin-success)' : s.value === 1 ? 'var(--admin-warning)' : 'var(--admin-danger)';
+          const level = getCabinetThresholdLevel(s.pointId, s.value);
+          if (level === 'alarm') return 'var(--admin-danger)';
+          if (level === 'warning') return 'var(--admin-warning)';
+          return 'var(--admin-success)';
+        };
+        const extraLabel = (s: typeof cabSensors[0]) => {
+          if (s.quality !== 0 || s.value == null) return '---';
+          if (s.pointId === 'pd_indi') return s.value === 0 ? 'Bình thường' : s.value === 1 ? 'Cảnh báo' : 'Báo động';
+          return `${Math.round(s.value * 10) / 10}${s.unit || ''}`;
+        };
+        const extras = cabSensors.filter(s => !['nhiet_do_pha_1','nhiet_do_pha_2','nhiet_do_pha_3','temp_1','temp_2','temp_3','phong_dien','pd'].includes(s.pointId));
+        return (
+          <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 30, width: 230,
+            background: 'var(--admin-overlay)', backdropFilter: 'blur(12px)',
+            border: '1px solid var(--admin-border)', boxShadow: 'var(--admin-shadow)' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--admin-border-light)', background: 'var(--admin-hover)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 0, background: isOffline ? 'var(--admin-danger)' : 'var(--admin-success)', display: 'inline-block', flexShrink: 0 }} />
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--admin-text)', letterSpacing: '.3px' }}>{selectedCabinet.name}</span>
+              </div>
+              <button onClick={() => { setSelectedCabinet(null); setSelectedNode(null); }}
+                style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, padding: '0 2px' }}>✕</button>
+            </div>
+            {/* Pha A B C + PD */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4, padding: '8px 10px', borderBottom: extras.length > 0 ? '1px solid var(--admin-border-light)' : 'none' }}>
+              {[['PHA A', fmt(t1), '°C', tempColor('nhiet_do_pha_1', t1)], ['PHA B', fmt(t2), '°C', tempColor('nhiet_do_pha_2', t2)], ['PHA C', fmt(t3), '°C', tempColor('nhiet_do_pha_3', t3)], ['P.ĐIỆN', fmtPd(pd), pd !== undefined ? 'dB' : '', pdColor('phong_dien', pd)]].map(([label, val, unit, color]) => (
+                <div key={label as string} style={{ background: 'rgba(255,255,255,0.04)', padding: '4px 3px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.44rem', color: 'var(--admin-text-muted)', fontWeight: 700, marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: 800, color: color as string, fontFamily: 'Consolas,monospace', lineHeight: 1 }}>
+                    {isOffline ? '--' : val as string}<span style={{ fontSize: '0.48rem', opacity: 0.7 }}>{!isOffline && (val as string) !== '--' ? unit : ''}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Các sensor còn lại */}
+            {extras.length > 0 && (
+              <div style={{ padding: '4px 0', maxHeight: 160, overflowY: 'auto' }}>
+                {extras.map((s, i) => (
+                  <div key={s.pointId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 10px', borderBottom: i < extras.length - 1 ? '1px solid var(--admin-border-light)' : 'none' }}>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--admin-text-muted)' }}>
+                      {{ pd_eppc: 'PD EPPC', pd_indi: 'PD Chỉ báo' }[s.pointId] ?? s.pointId.replace(/_/g, ' ')}
+                    </span>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: extraColor(s), fontFamily: 'Consolas,monospace' }}>
+                      {extraLabel(s)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {isEditMode ? (
         <SldEditPanel
@@ -396,16 +616,17 @@ export default function DashboardPage() {
           refreshTick={sldRefreshTick}
           selectedNode={selectedNode}
           onClearSelection={() => setSelectedNode(null)}
+          onDone={() => setIsEditMode(false)}
         />
       ) : (
         <div
           id="floatRightCol"
           style={{
-            position: 'absolute', top: 10, right: 10, bottom: 40, zIndex: 30,
+            position: 'absolute', top: 10, right: 10, bottom: 0, zIndex: 30,
             width: 'auto',
             display: 'flex', flexDirection: 'column', gap: 8, overflow: 'visible',
             alignItems: 'flex-end',
-            justifyContent: 'space-between'
+            justifyContent: 'flex-start'
           }}
         >
           <div style={{ width: 120, display: 'flex', flexDirection: 'column', minHeight: 0, flex: '0 1 auto' }}>
@@ -425,14 +646,18 @@ export default function DashboardPage() {
               hasAlert={activeCamHasAlert}
               headerAddon={
                 <select
-                  style={{ fontSize: '0.55rem', padding: '1px 4px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 0, maxWidth: 100, cursor: 'pointer', outline: 'none' }}
+                  style={{ fontSize: '0.55rem', padding: '1px 4px', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 0, minWidth: 150, maxWidth: 220, cursor: 'pointer', outline: 'none' }}
                   value={activeCameraSrc}
                   onChange={e => handleCamChange(e.target.value)}
                 >
                   {Object.entries(camOptionsGroups).map(([zone, opts]) => (
                     opts.length > 0 ? (
-                      <optgroup key={zone} label={zone}>
-                        {opts.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                      <optgroup key={zone} label={zone} style={{ background: 'var(--admin-border, #1e293b)', color: 'var(--admin-text, #fff)' }}>
+                        {opts.map(opt => (
+                          <option key={opt.id} value={opt.id} title={opt.title} style={{ background: 'var(--admin-border, #1e293b)', color: 'var(--admin-text, #fff)' }}>
+                            {opt.label}
+                          </option>
+                        ))}
                       </optgroup>
                     ) : null
                   ))}
@@ -443,23 +668,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div
-        style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
-          display: 'flex', gap: 24, padding: '4px 10px', fontSize: 10, color: 'var(--admin-text-muted)',
-          background: 'var(--admin-overlay)', borderTop: '1px solid var(--admin-border-light)',
-          backdropFilter: 'blur(6px)'
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, background: plcOnline ? 'var(--admin-success)' : 'var(--admin-danger)', borderRadius: 0, display: 'inline-block' }}></span>
-          PLC: {plcOnline ? 'Trực tuyến' : 'Ngoại tuyến'}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600 }}>
-          <span style={{ width: 6, height: 6, background: 'var(--admin-success)', borderRadius: 0, display: 'inline-block' }}></span>
-          SignalR: Đã kết nối
-        </span>
-      </div>
     </div>
   );
 }

@@ -4,11 +4,25 @@ copyright: Copyright © 2025 StationOS Team
 directories:
   output: dist-electron
 files:
-  - electron/**/*
+  - dist/**/*
+  - electron/main.cjs
+  - electron/preload.cjs
+  - electron/loading.html
   - package.json
+asarUnpack:
+  - electron/loading.html
+afterPack: ./scripts/afterPack.cjs
+extraResources:
+  - from: "../backend_published/win-x64"
+    to: "backend"
+  - from: "../pg_portable"
+    to: "pg_portable"
+  - from: "../go2rtc"
+    to: "go2rtc"
+  - from: "../vc_redist.x64.exe"
+    to: "vc_redist.x64.exe"
 linux:
   target:
-    - deb
     - AppImage
   category: Utility
   maintainer: StationOS Team <support@stationos.com>
@@ -19,6 +33,9 @@ win:
   icon: build/icon.png
 nsis:
   oneClick: false
+  perMachine: true
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: Station Monitor
+  runAfterFinish: false
+  include: build/installer.nsh

@@ -43,9 +43,16 @@ start "StationOS Backend" cmd /k "cd /d "%ROOT%\backend" && dotnet run --project
 echo    Mo cua so moi — xem log o do
 
 REM ── 4. Frontend (Vite) ───────────────────────────────────────
+if /I "%STATION_ELECTRON_NO_FRONTEND%"=="1" (
+    echo [4/4] Bo qua Frontend Vite vi dang chay ban Electron packaged...
+    goto after_frontend
+)
+
 echo [4/4] Frontend Vite (port 5173)...
 start "StationOS Frontend" cmd /k "cd /d "%ROOT%\frontend" && npm run dev"
 echo    Mo cua so moi — xem log o do
+
+:after_frontend
 
 echo.
 echo ===============================================

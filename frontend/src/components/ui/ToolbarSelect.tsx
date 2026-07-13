@@ -36,7 +36,7 @@ export default function ToolbarSelect({ value, onChange, options, width = 160, s
         onClick={handleOpen}
         style={{
           width,
-          background: '#0f1729',
+          background: 'var(--admin-bg, #1a1c1e)',
           border: '1px solid var(--admin-border)',
           color: 'var(--admin-text)',
           padding: '3px 8px',
@@ -48,6 +48,10 @@ export default function ToolbarSelect({ value, onChange, options, width = 160, s
           justifyContent: 'space-between',
           gap: 6,
           height: 24,
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          borderRadius: 0,
+          boxSizing: 'border-box',
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -62,7 +66,7 @@ export default function ToolbarSelect({ value, onChange, options, width = 160, s
           left: pos.left,
           width: pos.width,
           zIndex: 9999,
-          background: '#0f1729',
+          background: 'var(--admin-panel, #24272a)',
           border: '1px solid var(--admin-border)',
           maxHeight: 240,
           overflowY: 'auto',
