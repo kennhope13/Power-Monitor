@@ -68,52 +68,78 @@ def draw_rounded_rect(draw, coords, r, fill, outline, width=2):
     draw.arc([x1, y2-2*r, x1+2*r, y2], 90, 180, fill=outline, width=width)
     draw.arc([x2-2*r, y2-2*r, x2, y2], 0, 90, fill=outline, width=width)
 
+def draw_container(draw, x, y, title, lines, width=270, height=320):
+    draw_rounded_rect(draw, [x, y, x + width, y + height], 10, BOX_BG, BORDER_COLOR)
+    draw.rectangle([x, y, x + width, y + 30], fill=HEADER_BG)
+    title_w = draw.textlength(title, font=font_bold)
+    draw.text((x + (width - title_w)/2, y + 8), title, fill=TEXT_COLOR, font=font_bold)
+    yy = y + 45
+    for line in lines:
+        draw.text((x + 15, yy), line, fill=TEXT_COLOR, font=font)
+        yy += 20
+
+def draw_class_box(draw, x, y, title, lines, width=280, height=180):
+    draw_rounded_rect(draw, [x, y, x + width, y + height], 8, BOX_BG, BORDER_COLOR)
+    draw.rectangle([x, y, x + width, y + 25], fill=HEADER_BG)
+    title_w = draw.textlength(title, font=font_bold)
+    draw.text((x + (width - title_w)/2, y + 5), title, fill=TEXT_COLOR, font=font_bold)
+    yy = y + 35
+    for line in lines:
+        draw.text((x + 12, yy), line, fill=TEXT_COLOR, font=font)
+        yy += 18
+
 # ==========================================
 # 1. Architecture Diagram
 # ==========================================
-img = Image.new('RGB', (850, 480), BG_COLOR)
+img = Image.new('RGB', (960, 480), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ KIẾN TRÚC HỆ THỐNG STATIONOS (ALL-IN-ONE)", fill=BORDER_COLOR, font=font_title)
 
-# Client Container
-draw_rounded_rect(draw, [40, 80, 270, 420], 10, BOX_BG, BORDER_COLOR)
-draw.rectangle([40, 80, 270, 110], fill=HEADER_BG)
-draw.text((50, 88), "CLIENT (Electron + React)", fill=TEXT_COLOR, font=font_bold)
-draw.text((55, 130), "- UI Render: Port 6173\n- Giao diện giám sát SLD\n- CCTV & Camera Nhiệt\n- Biểu đồ PD Analytics\n- Quản lý thiết bị\n- Xác thực & Phân quyền", fill=TEXT_COLOR, font=font)
+draw_container(draw, 40, 80, "CLIENT (Electron + React)", [
+    "- UI Render: Port 6173",
+    "- Giao diện sơ đồ một sợi SLD",
+    "- CCTV & Camera Nhiệt",
+    "- Biểu đồ PD Analytics",
+    "- Quản lý thiết bị trạm con",
+    "- Xác thực & Phân quyền"
+], width=260, height=340)
 
-# Service Container
-draw_rounded_rect(draw, [330, 80, 570, 420], 10, BOX_BG, BORDER_COLOR)
-draw.rectangle([330, 80, 570, 110], fill=HEADER_BG)
-draw.text((340, 88), "SERVICE (ASP.NET Core)", fill=TEXT_COLOR, font=font_bold)
-draw.text((345, 130), "- API Backend: Port 5050\n- go2rtc Streamer: Port 1984\n- Hub SignalR Realtime\n- PlcPollingWorker (S7)\n- CentralSyncWorker\n- License Checker Engine", fill=TEXT_COLOR, font=font)
+draw_container(draw, 340, 80, "SERVICE (ASP.NET Core)", [
+    "- API Backend: Port 5050",
+    "- go2rtc Streamer: Port 1984",
+    "- Hub SignalR Realtime",
+    "- PlcPollingWorker (S7)",
+    "- CentralSyncWorker",
+    "- License Checker Engine"
+], width=280, height=340)
 
-# Database Container
-draw_rounded_rect(draw, [630, 80, 830, 420], 10, BOX_BG, BORDER_COLOR)
-draw.rectangle([630, 80, 830, 110], fill=HEADER_BG)
-draw.text((640, 88), "DATABASE (PostgreSQL)", fill=TEXT_COLOR, font=font_bold)
-draw.text((645, 130), "- PG Portable: Port 6432\n- Table Stations / Devices\n- Table SensorReadings\n- Table Alerts / Rules\n- Table SyncQueues\n- Table MaintenanceTasks", fill=TEXT_COLOR, font=font)
+draw_container(draw, 660, 80, "DATABASE (PostgreSQL)", [
+    "- PG Portable: Port 6432",
+    "- Table Stations / Devices",
+    "- Table SensorReadings",
+    "- Table Alerts / Rules",
+    "- Table SyncQueues",
+    "- Table MaintenanceTasks"
+], width=260, height=340)
 
-# Arrows
-draw_arrow(draw, (270, 160), (330, 160), "HTTP/WS")
-draw_arrow(draw, (270, 320), (330, 320), "WebRTC")
-draw_arrow(draw, (570, 240), (630, 240), "EF Core")
+draw_arrow(draw, (300, 160), (340, 160), "HTTP/WS")
+draw_arrow(draw, (300, 320), (340, 320), "WebRTC")
+draw_arrow(draw, (620, 240), (660, 240), "EF Core")
 
 img.save(os.path.join(output_dir, "architecture_diagram.png"))
 
 # ==========================================
 # 2. Use Case Diagram
 # ==========================================
-img = Image.new('RGB', (850, 550), BG_COLOR)
+img = Image.new('RGB', (950, 550), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ USE CASE HỆ THỐNG STATIONOS", fill=BORDER_COLOR, font=font_title)
 
 # System boundary
-draw.rectangle([200, 60, 650, 520], outline=BORDER_COLOR, width=2)
+draw.rectangle([200, 60, 750, 520], outline=BORDER_COLOR, width=2)
 draw.text((210, 70), "Hệ thống StationOS (Trạm con)", fill=BORDER_COLOR, font=font_bold)
 
-# Use Cases
+# Use Cases (widened ellipse, centered text)
 ucs = [
     ("Đăng nhập hệ thống (RBAC)", 100),
     ("Giám sát sơ đồ một sợi SLD", 170),
@@ -124,9 +150,9 @@ ucs = [
 ]
 
 for name, y in ucs:
-    draw.ellipse([300, y, 550, y+45], outline=BORDER_COLOR, fill=BOX_BG, width=2)
+    draw.ellipse([280, y, 620, y+45], outline=BORDER_COLOR, fill=BOX_BG, width=2)
     w = draw.textlength(name, font=font)
-    draw.text((425 - w/2, y + 14), name, fill=TEXT_COLOR, font=font)
+    draw.text((450 - w/2, y + 14), name, fill=TEXT_COLOR, font=font)
 
 # Actors
 def draw_actor(draw, x, y, label):
@@ -138,217 +164,261 @@ def draw_actor(draw, x, y, label):
     w = draw.textlength(label, font=font_bold)
     draw.text((x - w/2, y + 80), label, fill=TEXT_COLOR, font=font_bold)
 
-# Left Actors
 draw_actor(draw, 80, 100, "Quản trị viên")
 draw_actor(draw, 80, 320, "Nhân viên trực ban")
 
-# Connect actors to UCs
-draw.line([100, 140, 300, 122], fill=BORDER_COLOR, width=1)
-draw.line([100, 140, 300, 402], fill=BORDER_COLOR, width=1)
-draw.line([100, 140, 300, 472], fill=BORDER_COLOR, width=1)
+draw.line([100, 140, 280, 122], fill=BORDER_COLOR, width=1)
+draw.line([100, 140, 280, 402], fill=BORDER_COLOR, width=1)
+draw.line([100, 140, 280, 472], fill=BORDER_COLOR, width=1)
 
-draw.line([100, 360, 300, 122], fill=BORDER_COLOR, width=1)
-draw.line([100, 360, 300, 192], fill=BORDER_COLOR, width=1)
-draw.line([100, 360, 300, 262], fill=BORDER_COLOR, width=1)
-draw.line([100, 360, 300, 332], fill=BORDER_COLOR, width=1)
+draw.line([100, 360, 280, 122], fill=BORDER_COLOR, width=1)
+draw.line([100, 360, 280, 192], fill=BORDER_COLOR, width=1)
+draw.line([100, 360, 280, 262], fill=BORDER_COLOR, width=1)
+draw.line([100, 360, 280, 332], fill=BORDER_COLOR, width=1)
 
 # Right External System
-draw.rectangle([700, 220, 820, 300], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.text((712, 240), "Hệ thống\nTrạm Tổng\n(Central API)", fill=TEXT_COLOR, font=font_bold)
-
-# Connect Central to UCs (e.g. Sync)
-draw.line([550, 332, 700, 260], fill=BORDER_COLOR, width=1)
+draw.rectangle([770, 220, 890, 300], fill=BOX_BG, outline=BORDER_COLOR, width=2)
+draw.text((782, 240), "Hệ thống\nTrạm Tổng\n(Central API)", fill=TEXT_COLOR, font=font_bold)
+draw.line([620, 332, 770, 260], fill=BORDER_COLOR, width=1)
 
 img.save(os.path.join(output_dir, "usecase_diagram.png"))
 
 # ==========================================
 # 3. Class Diagram
 # ==========================================
-img = Image.new('RGB', (950, 580), BG_COLOR)
+img = Image.new('RGB', (1000, 580), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ LỚP HỆ THỐNG STATIONOS (UML CLASS DIAGRAM)", fill=BORDER_COLOR, font=font_title)
 
-# Station
-draw.rectangle([40, 80, 240, 240], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([40, 80, 240, 105], fill=HEADER_BG)
-draw.text((50, 85), "Station (Trạm)", fill=TEXT_COLOR, font=font_bold)
-draw.text((45, 115), "+ Id: Guid\n+ Code: string\n+ Name: string\n+ Location: string\n+ Status: string", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 40, 80, "Station (Trạm)", [
+    "+ Id: Guid",
+    "+ Code: string",
+    "+ Name: string",
+    "+ Location: string",
+    "+ Status: string"
+], width=250, height=180)
 
-# Device
-draw.rectangle([340, 80, 580, 260], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([340, 80, 580, 105], fill=HEADER_BG)
-draw.text((350, 85), "Device (Thiết bị)", fill=TEXT_COLOR, font=font_bold)
-draw.text((345, 115), "+ Id: Guid\n+ StationId: Guid\n+ Name: string\n+ Type: string\n+ Protocol: string\n+ Config: string\n+ IsOnline: bool\n+ Status: string", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 330, 80, "Device (Thiết bị)", [
+    "+ Id: Guid",
+    "+ StationId: Guid",
+    "+ Name: string",
+    "+ Type: string",
+    "+ Protocol: string",
+    "+ Config: string",
+    "+ IsOnline: bool",
+    "+ Status: string"
+], width=290, height=200)
 
-# SensorReading
-draw.rectangle([680, 80, 920, 260], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([680, 80, 920, 105], fill=HEADER_BG)
-draw.text((690, 85), "SensorReading (Giá trị đo)", fill=TEXT_COLOR, font=font_bold)
-draw.text((685, 115), "+ Id: int\n+ Time: DateTime\n+ DeviceId: Guid\n+ PointId: string\n+ Value: double?\n+ Unit: string\n+ Quality: int", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 660, 80, "SensorReading (Giá trị đo)", [
+    "+ Id: int",
+    "+ Time: DateTime",
+    "+ DeviceId: Guid",
+    "+ PointId: string",
+    "+ Value: double?",
+    "+ Unit: string",
+    "+ Quality: int"
+], width=290, height=200)
 
-# Rule
-draw.rectangle([40, 320, 240, 480], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([40, 320, 240, 345], fill=HEADER_BG)
-draw.text((50, 325), "Rule (Quy tắc)", fill=TEXT_COLOR, font=font_bold)
-draw.text((45, 355), "+ Id: Guid\n+ StationId: Guid\n+ Name: string\n+ Condition: string\n+ Actions: string\n+ Enabled: bool", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 40, 320, "Rule (Quy tắc)", [
+    "+ Id: Guid",
+    "+ StationId: Guid",
+    "+ Name: string",
+    "+ Condition: string",
+    "+ Actions: string",
+    "+ Enabled: bool"
+], width=250, height=180)
 
-# Alert
-draw.rectangle([340, 320, 580, 530], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([340, 320, 580, 345], fill=HEADER_BG)
-draw.text((350, 325), "Alert (Cảnh báo)", fill=TEXT_COLOR, font=font_bold)
-draw.text((345, 355), "+ Id: Guid\n+ StationId: Guid\n+ PointId: string\n+ Message: string\n+ Severity: string\n+ ValueTrigger: double\n+ Timestamp: DateTime\n+ Acknowledged: bool\n+ AckBy: string", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 330, 320, "Alert (Cảnh báo)", [
+    "+ Id: Guid",
+    "+ StationId: Guid",
+    "+ PointId: string",
+    "+ Message: string",
+    "+ Severity: string",
+    "+ ValueTrigger: double",
+    "+ Timestamp: DateTime",
+    "+ Acknowledged: bool",
+    "+ AckBy: string"
+], width=290, height=220)
 
-# SyncQueue
-draw.rectangle([680, 320, 920, 500], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.rectangle([680, 320, 920, 345], fill=HEADER_BG)
-draw.text((690, 325), "SyncQueue (Hàng đợi)", fill=TEXT_COLOR, font=font_bold)
-draw.text((685, 355), "+ Id: long\n+ EntityType: string\n+ EntityId: Guid\n+ Payload: string\n+ Status: string\n+ RetryCount: int\n+ CreatedAt: DateTime", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 660, 320, "SyncQueue (Hàng đợi)", [
+    "+ Id: long",
+    "+ EntityType: string",
+    "+ EntityId: Guid",
+    "+ Payload: string",
+    "+ Status: string",
+    "+ RetryCount: int",
+    "+ CreatedAt: DateTime"
+], width=290, height=200)
 
-# Relations
-draw.line([240, 160, 340, 160], fill=BORDER_COLOR, width=2)
-draw.text((250, 140), "1", fill=TEXT_COLOR, font=font)
-draw.text((320, 140), "*", fill=TEXT_COLOR, font=font)
+draw.line([290, 160, 330, 160], fill=BORDER_COLOR, width=2)
+draw.text((298, 140), "1", fill=TEXT_COLOR, font=font)
+draw.text((318, 140), "*", fill=TEXT_COLOR, font=font)
 
-draw.line([580, 160, 680, 160], fill=BORDER_COLOR, width=2)
-draw.text((590, 140), "1", fill=TEXT_COLOR, font=font)
-draw.text((660, 140), "*", fill=TEXT_COLOR, font=font)
+draw.line([620, 160, 660, 160], fill=BORDER_COLOR, width=2)
+draw.text((628, 140), "1", fill=TEXT_COLOR, font=font)
+draw.text((648, 140), "*", fill=TEXT_COLOR, font=font)
 
-draw.line([140, 240, 140, 320], fill=BORDER_COLOR, width=2)
-draw.line([460, 260, 460, 320], fill=BORDER_COLOR, width=2)
+draw.line([140, 260, 140, 320], fill=BORDER_COLOR, width=2)
+draw.line([475, 280, 475, 320], fill=BORDER_COLOR, width=2)
 
 img.save(os.path.join(output_dir, "class_diagram.png"))
 
 # ==========================================
 # 4. Activity Diagram
 # ==========================================
-img = Image.new('RGB', (850, 480), BG_COLOR)
+img = Image.new('RGB', (950, 480), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ HOẠT ĐỘNG THU THẬP TELEMETRY & ĐÁNH GIÁ CẢNH BÁO", fill=BORDER_COLOR, font=font_title)
 
-# Start node
-draw.ellipse([400, 50, 420, 70], fill=BORDER_COLOR)
-draw_arrow(draw, (410, 70), (410, 100))
+# Start node centered at X=425
+draw.ellipse([415, 50, 435, 70], fill=BORDER_COLOR)
+draw_arrow(draw, (425, 70), (425, 100))
 
 # Activity 1: Read Sensors
-draw_rounded_rect(draw, [250, 100, 570, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((265, 113), "Đọc dữ liệu cảm biến (PLC S7, Modbus, Camera Nhiệt)", fill=TEXT_COLOR, font=font_bold)
-draw_arrow(draw, (410, 140), (410, 170))
+draw_rounded_rect(draw, [220, 100, 630, 140], 5, BOX_BG, BORDER_COLOR)
+w = draw.textlength("Đọc dữ liệu cảm biến (PLC S7, Modbus, Camera Nhiệt)", font=font_bold)
+draw.text((425 - w/2, 113), "Đọc dữ liệu cảm biến (PLC S7, Modbus, Camera Nhiệt)", fill=TEXT_COLOR, font=font_bold)
+draw_arrow(draw, (425, 140), (425, 170))
 
 # Decision 1
-draw.polygon([(410, 170), (450, 190), (410, 210), (370, 190)], outline=BORDER_COLOR, fill=HEADER_BG, width=2)
-draw.text((460, 183), "Thành công?", fill=TEXT_COLOR, font=font)
+draw.polygon([(425, 170), (465, 190), (425, 210), (385, 190)], outline=BORDER_COLOR, fill=HEADER_BG, width=2)
+draw.text((475, 183), "Thành công?", fill=TEXT_COLOR, font=font)
 
 # Success arrow
-draw_arrow(draw, (410, 210), (410, 250), "Có")
+draw_arrow(draw, (425, 210), (425, 250), "Có")
 # Fail arrow
-draw.line([370, 190, 180, 190], fill=ARROW_COLOR, width=2)
-draw_arrow(draw, (180, 190), (180, 250), "Không")
+draw.line([385, 190, 170, 190], fill=ARROW_COLOR, width=2)
+draw_arrow(draw, (170, 190), (170, 250), "Không")
 
 # Fail Action
-draw_rounded_rect(draw, [80, 250, 280, 290], 5, BOX_BG, BORDER_COLOR)
-draw.text((95, 263), "Ghi nhận Offline, Quality=2", fill=TEXT_COLOR, font=font)
+draw_rounded_rect(draw, [60, 250, 280, 290], 5, BOX_BG, BORDER_COLOR)
+draw.text((75, 263), "Ghi nhận Offline, Quality=2", fill=TEXT_COLOR, font=font)
 
 # Success Action
-draw_rounded_rect(draw, [300, 250, 520, 290], 5, BOX_BG, BORDER_COLOR)
+draw_rounded_rect(draw, [300, 250, 540, 290], 5, BOX_BG, BORDER_COLOR)
 draw.text((315, 263), "Ghi nhận số đo, Quality=1", fill=TEXT_COLOR, font=font)
 
-draw_arrow(draw, (410, 290), (410, 330))
-draw.line([180, 290, 180, 310], fill=ARROW_COLOR, width=2)
-draw.line([180, 310, 410, 310], fill=ARROW_COLOR, width=2)
+draw_arrow(draw, (425, 290), (425, 330))
+draw.line([170, 290, 170, 310], fill=ARROW_COLOR, width=2)
+draw.line([170, 310, 425, 310], fill=ARROW_COLOR, width=2)
 
 # Activity 3: Rule Evaluation
-draw_rounded_rect(draw, [250, 330, 570, 370], 5, BOX_BG, BORDER_COLOR)
-draw.text((275, 343), "Đánh giá quy tắc cảnh báo & Đẩy SignalR", fill=TEXT_COLOR, font=font_bold)
-draw_arrow(draw, (410, 370), (410, 410))
+draw_rounded_rect(draw, [220, 330, 630, 370], 5, BOX_BG, BORDER_COLOR)
+w = draw.textlength("Đánh giá quy tắc cảnh báo & Đẩy SignalR", font=font_bold)
+draw.text((425 - w/2, 343), "Đánh giá quy tắc cảnh báo & Đẩy SignalR", fill=TEXT_COLOR, font=font_bold)
+draw_arrow(draw, (425, 370), (425, 410))
 
 # End Node
-draw.ellipse([400, 410, 420, 430], fill=WHITE, outline=BORDER_COLOR, width=2)
-draw.ellipse([404, 414, 416, 426], fill=BORDER_COLOR)
+draw.ellipse([415, 410, 435, 430], fill=WHITE, outline=BORDER_COLOR, width=2)
+draw.ellipse([419, 414, 431, 426], fill=BORDER_COLOR)
 
 img.save(os.path.join(output_dir, "activity_diagram.png"))
 
 # ==========================================
 # 5. State Diagram
 # ==========================================
-img = Image.new('RGB', (850, 420), BG_COLOR)
+img = Image.new('RGB', (950, 420), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ TRẠNG THÁI THIẾT BỊ VÀ VÒNG ĐỜI CẢNH BÁO", fill=BORDER_COLOR, font=font_title)
 
 # Device Connection state
 draw.text((60, 60), "1. Trạng thái kết nối thiết bị", fill=BORDER_COLOR, font=font_bold)
-draw_rounded_rect(draw, [60, 100, 180, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((85, 113), "UNKNOWN", fill=TEXT_COLOR, font=font_bold)
-draw_rounded_rect(draw, [300, 100, 420, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((330, 113), "ONLINE", fill=TEXT_COLOR, font=font_bold)
-draw_rounded_rect(draw, [180, 220, 300, 260], 5, BOX_BG, BORDER_COLOR)
-draw.text((210, 233), "OFFLINE", fill=TEXT_COLOR, font=font_bold)
+draw_rounded_rect(draw, [40, 100, 200, 140], 5, BOX_BG, BORDER_COLOR)
+draw.text((78, 113), "UNKNOWN", fill=TEXT_COLOR, font=font_bold)
 
-draw_arrow(draw, (180, 120), (300, 120), "Ping OK")
-draw_arrow(draw, (360, 140), (300, 220), "Mất Ping")
+draw_rounded_rect(draw, [320, 100, 480, 140], 5, BOX_BG, BORDER_COLOR)
+draw.text((368, 113), "ONLINE", fill=TEXT_COLOR, font=font_bold)
+
+draw_rounded_rect(draw, [180, 220, 340, 260], 5, BOX_BG, BORDER_COLOR)
+draw.text((228, 233), "OFFLINE", fill=TEXT_COLOR, font=font_bold)
+
+draw_arrow(draw, (200, 120), (320, 120), "Ping OK")
+draw_arrow(draw, (380, 140), (300, 220), "Mất Ping")
 draw_arrow(draw, (180, 240), (120, 140), "Có Ping lại")
 
 # Alert state
-draw.text((480, 60), "2. Vòng đời Cảnh báo sự cố (Alert)", fill=BORDER_COLOR, font=font_bold)
-draw_rounded_rect(draw, [480, 100, 600, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((520, 113), "ACTIVE", fill=TEXT_COLOR, font=font_bold)
-draw_rounded_rect(draw, [700, 100, 820, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((735, 113), "ACKNOWLEDGED", fill=TEXT_COLOR, font=font_bold)
-draw_rounded_rect(draw, [590, 220, 710, 260], 5, BOX_BG, BORDER_COLOR)
-draw.text((625, 233), "RESOLVED", fill=TEXT_COLOR, font=font_bold)
+draw.text((500, 60), "2. Vòng đời Cảnh báo sự cố (Alert)", fill=BORDER_COLOR, font=font_bold)
 
-draw_arrow(draw, (600, 120), (700, 120), "Bấm Xác nhận")
-draw_arrow(draw, (760, 140), (710, 220), "Về bình thường")
-draw_arrow(draw, (590, 240), (540, 140), "Reset")
+draw_rounded_rect(draw, [500, 100, 660, 140], 5, BOX_BG, BORDER_COLOR)
+draw.text((552, 113), "ACTIVE", fill=TEXT_COLOR, font=font_bold)
+
+draw_rounded_rect(draw, [720, 100, 900, 140], 5, BOX_BG, BORDER_COLOR)
+draw.text((742, 113), "ACKNOWLEDGED", fill=TEXT_COLOR, font=font_bold)
+
+draw_rounded_rect(draw, [610, 220, 770, 260], 5, BOX_BG, BORDER_COLOR)
+draw.text((652, 233), "RESOLVED", fill=TEXT_COLOR, font=font_bold)
+
+draw_arrow(draw, (660, 120), (720, 120), "Xác nhận")
+draw_arrow(draw, (770, 140), (710, 220), "OK trở lại")
+draw_arrow(draw, (610, 240), (560, 140), "Reset")
 
 img.save(os.path.join(output_dir, "state_diagram.png"))
 
 # ==========================================
 # 6. Database ERD Diagram
 # ==========================================
-img = Image.new('RGB', (950, 620), BG_COLOR)
+img = Image.new('RGB', (1000, 620), BG_COLOR)
 draw = ImageDraw.Draw(img)
-
 draw.text((20, 20), "SƠ ĐỒ MỐI QUAN HỆ CƠ SỞ DỮ LIỆU THỰC TẾ (DATABASE ERD SCHEMA)", fill=BORDER_COLOR, font=font_title)
 
 # Stations
-draw.rectangle([40, 70, 260, 230], outline=BORDER_COLOR, fill=BOX_BG, width=2)
-draw.rectangle([40, 70, 260, 95], fill=HEADER_BG)
-draw.text((45, 75), "Stations (Trạm giám sát)", fill=TEXT_COLOR, font=font_bold)
-draw.text((45, 105), "* Id: uuid (PK)\n- Code: varchar(50) (UQ)\n- Name: varchar(200)\n- Location: text\n- Status: varchar(20)", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 40, 70, "Stations (Trạm giám sát)", [
+    "* Id: uuid (PK)",
+    "- Code: varchar(50) (UQ)",
+    "- Name: varchar(200)",
+    "- Location: text",
+    "- Status: varchar(20)"
+], width=250, height=170)
 
 # Devices
-draw.rectangle([340, 70, 600, 260], outline=BORDER_COLOR, fill=BOX_BG, width=2)
-draw.rectangle([340, 70, 600, 95], fill=HEADER_BG)
-draw.text((345, 75), "Devices (Thiết bị kết nối)", fill=TEXT_COLOR, font=font_bold)
-draw.text((345, 105), "* Id: uuid (PK)\n- StationId: uuid (FK)\n- Name: varchar(150)\n- Type: varchar(50)\n- Protocol: varchar(50)\n- Config: text\n- IsOnline: boolean", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 330, 70, "Devices (Thiết bị kết nối)", [
+    "* Id: uuid (PK)",
+    "- StationId: uuid (FK)",
+    "- Name: varchar(150)",
+    "- Type: varchar(50)",
+    "- Protocol: varchar(50)",
+    "- Config: text",
+    "- IsOnline: boolean"
+], width=290, height=200)
 
 # SensorReadings
-draw.rectangle([680, 70, 910, 260], outline=BORDER_COLOR, fill=BOX_BG, width=2)
-draw.rectangle([680, 70, 910, 95], fill=HEADER_BG)
-draw.text((685, 75), "SensorReadings (Số đo)", fill=TEXT_COLOR, font=font_bold)
-draw.text((685, 105), "* Id: serial (PK)\n- Time: timestamp\n- StationId: uuid (FK)\n- DeviceId: uuid (FK)\n- PointId: varchar(100)\n- Value: double\n- Quality: integer", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 660, 70, "SensorReadings (Số đo)", [
+    "* Id: serial (PK)",
+    "- Time: timestamp",
+    "- StationId: uuid (FK)",
+    "- DeviceId: uuid (FK)",
+    "- PointId: varchar(100)",
+    "- Value: double",
+    "- Quality: integer"
+], width=290, height=200)
 
 # Rules
-draw.rectangle([40, 290, 260, 450], outline=BORDER_COLOR, fill=BOX_BG, width=2)
-draw.rectangle([40, 290, 260, 315], fill=HEADER_BG)
-draw.text((45, 295), "Rules (Quy tắc)", fill=TEXT_COLOR, font=font_bold)
-draw.text((45, 325), "* Id: uuid (PK)\n- StationId: uuid (FK)\n- Name: varchar(200)\n- Condition: text\n- Actions: text\n- Enabled: boolean", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 40, 290, "Rules (Quy tắc)", [
+    "* Id: uuid (PK)",
+    "- StationId: uuid (FK)",
+    "- Name: varchar(200)",
+    "- Condition: text",
+    "- Actions: text",
+    "- Enabled: boolean"
+], width=250, height=170)
 
 # Alerts
-draw.rectangle([340, 290, 600, 520], outline=BORDER_COLOR, fill=BOX_BG, width=2)
-draw.rectangle([340, 290, 600, 315], fill=HEADER_BG)
-draw.text((345, 295), "Alerts (Cảnh báo)", fill=TEXT_COLOR, font=font_bold)
-draw.text((345, 325), "* Id: uuid (PK)\n- StationId: uuid (FK)\n- PointId: varchar(100)\n- Message: varchar(500)\n- Severity: varchar(20)\n- ValueTrigger: double\n- Timestamp: timestamp\n- Acknowledged: boolean", fill=TEXT_COLOR, font=font)
+draw_class_box(draw, 330, 290, "Alerts (Cảnh báo)", [
+    "* Id: uuid (PK)",
+    "- StationId: uuid (FK)",
+    "- PointId: varchar(100)",
+    "- Message: varchar(500)",
+    "- Severity: varchar(20)",
+    "- ValueTrigger: double",
+    "- Timestamp: timestamp",
+    "- Acknowledged: boolean"
+], width=290, height=220)
 
-# Relations (Lines)
-draw.line([260, 140, 340, 140], fill=BORDER_COLOR, width=2)
-draw.line([600, 160, 680, 160], fill=BORDER_COLOR, width=2)
-draw.line([150, 230, 150, 290], fill=BORDER_COLOR, width=2)
-draw.line([470, 260, 470, 290], fill=BORDER_COLOR, width=2)
+draw.line([290, 140, 330, 140], fill=BORDER_COLOR, width=2)
+draw.line([620, 160, 660, 160], fill=BORDER_COLOR, width=2)
+draw.line([150, 240, 150, 290], fill=BORDER_COLOR, width=2)
+draw.line([475, 270, 475, 290], fill=BORDER_COLOR, width=2)
 
 img.save(os.path.join(output_dir, "erd_diagram.png"))
 
-print("All 6 diagrams generated successfully at docs/diagrams")
+print("All 6 diagrams regenerated successfully with perfectly centered title headers and widened boxes.")
