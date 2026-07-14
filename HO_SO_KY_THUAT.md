@@ -4,14 +4,14 @@
 ---
 
 > [!IMPORTANT]
-> Tài liệu kỹ thuật này được lập chi tiết nhằm chứng minh toàn diện quy trình sản xuất và chất lượng phần mềm của sản phẩm **StationOS - Power Monitor (Phiên bản v3.x)**, đáp ứng các tiêu chuẩn khắt khe về bàn giao kỹ thuật công nghiệp và kiểm toán thuế của Bộ Tài chính/Tổng cục Thuế Việt Nam.
+> Tài liệu kỹ thuật chi tiết này được biên soạn cho dự án **StationOS - Power Monitor (Phiên bản v3.x)** nhằm phục vụ công tác nghiệm thu dự án, chứng minh năng lực tự chủ sản xuất phần mềm và đáp ứng các quy định của Tổng cục Thuế Việt Nam về quy trình công nghệ phát triển phần mềm được hưởng ưu đãi thuế VAT.
 
 ---
 
 ## I. CÔNG ĐOẠN KHẢO SÁT & XÁC ĐỊNH YÊU CẦU
 
 ### 1. Phiếu khảo sát yêu cầu khách hàng
-* **Đơn vị yêu cầu**: Công ty Điện lực truyền tải và Ban Quản lý Dự án điện lực cấp Tỉnh (đại diện: Trạm 110kV Long An, huyện Bến Lức, tỉnh Long An).
+* **Đơn vị yêu cầu**: Công ty Điện lực truyền tải và Ban Quản lý Dự án điện lực cấp Tỉnh (đại diện vận hành: Trạm biến áp 110kV Long An, Huyện Bến Lức, Tỉnh Long An).
 * **Thời gian khảo sát thực địa**: Từ ngày 10/05/2026 đến 15/05/2026.
 * **Hiện trạng trạm vận hành**:
   * Trạm biến áp 110kV Long An vận hành liên tục 24/7 với công suất tải cao. Các thiết bị cơ điện như Máy biến áp chính (T1, T2), máy cắt trung thế, dao cách ly 110kV thường phát sinh nhiệt độ cao tại các đầu cốt đấu nối do quá tải hoặc tiếp xúc xấu.
@@ -90,10 +90,10 @@ graph TD
 ```
 
 ### 2. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
-Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm 24 bảng dữ liệu, dưới đây là các bảng dữ liệu cốt lõi nhất:
+Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm 24 bảng dữ liệu, dưới đây là các bảng dữ liệu cốt lõi nhất được thiết kế chi tiết:
 
-#### Bảng `Stations` (Danh sách các trạm giám sát)
 ```sql
+-- 1. Bảng Stations (Danh sách các trạm giám sát)
 CREATE TABLE "Stations" (
     "Id" UUID PRIMARY KEY,
     "Code" VARCHAR(50) UNIQUE NOT NULL,
@@ -101,10 +101,8 @@ CREATE TABLE "Stations" (
     "Location" TEXT NULL, -- Lưu tọa độ GPS dưới dạng chuỗi JSON
     "Status" VARCHAR(20) NOT NULL DEFAULT 'active'
 );
-```
 
-#### Bảng `Devices` (Danh sách thiết bị kết nối)
-```sql
+-- 2. Bảng Devices (Danh sách thiết bị kết nối)
 CREATE TABLE "Devices" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
@@ -112,12 +110,11 @@ CREATE TABLE "Devices" (
     "Type" VARCHAR(50) NOT NULL, -- 'camera_thermal', 'plc_s7', 'modbus_device'...
     "Protocol" VARCHAR(50) NOT NULL, -- 'rtsp', 'plc_s7', 'modbus_tcp'
     "Config" TEXT NOT NULL, -- Lưu cấu hình kết nối chi tiết (IP, Port, Username, Password) dạng JSON
-    "IsOnline" BOOLEAN NOT NULL DEFAULT false
+    "IsOnline" BOOLEAN NOT NULL DEFAULT false,
+    "Status" VARCHAR(50) NOT NULL DEFAULT 'unknown'
 );
-```
 
-#### Bảng `Users` (Danh sách tài khoản & phân quyền)
-```sql
+-- 3. Bảng Users (Danh sách tài khoản & phân quyền)
 CREATE TABLE "Users" (
     "Id" UUID PRIMARY KEY,
     "Username" VARCHAR(100) UNIQUE NOT NULL,
@@ -127,20 +124,16 @@ CREATE TABLE "Users" (
     "Email" VARCHAR(100) NULL,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-```
 
-#### Bảng `SldFiles` (Thông tin tệp sơ đồ một sợi SVG)
-```sql
+-- 4. Bảng SldFiles (Thông tin tệp sơ đồ một sợi SVG)
 CREATE TABLE "SldFiles" (
     "Id" UUID PRIMARY KEY,
     "Name" VARCHAR(200) NOT NULL,
     "Path" VARCHAR(500) NOT NULL, -- Đường dẫn tương đối lưu file SVG (Ví dụ: /sld/7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg)
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-```
 
-#### Bảng `SldPoints` (Liên kết điểm đo với phần tử đồ họa SVG)
-```sql
+-- 5. Bảng SldPoints (Liên kết điểm đo với phần tử đồ họa SVG)
 CREATE TABLE "SldPoints" (
     "Id" UUID PRIMARY KEY,
     "SldFileId" UUID REFERENCES "SldFiles"("Id") ON DELETE CASCADE,
@@ -148,21 +141,20 @@ CREATE TABLE "SldPoints" (
     "PointId" VARCHAR(100) NOT NULL, -- Liên kết đến PointId đo lường thực tế
     "Description" VARCHAR(200) NULL
 );
-```
 
-#### Bảng `SensorReadings` (Dữ liệu tức thời của cảm biến)
-```sql
+-- 6. Bảng SensorReadings (Dữ liệu tức thời của cảm biến)
 CREATE TABLE "SensorReadings" (
     "Id" SERIAL PRIMARY KEY,
-    "PointId" VARCHAR(100) UNIQUE NOT NULL,
+    "Time" TIMESTAMP NOT NULL,
+    "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
+    "DeviceId" UUID REFERENCES "Devices"("Id") ON DELETE CASCADE,
+    "PointId" VARCHAR(100) NOT NULL,
     "Value" DOUBLE PRECISION NULL,
-    "Quality" INTEGER NOT NULL, -- 1 = Tốt, 2 = Mất kết nối thiết bị
-    "Timestamp" TIMESTAMP NOT NULL
+    "Unit" VARCHAR(50) NULL,
+    "Quality" INTEGER NOT NULL -- 1 = Tốt, 2 = Mất kết nối thiết bị
 );
-```
 
-#### Bảng `Alerts` (Nhật ký cảnh báo sự cố đang xảy ra)
-```sql
+-- 7. Bảng Alerts (Nhật ký cảnh báo sự cố đang xảy ra)
 CREATE TABLE "Alerts" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
@@ -176,18 +168,50 @@ CREATE TABLE "Alerts" (
     "AckBy" VARCHAR(100) NULL,
     "AckAt" TIMESTAMP NULL
 );
-```
 
-#### Bảng `SyncQueues` (Hàng đợi đồng bộ dữ liệu)
-```sql
+-- 8. Bảng Rules (Các quy tắc giám sát tự động)
+CREATE TABLE "Rules" (
+    "Id" UUID PRIMARY KEY,
+    "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
+    "Name" VARCHAR(200) NOT NULL,
+    "RuleSet" TEXT NULL,
+    "Condition" TEXT NOT NULL, -- Cấu hình điều kiện logic JSON
+    "Actions" TEXT NOT NULL, -- Hành động cảnh báo JSON
+    "Enabled" BOOLEAN NOT NULL DEFAULT true
+);
+
+-- 9. Bảng SyncQueues (Hàng đợi đồng bộ dữ liệu)
 CREATE TABLE "SyncQueues" (
     "Id" BIGSERIAL PRIMARY KEY,
     "EntityType" VARCHAR(50) NOT NULL, -- 'TelemetryData', 'Alert', 'Report'
-    "EntityId" VARCHAR(100) NOT NULL,
+    "EntityId" UUID NOT NULL,
     "Payload" TEXT NOT NULL, -- Nội dung thực thể dạng JSON để gửi lên API Trạm tổng
     "Status" VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'sent', 'failed'
     "RetryCount" INTEGER NOT NULL DEFAULT 0,
+    "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "SentAt" TIMESTAMP NULL
+);
+
+-- 10. Bảng MaintenanceTasks (Lịch bảo trì thiết bị sinh tự động)
+CREATE TABLE "MaintenanceTasks" (
+    "Id" UUID PRIMARY KEY,
+    "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
+    "Title" VARCHAR(250) NOT NULL,
+    "Type" VARCHAR(50) NOT NULL, -- 'inspection', 'repair'
+    "Status" VARCHAR(50) NOT NULL, -- 'pending', 'in_progress', 'completed'
+    "AssignedTo" VARCHAR(100) NULL,
+    "ScheduledDate" TIMESTAMP NULL,
+    "Notes" TEXT NULL,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 11. Bảng Boundaries (Định nghĩa các vùng biên nhiệt độ camera)
+CREATE TABLE "Boundaries" (
+    "Id" UUID PRIMARY KEY,
+    "DeviceId" UUID REFERENCES "Devices"("Id") ON DELETE CASCADE,
+    "PointId" VARCHAR(100) NOT NULL,
+    "PolygonCoordinates" TEXT NOT NULL, -- Tọa độ các đỉnh của đa giác ROI JSON
+    "Label" VARCHAR(100) NULL
 );
 ```
 
@@ -196,175 +220,279 @@ CREATE TABLE "SyncQueues" (
 ## III. CÔNG ĐOẠN LẬP TRÌNH & VIẾT MÃ NGUỒN
 
 ### 1. Nhật ký lập trình (Commit Log / Git Log) chi tiết
-Dưới đây là danh sách đầy đủ nhật ký phát triển tính năng và sửa lỗi của nhánh `release/v3.0.40` trước khi nâng cấp và đóng gói bản `v3.0.51`:
+Các thay đổi mã nguồn chính gần đây được đẩy lên kho lưu trữ để kiểm soát phiên bản:
 
-* **`719d13a`** - *kennhope13*: `chore: bump version to v3.0.51 and fix camera dropdown text visibility & seed SVG path` (Sửa lỗi hiển thị dropdown Camera và logic copy file SVG sơ đồ khi cài đặt).
-* **`e1a0591`** - *kennhope13*: `chore: bump version to v3.0.50` (Tăng version chuẩn bị đóng gói).
-* **`a51f2b8`** - *kennhope13*: `fix: instantiate builder with WebApplicationOptions to configure WebRootPath, avoiding NotSupportedException` (Sửa lỗi không tìm thấy WebRoot của API trong bản build tự chứa của Electron).
-* **`969adf6`** - *kennhope13*: `fix: set offline simulated values to null and quality to 2 to display ----- on UI` (Sửa hiển thị các điểm đo mất kết nối mạng thành nét đứt `-----`).
-* **`ecebe38`** - *kennhope13*: `fix: redirect backend wwwroot to AppData to resolve write permissions error` (Thay đổi Web Root sang thư mục AppData để tránh xung đột phân quyền thư mục ghi trên Windows 11).
-* **`05389ab`** - *kennhope13*: `fix: prevent sidebar theme selection popover text wrapping` (Sửa lỗi hiển thị sidebar chọn giao diện bị tràn chữ).
-* **`63ec2c6`** - *kennhope13*: `chore: license root configuration, sensor limit fixes, UI warnings removal, and bump version to v3.0.49` (Cấu hình giới hạn cảm biến theo giấy phép bản quyền).
-* **`8f583dc`** - *kennhope13*: `fix: prevent local loops from resolving server_ip config in env.ts, and bump to v3.0.48` (Sửa lỗi vòng lặp DNS trên cấu hình IP Server).
+```text
+719d13a - chore: bump version to v3.0.51 and fix camera dropdown text visibility & seed SVG path
+e1a0591 - chore: bump version to v3.0.50
+a51f2b8 - fix: instantiate builder with WebApplicationOptions to configure WebRootPath, avoiding NotSupportedException
+969adf6 - fix: set offline simulated values to null and quality to 2 to display ----- on UI
+ecebe38 - fix: redirect backend wwwroot to AppData to resolve write permissions error
+05389ab - fix: prevent sidebar theme selection popover text wrapping
+63ec2c6 - chore: license root configuration, sensor limit fixes, UI warnings removal, and bump version to v3.0.49
+8f583dc - fix: prevent local loops from resolving server_ip config in env.ts, and bump to v3.0.48
+a903a85 - fix: catch socket errors to prevent ECONNRESET crash and deduplicate service shutdown hooks, and bump to v3.0.47
+```
 
 ### 2. Đoạn mã nguồn mẫu tiêu biểu mở rộng (Expanded Code Snippets)
 
-#### A. Logic cấu hình cơ sở dữ liệu DbContext và kích hoạt tính năng chuỗi thời gian TimescaleDB (`AppDbContext.cs`):
+#### A. Tiến trình nền đọc Modbus/S7 liên tục và giám sát thiết bị (`PlcPollingWorker.cs`):
 ```csharp
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
+using S7.Net;
+using StationOS.Data;
 using StationOS.Data.Entities;
 
-namespace StationOS.Data
+namespace StationOS.Workers.Polling;
+
+public class PlcPollingWorker : BackgroundService
 {
-    public class AppDbContext : DbContext
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IRealtimeNotifier _notifier;
+    private readonly ILogger<PlcPollingWorker> _logger;
+    private readonly IMemoryCache _cache;
+
+    private readonly Dictionary<Guid, DateTime> _lastPollTimes = new();
+    private readonly Dictionary<Guid, DateTime> _lastDbSaveTimes = new();
+
+    public PlcPollingWorker(
+        IServiceScopeFactory scopeFactory,
+        IRealtimeNotifier notifier,
+        ILogger<PlcPollingWorker> logger,
+        IMemoryCache cache)
     {
-        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        _scopeFactory = scopeFactory;
+        _notifier = notifier;
+        _logger = logger;
+        _cache = cache;
+    }
 
-        public DbSet<Station> Stations => Set<Station>();
-        public DbSet<Device> Devices => Set<Device>();
-        public DbSet<User> Users => Set<User>();
-        public DbSet<SldFile> SldFiles => Set<SldFile>();
-        public DbSet<SldPoint> SldPoints => Set<SldPoint>();
-        public DbSet<SensorReading> SensorReadings => Set<SensorReading>();
-        public DbSet<Alert> Alerts => Set<Alert>();
-        public DbSet<Rule> Rules => Set<Rule>();
-        public DbSet<SyncQueue> SyncQueues => Set<SyncQueue>();
-        public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("[PLC] Worker khởi động đọc dữ liệu chu kỳ");
 
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            base.OnModelCreating(modelBuilder);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                await PollAllPlcDevicesAsync(db, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[PLC] Lỗi trong vòng lặp chính");
+            }
 
-            // Cấu hình khoá chính phức hợp cho bảng dữ liệu lịch sử đo lường (Hypertable)
-            modelBuilder.Entity<TelemetryData>()
-                .HasKey(t => new { t.Timestamp, t.PointId });
+            await Task.Delay(1000, stoppingToken);
+        }
+    }
 
-            // Chỉ mục tăng tốc độ truy vấn theo thời gian
-            modelBuilder.Entity<TelemetryData>()
-                .HasIndex(t => t.Timestamp);
+    private async Task PollAllPlcDevicesAsync(AppDbContext db, CancellationToken ct)
+    {
+        var plcDevices = await db.Devices
+            .Where(d => d.Type == "plc_s7" && d.Status == "active")
+            .ToListAsync(ct);
 
-            // Cấu hình quan hệ CASCADE DELETE khi xóa Trạm
-            modelBuilder.Entity<Device>()
-                .HasOne(d => d.Station)
-                .WithMany(s => s.Devices)
-                .HasForeignKey(d => d.StationId)
-                .OnDelete(DeleteBehavior.Cascade);
+        foreach (var device in plcDevices)
+        {
+            await PollSinglePlcAsync(db, device, ct);
+        }
+    }
+
+    private async Task PollSinglePlcAsync(AppDbContext db, Device device, CancellationToken ct)
+    {
+        var config = JsonSerializer.Deserialize<Dictionary<string, string>>(device.Config);
+        if (config == null) return;
+
+        string ip = config["ip"];
+        short rack = short.Parse(config["rack"]);
+        short slot = short.Parse(config["slot"]);
+        int dbNum = int.Parse(config["db"]);
+        int offset = int.Parse(config["offset"]);
+        int length = int.Parse(config["length"]);
+
+        Plc plc = new Plc(CpuType.S71200, ip, rack, slot);
+        try
+        {
+            await plc.OpenAsync(ct);
+            if (plc.IsConnected)
+            {
+                var rawData = await plc.ReadAsync(DataType.DataBlock, dbNum, offset, VarType.Byte, length, 0, ct);
+                if (rawData is byte[] bytes)
+                {
+                    double tempVal = (short)((bytes[0] << 8) | bytes[1]);
+                    // Ghi nhận giá trị đo
+                    var reading = new SensorReading
+                    {
+                        Time = DateTime.UtcNow,
+                        DeviceId = device.Id,
+                        PointId = "temp_pha_1",
+                        Value = tempVal,
+                        Unit = "°C",
+                        Quality = 1
+                    };
+                    db.SensorReadings.Add(reading);
+                    await db.SaveChangesAsync(ct);
+                    
+                    // Phát thông báo thời gian thực qua SignalR
+                    await _notifier.SendSensorUpdateAsync(new[] { new { deviceId = device.Id, pointId = "temp_pha_1", value = tempVal, quality = 1 } });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"[PLC] Mất kết nối tới PLC {ip}");
+        }
+        finally
+        {
+            plc.Close();
         }
     }
 }
 ```
 
-#### B. Logic kết nối và duy trì kết nối duy nhất (Singleton Pattern) của SignalR Client (`realtime.service.ts`):
-```typescript
-import * as signalR from '@microsoft/signalr';
+#### B. Tiến trình nền đồng bộ SyncQueue lên trạm tổng trung tâm (`CentralSyncWorker.cs`):
+```csharp
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using StationOS.Data;
+using StationOS.Data.Entities;
 
-class RealtimeService {
-  private connection: signalR.HubConnection | null = null;
-  private listeners: Map<string, Array<(data: any) => void>> = new Map();
+namespace StationOS.Workers.Polling;
 
-  public async startConnection(hubUrl: string): Promise<signalR.HubConnection> {
-    if (this.connection) {
-      return this.connection; // Trả về kết nối hiện có, tránh tạo song song gây nghẽn cổng
+public class CentralSyncWorker : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<CentralSyncWorker> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly string? _centralUrl;
+    private readonly string? _stationId;
+
+    public CentralSyncWorker(
+        IServiceScopeFactory scopeFactory,
+        ILogger<CentralSyncWorker> logger,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
+    {
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _centralUrl = configuration["CentralServer"];
+        _stationId = configuration["StationId"];
     }
 
-    this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl, {
-        skipNegotiation: true,
-        transport: signalR.HttpTransportType.WebSockets
-      })
-      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-      .build();
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (string.IsNullOrEmpty(_centralUrl) || string.IsNullOrEmpty(_stationId))
+        {
+            _logger.LogInformation("[CentralSync] Chưa cấu hình Central Server hoặc StationId");
+            return;
+        }
 
-    this.connection.on("ReceiveTelemetry", (pointId: string, value: number, quality: number) => {
-      const callbacks = this.listeners.get(pointId);
-      if (callbacks) {
-        callbacks.forEach(callback => callback({ value, quality }));
-      }
-    });
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await PushBatchAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[CentralSync] Lỗi trong tiến trình đồng bộ");
+            }
 
-    try {
-      await this.connection.start();
-      console.log("[SignalR] Kết nối thành công đến Backend Hub Server.");
-    } catch (err) {
-      console.error("[SignalR] Lỗi khởi chạy kết nối:", err);
-      setTimeout(() => this.startConnection(hubUrl), 5000);
+            await Task.Delay(30000, stoppingToken); // Chạy định kỳ mỗi 30 giây
+        }
     }
 
-    return this.connection;
-  }
+    private async Task PushBatchAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-  public registerListener(pointId: string, callback: (data: any) => void) {
-    if (!this.listeners.has(pointId)) {
-      this.listeners.set(pointId, []);
-    }
-    this.listeners.get(pointId)?.push(callback);
-  }
+        var pending = await db.SyncQueues
+            .Where(q => q.Status == "pending" && q.RetryCount < 3)
+            .OrderBy(q => q.CreatedAt)
+            .Take(50)
+            .ToListAsync(ct);
 
-  public unregisterListener(pointId: string, callback: (data: any) => void) {
-    const list = this.listeners.get(pointId);
-    if (list) {
-      this.listeners.set(pointId, list.filter(cb => cb !== callback));
+        if (pending.Count == 0) return;
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Station-Id", _stationId);
+
+        foreach (var item in pending)
+        {
+            try
+            {
+                var response = await client.PostAsJsonAsync($"{_centralUrl}/api/v1/ingest/telemetry", item.Payload, ct);
+                if (response.IsSuccessStatusCode)
+                {
+                    item.Status = "sent";
+                    item.SentAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    item.RetryCount++;
+                    if (item.RetryCount >= 3) item.Status = "failed";
+                }
+            }
+            catch
+            {
+                item.RetryCount++;
+                if (item.RetryCount >= 3) item.Status = "failed";
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
     }
-  }
 }
-
-export const realtimeService = new RealtimeService();
 ```
 
 ---
 
-## IV. CÔNG ĐOẠN KIỂM THỬ & SỬ A LỖI (TESTING)
+## IV. CÔNG ĐOẠN KIỂM THỬ & SỬA LỖI (TESTING)
 
-### 1. Ca kiểm thử chi tiết hoàn chỉnh (Full Test Cases Specification)
+### 1. Danh sách ca kiểm thử chi tiết hoàn chỉnh (Test Cases Specification)
 
-#### Ca kiểm thử TC-002: Kiểm tra tự động sao chép file sơ đồ mẫu khi cài đặt
-* **Mục đích**: Đảm bảo tệp tin SVG mẫu luôn sẵn có cho trang Dashboard để tránh lỗi vỡ ảnh sơ đồ (SLD) khi người dùng chạy bộ cài đặt thương mại.
-* **Điều kiện chuẩn bị**: Xóa thư mục lưu trữ động `%APPDATA%/Station Monitor/wwwroot/sld` trên máy thử nghiệm.
-* **Các bước thực hiện**:
-  1. Khởi chạy ứng dụng Electron từ tệp build thương mại `.exe`.
-  2. Hệ thống gọi tiến trình Backend khởi tạo cơ sở dữ liệu (`DbInitializer.SeedDefaultSldAsync`).
-  3. Kiểm tra sự tồn tại của tệp tin tại đường dẫn `%APPDATA%/Station Monitor/wwwroot/sld/7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg`.
-* **Dữ liệu đầu vào**: Không có.
-* **Kết quả kỳ vọng**: Tệp tin SVG được sao chép thành công. Ứng dụng hiển thị đúng đồ họa sơ đồ một sợi lên Dashboard mà không báo lỗi 404.
-* **Kết quả thực tế**: Tệp tin tự động sao chép thành công. Đồ họa SLD vẽ mượt mà.
-* **Trạng thái**: **ĐẠT (Passed)**.
-* **Người thực hiện**: Nguyễn Tiến Minh (Kiểm thử viên).
-
-#### Ca kiểm thử TC-007: Hiển thị giá trị lỗi mạng của cảm biến/thiết bị đo lường
-* **Mục đích**: Đảm bảo nhân viên vận hành phân biệt được giữa thiết bị đo được giá trị bằng `0` và thiết bị thực tế đang bị mất kết nối mạng.
-* **Điều kiện chuẩn bị**: Thiết lập 1 thiết bị Modbus TCP đang hoạt động bình thường, hiển thị nhiệt độ máy biến áp là `45.2°C`.
-* **Các bước thực hiện**:
-  1. Rút cáp mạng LAN kết nối từ máy tính trạm con tới thiết bị Modbus.
-  2. Chờ tiến trình nền `PlcPollingWorker` quét chu kỳ tiếp theo (sau 2 giây).
-  3. Theo dõi hiển thị giá trị nhiệt độ máy biến áp trên sơ đồ SLD và bảng Dashboard.
-* **Dữ liệu đầu vào**: Trạng thái cổng kết nối vật lý bị tắt.
-* **Kết quả kỳ vọng**: Lấy mẫu thất bại, chất lượng dữ liệu chuyển thành `Quality = 2`. Giá trị nhiệt độ lập tức đổi từ `45.2°C` thành nét đứt `-----`.
-* **Kết quả thực tế**: Giá trị hiển thị đúng dạng `-----`, hệ thống đồng thời kích hoạt cảnh báo mất kết nối thiết bị ngoại vi.
-* **Trạng thái**: **ĐẠT (Passed)**.
-* **Người thực hiện**: Nguyễn Tiến Minh (Kiểm thử viên).
+| STT | Mã TC | Tên ca kiểm thử | Điều kiện chuẩn bị | Các bước thực hiện | Kết quả kỳ vọng | Trạng thái |
+|---|---|---|---|---|---|---|
+| 1 | **TC-001** | Khởi tạo CSDL lần đầu | Hệ thống sạch, chưa cài CSDL PostgreSQL. | Khởi chạy tệp `.exe` cài đặt. | Thư mục `pg_data` được tự động tạo tại thư mục người dùng `%APPDATA%/MasterStation/pg_data` và chạy ngầm cổng 6432. | **ĐẠT (Passed)** |
+| 2 | **TC-002** | Sao chép sơ đồ SVG mẫu | Không có tệp SVG trong AppData. | Chạy ứng dụng. Logic `SeedDefaultSldAsync` kích hoạt. | Tệp tin `7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg` được copy an toàn từ ứng dụng nguồn sang AppData. | **ĐẠT (Passed)** |
+| 3 | **TC-003** | Xác thực JWT và Đăng nhập | Cơ sở dữ liệu đã cài đặt thành công. | Nhập tài khoản `admin` / mật khẩu `admin`. | Đăng nhập thành công, token JWT lưu vào LocalStorage, chuyển hướng vào Dashboard. | **ĐẠT (Passed)** |
+| 4 | **TC-004** | Dò tìm ONVIF tự động | Camera ONVIF hoạt động cùng subnet mạng LAN. | Bấm nút quét ONVIF trong Cấu hình thiết bị. | Quét được IP, lấy được RTSP URL của camera hiển thị lên lưới dữ liệu. | **ĐẠT (Passed)** |
+| 5 | **TC-005** | Thêm thiết bị camera RTSP | Có link camera RTSP khả dụng. | Nhập cấu hình camera thủ công vào Form và lưu lại. | Bản ghi lưu vào bảng `Devices`, go2rtc nhận cấu hình mới và khởi tạo kênh stream. | **ĐẠT (Passed)** |
+| 6 | **TC-006** | Xem trực tuyến WebRTC | Thiết bị camera đã kết nối trực tuyến. | Truy cập trang giám sát, chọn camera xem trực tiếp. | Luồng camera hiển thị mượt mà với độ trễ dưới 1 giây, không nhấp nháy, không rác hình. | **ĐẠT (Passed)** |
+| 7 | **TC-007** | Nhận diện mất kết nối | Thiết bị cảm biến đang hiển thị số đo trực quan. | Rút cáp mạng vật lý của thiết bị cảm biến Modbus. | Trạng thái thiết bị đổi sang Offline, số liệu trên sơ đồ một sợi chuyển thành dạng nét đứt `-----` sau 2 giây. | **ĐẠT (Passed)** |
+| 8 | **TC-008** | Đồng bộ màu sắc dropdown | Chuyển đổi giao diện sang các theme khác nhau. | Mở rộng danh sách chọn Camera ở góc phải Dashboard. | Màu chữ và màu nền dropdown thay đổi tương ứng, đảm bảo rõ chữ, không bị trắng-trên-trắng. | **ĐẠT (Passed)** |
+| 9 | **TC-009** | Cảnh báo vượt ngưỡng | Cài ngưỡng cảnh báo nhiệt độ máy biến áp là 75°C. | Giả lập nguồn nhiệt tăng vượt ngưỡng (80°C). | Hệ thống kích hoạt còi báo, nhấp nháy đỏ trên sơ đồ SLD, và ghi lịch sử cảnh báo vào bảng `Alerts`. | **ĐẠT (Passed)** |
+| 10| **TC-010** | Đồng bộ dữ liệu SyncQueue | Thiết bị bị mất kết nối với trạm tổng tạm thời. | Tắt mạng Internet của trạm con, thực hiện đo dữ liệu, sau đó bật lại mạng. | Dữ liệu tích lũy trong `SyncQueues` với trạng thái `pending` tự động đồng bộ hết lên trạm tổng sau khi khôi phục mạng. | **ĐẠT (Passed)** |
+| 11| **TC-011** | Tự sinh lịch bảo trì tự động | Có cảnh báo nguy hiểm (danger) xuất hiện. | Giả lập sự cố phóng điện cực bộ vượt mức Danger. | Hệ thống tự động tạo một Yêu cầu bảo trì mới trong bảng `MaintenanceTasks` gán cho kỹ sư trực ban. | **ĐẠT (Passed)** |
+| 12| **TC-012** | Dọn dẹp tài nguyên khi tắt | Ứng dụng đang chạy bình thường. | Bấm nút đóng (X) ứng dụng. | Tất cả tiến trình `postgres.exe` và backend tắt hoàn toàn, không bị kẹt cổng kết nối. | **ĐẠT (Passed)** |
 
 ---
 
 ## V. CÔNG ĐOẠN BÀN GIAO & HƯỚNG DẪN SỬ DỤNG
 
-### 1. Danh mục tài liệu kỹ thuật bàn giao
-* Tệp cài đặt chính thức: `Station Monitor Setup 3.0.51.exe`
-* File cấu hình hệ thống: `appsettings.json`, `go2rtc.yaml`
-* Tài liệu Hướng dẫn sử dụng cho kỹ sư trạm: `User_Guide_v3.0.51.pdf`
+### 1. Hướng dẫn cài đặt cho kỹ sư vận hành
+1. Giải nén hoặc kích hoạt trực tiếp tệp cài đặt chính thức: **`Station Monitor Setup 3.0.51.exe`**.
+2. Thực hiện các bước cài đặt mặc định theo trình hướng dẫn cài đặt NSIS.
+3. Chạy biểu tượng ứng dụng **Station Monitor** ngoài Desktop với quyền Administrator.
 
-### 2. Hướng dẫn khắc phục sự cố nhanh (Troubleshooting Guide)
-
-#### A. Sự cố 1: Ứng dụng báo lỗi "Không thể kết nối đến Cơ sở dữ liệu" lúc khởi chạy
-* **Nguyên nhân**: Cổng kết nối cơ sở dữ liệu `6432` bị chiếm dụng bởi một tiến trình PostgreSQL khác đang chạy ngầm trên máy trạm hoặc tệp tin khóa dữ liệu `.pid` cũ chưa được dọn dẹp khi tắt app đột ngột.
-* **Cách khắc phục**:
-  1. Mở Task Manager (Trình quản lý tác vụ) trên Windows.
-  2. Tìm và kết thúc toàn bộ các tiến trình có tên `postgres.exe` hoặc `StationOS.Api.exe`.
-  3. Vào thư mục `%APPDATA%/MasterStation/pg_data/` và xóa tệp tin **`postmaster.pid`** (nếu có).
-  4. Khởi chạy lại ứng dụng bằng quyền Administrator.
-
-#### B. Sự cố 2: Camera hiển thị thông báo "Loading..." hoặc màn hình đen kéo dài
-* **Nguyên nhân**: Luồng RTSP cấu hình không chính xác, camera bị ngắt nguồn, hoặc cổng RTSP `554` bị chặn bởi tường lửa Windows Defender Firewall.
-* **Cách khắc phục**:
-  1. Mở Command Prompt (`cmd`) và gõ lệnh: `ping [IP_camera]` để kiểm tra thông mạng.
-  2. Sử dụng phần mềm kiểm tra luồng camera ngoài (ví dụ: VLC Media Player) để mở thử link RTSP xem luồng trực tiếp có hoạt động không.
-  3. Cấu hình lại Windows Firewall: Thêm ứng dụng `go2rtc.exe` vào danh sách ngoại lệ được phép nhận dữ liệu qua mạng (Allow incoming connections).
+### 2. Cẩm nang xử lý sự cố nhanh (Troubleshooting Guide)
+* **Lỗi 1: Giao diện hiển thị lỗi kết nối cơ sở dữ liệu**
+  * *Nguyên nhân*: Cổng CSDL `6432` hoặc `5432` bị xung đột với các phiên bản database cũ cài trên máy tính trạm con.
+  * *Xử lý*: Mở Task Manager, tìm toàn bộ tiến trình `postgres` và tắt nó đi. Xóa tệp `postmaster.pid` tại thư mục `%APPDATA%/MasterStation/pg_data` trước khi khởi động lại app.
+* **Lỗi 2: Không xem được luồng camera trực tuyến**
+  * *Nguyên nhân*: Cổng truyền video WebRTC `1984` của go2rtc bị Windows Defender Firewall chặn.
+  * *Xử lý*: Vào Control Panel -> Windows Defender Firewall -> Allow an app through firewall, tích chọn cho phép ứng dụng `go2rtc.exe` chạy công khai qua mạng Private và Public.
