@@ -54,166 +54,26 @@
 ## II. CÔNG ĐOẠN PHÂN TÍCH & THIẾT KẾ
 
 ### 1. Sơ đồ kiến trúc hệ thống (System Architecture Diagram)
-Hệ thống được thiết kế theo mô hình **Thick Client (All-in-One)** đóng gói toàn bộ dịch vụ để chạy trực tiếp trên máy tính phòng điều khiển:
-
-```text
-+-------------------------------------------------------------+
-|                      USER INTERFACE (UI)                    |
-|       React + TypeScript SPA (Dashboard, SLD, CCTV, Alerts) |
-+-------------------------------------------------------------+
-                               |
-                               | WebSockets (SignalR) / REST HTTPS
-                               v
-+-------------------------------------------------------------+
-|                 APPLICATION BACKEND API                     |
-|           ASP.NET Core 8 Web API / WebHost Container        |
-|  +-------------------+  +-----------------+  +------------+ |
-|  | PlcPollingWorker  |  | CentralSyncWkr  |  | Auth/Lic   | |
-|  +-------------------+  +-----------------+  +------------+ |
-+-------------------------------------------------------------+
-            |                      |                  |
-            | Snap7 / Modbus       | HTTPS            | EF Core
-            v                      v                  v
-+---------------------+ +--------------------+ +--------------+
-| EXTERNAL HARDWARE   | | MASTER STATION     | | TIME-SERIES  |
-| Siemens PLC S7      | | (Central Server)   | | DATABASE     |
-| Thermal Cameras     | |                    | | PostgreSQL + |
-| Modbus RTU/TCP      | | Ingest Endpoints   | | TimescaleDB  |
-+---------------------+ +--------------------+ +--------------+
-```
+![Sơ đồ kiến trúc hệ thống StationOS](docs/diagrams/architecture_diagram.png)
 
 ### 2. Sơ đồ Use Case (Use Case Diagram)
-Các chức năng chính được ánh xạ đến 3 nhóm người dùng trong trạm biến áp:
-
-```text
-               +------------------------------------------------+
-               |                  StationOS System              |
-               |                                                |
-  (Operator)-----> [UC01: Giám sát sơ đồ một sợi SLD]           |
-      |        |                                                |
-      +----------> [UC02: Xem trực tiếp Camera nhiệt & CCTV]    |
-      |        |                                                |
-      +----------> [UC03: Xác nhận & xử lý Cảnh báo]            |
-               |                                                |
-   (Manager)-----> [UC04: Cấu hình quy tắc cảnh báo (Rules)]     |
-      |        |                                                |
-      +----------> [UC05: Lên lịch & Quản lý nhiệm vụ bảo trì]  |
-               |                                                |
-    (Admin)------> [UC06: Quản lý thiết bị (Thêm/Sửa/Xóa)]      |
-      |        |                                                |
-      +----------> [UC07: Phân quyền & Quản lý người dùng]      |
-      |        |                                                |
-      +----------> [UC08: Nhập & Kích hoạt bản quyền License]   |
-               +------------------------------------------------+
-```
+![Sơ đồ Use Case hệ thống StationOS](docs/diagrams/usecase_diagram.png)
 
 ### 3. Sơ đồ Lớp (Class Diagram)
-Mô tả mối quan hệ giữa các đối tượng Entity chính được quản lý bởi Entity Framework Core:
-
-```text
-+-------------------+        1      *        +---------------------+
-|      Station      |------------------------|        Device       |
-|-------------------|                        |---------------------|
-| + Id: Guid        |                        | + Id: Guid          |
-| + Code: string    |                        | + StationId: Guid   |
-| + Name: string    |                        | + Name: string      |
-| + Status: string  |                        | + Type: string      |
-|                   |                        | + Config: string    |
-+-------------------+                        | + IsOnline: bool    |
-          | 1                                +---------------------+
-          |                                             | 1
-          | *                                           |
-+-------------------+                                   | *
-|    SensorReading  |                                   |
-|-------------------|                                   |
-| + Id: int         |                                   |
-| + DeviceId: Guid  |<----------------------------------+
-| + PointId: string |
-| + Value: double?  |
-| + Time: DateTime  |
-| + Quality: int    |
-+-------------------+
-```
+![Sơ đồ lớp hệ thống StationOS](docs/diagrams/class_diagram.png)
 
 ### 4. Sơ đồ Hoạt động (Activity Diagram)
-Mô tả quy trình **Thu thập dữ liệu cảm biến tuần tự & Đánh giá Cảnh báo tự động**:
-
-```text
-   [Bắt đầu chu kỳ lấy mẫu (1 giây)]
-                   |
-                   v
-       [Đọc dữ liệu từ S7/Modbus/Cam]
-                   |
-        /---------------------\
-       < Kết nối thành công?   >
-        \---------------------/
-          /                 \
-     (Có) /                 \ (Không)
-         v                   v
-  [Ghi nhận dữ liệu]    [Đánh dấu Offline]
-  [Quality = 1]         [Value = null, Quality = 2]
-         |                   |
-         +--------->---------+
-                   |
-                   v
-     [Kiểm tra quy tắc cảnh báo (Rule Engine)]
-                   |
-        /---------------------\
-       < Vượt ngưỡng cảnh báo? >
-        \---------------------/
-          /                 \
-     (Có) /                 \ (Không)
-         v                   v
-  [Tạo Alert trong CSDL]  [Cập nhật trạng thái OK]
-  [Phát còi báo động]
-         |                   |
-         +--------->---------+
-                   |
-                   v
-       [Push dữ liệu qua SignalR lên UI]
-       [Lưu dữ liệu lịch sử vào DB]
-                   |
-                   v
-             [Kết thúc chu kỳ]
-```
+![Sơ đồ hoạt động hệ thống StationOS](docs/diagrams/activity_diagram.png)
 
 ### 5. Sơ đồ Trạng thái (State Diagram)
-Mô tả vòng đời và sự chuyển đổi trạng thái của **Cảnh báo sự cố (Alert)**:
-
-```text
-           [Khởi tạo Quy tắc]
-                   |
-                   v
-    +------------------------------+
-    |           CHƯA KÍCH HOẠT     |
-    +------------------------------+
-                   |
-                   | Điều kiện cảnh báo thỏa mãn
-                   v
-    +------------------------------+
-    |             ACTIVE           |<--------+
-    | (Nhấp nháy đỏ trên giao diện)|         | Sự cố lặp lại
-    +------------------------------+         |
-                   |                         |
-                   | Nhân viên nhấn Xác nhận |
-                   v                         |
-    +------------------------------+---------+
-    |          ACKNOWLEDGED        |
-    | (Ngừng nhấp nháy, ghi log)   |
-    +------------------------------+
-                   |
-                   | Giá trị đo lường về mức an toàn
-                   v
-    +------------------------------+
-    |            RESOLVED          |
-    |  (Lưu lịch sử, đóng sự cố)   |
-    +------------------------------+
-```
+![Sơ đồ trạng thái hệ thống StationOS](docs/diagrams/state_diagram.png)
 
 ### 6. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
+![Sơ đồ cơ sở dữ liệu thực tế ERD](docs/diagrams/erd_diagram.png)
+
 Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm các bảng dữ liệu cốt lõi dưới đây:
 
-#### 2.1 Bảng `Stations` (Danh sách các trạm giám sát)
+#### 6.1 Bảng `Stations` (Danh sách các trạm giám sát)
 ```sql
 CREATE TABLE "Stations" (
     "Id" UUID PRIMARY KEY,
@@ -231,7 +91,7 @@ CREATE TABLE "Stations" (
 | `Location` | `TEXT` | - | NULL | Chuỗi JSON chứa kinh độ, vĩ độ |
 | `Status` | `VARCHAR(20)` | - | NOT NULL | Trạng thái trạm (`active`/`inactive`) |
 
-#### 2.2 Bảng `Devices` (Danh sách thiết bị kết nối)
+#### 6.2 Bảng `Devices` (Danh sách thiết bị kết nối)
 ```sql
 CREATE TABLE "Devices" (
     "Id" UUID PRIMARY KEY,
@@ -255,7 +115,7 @@ CREATE TABLE "Devices" (
 | `IsOnline` | `BOOLEAN` | - | NOT NULL | Trạng thái kết nối |
 | `Status` | `VARCHAR(50)` | - | NOT NULL | Trạng thái hoạt động |
 
-#### 2.3 Bảng `Users` (Danh sách tài khoản & phân quyền)
+#### 6.3 Bảng `Users` (Danh sách tài khoản & phân quyền)
 ```sql
 CREATE TABLE "Users" (
     "Id" UUID PRIMARY KEY,
@@ -277,7 +137,7 @@ CREATE TABLE "Users" (
 | `Email` | `VARCHAR(100)` | - | NULL | Hòm thư điện tử |
 | `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Ngày tạo tài khoản |
 
-#### 2.4 Bảng `SldFiles` (Thông tin tệp sơ đồ một sợi SVG)
+#### 6.4 Bảng `SldFiles` (Thông tin tệp sơ đồ một sợi SVG)
 ```sql
 CREATE TABLE "SldFiles" (
     "Id" UUID PRIMARY KEY,
@@ -293,7 +153,7 @@ CREATE TABLE "SldFiles" (
 | `Path` | `VARCHAR(500)` | - | NOT NULL | Đường dẫn lưu trữ tệp SVG trên đĩa |
 | `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Thời điểm tải lên |
 
-#### 2.5 Bảng `SldPoints` (Liên kết điểm đo với phần tử đồ họa SVG)
+#### 6.5 Bảng `SldPoints` (Liên kết điểm đo với phần tử đồ họa SVG)
 ```sql
 CREATE TABLE "SldPoints" (
     "Id" UUID PRIMARY KEY,
@@ -311,7 +171,7 @@ CREATE TABLE "SldPoints" (
 | `PointId` | `VARCHAR(100)` | - | NOT NULL | Mã điểm đo cảm biến |
 | `Description` | `VARCHAR(200)` | - | NULL | Chú thích điểm liên kết |
 
-#### 2.6 Bảng `SensorReadings` (Dữ liệu tức thời của cảm biến)
+#### 6.6 Bảng `SensorReadings` (Dữ liệu tức thời của cảm biến)
 ```sql
 CREATE TABLE "SensorReadings" (
     "Id" SERIAL PRIMARY KEY,
@@ -335,7 +195,7 @@ CREATE TABLE "SensorReadings" (
 | `Unit` | `VARCHAR(50)` | - | NULL | Đơn vị đo (`°C`, `dB`...) |
 | `Quality` | `INTEGER` | - | NOT NULL | Chất lượng tín hiệu (`1`=Tốt, `2`=Mất kết nối) |
 
-#### 2.7 Bảng `Alerts` (Nhật ký cảnh báo sự cố đang xảy ra)
+#### 6.7 Bảng `Alerts` (Nhật ký cảnh báo sự cố đang xảy ra)
 ```sql
 CREATE TABLE "Alerts" (
     "Id" UUID PRIMARY KEY,
@@ -363,7 +223,7 @@ CREATE TABLE "Alerts" (
 | `Timestamp` | `TIMESTAMP` | - | NOT NULL | Thời gian xuất hiện sự cố |
 | `Acknowledged` | `BOOLEAN` | - | NOT NULL | Đã xác nhận cảnh báo chưa |
 
-#### 2.8 Bảng `Rules` (Các quy tắc giám sát tự động)
+#### 6.8 Bảng `Rules` (Các quy tắc giám sát tự động)
 ```sql
 CREATE TABLE "Rules" (
     "Id" UUID PRIMARY KEY,
@@ -384,7 +244,7 @@ CREATE TABLE "Rules" (
 | `Actions` | `TEXT` | - | NOT NULL | Biểu thức hành động xử lý dạng JSON |
 | `Enabled` | `BOOLEAN` | - | NOT NULL | Quy tắc đang bật hay tắt |
 
-#### 2.9 Bảng `SyncQueues` (Hàng đợi đồng bộ dữ liệu)
+#### 6.9 Bảng `SyncQueues` (Hàng đợi đồng bộ dữ liệu)
 ```sql
 CREATE TABLE "SyncQueues" (
     "Id" BIGSERIAL PRIMARY KEY,
@@ -408,7 +268,7 @@ CREATE TABLE "SyncQueues" (
 | `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Thời gian tạo hàng đợi |
 | `SentAt` | `TIMESTAMP` | - | NULL | Thời gian gửi thành công |
 
-#### 2.10 Bảng `MaintenanceTasks` (Lịch bảo trì thiết bị sinh tự động)
+#### 6.10 Bảng `MaintenanceTasks` (Lịch bảo trì thiết bị sinh tự động)
 ```sql
 CREATE TABLE "MaintenanceTasks" (
     "Id" UUID PRIMARY KEY,
@@ -432,7 +292,7 @@ CREATE TABLE "MaintenanceTasks" (
 | `AssignedTo` | `VARCHAR(100)` | - | NULL | Người chịu trách nhiệm thực hiện |
 | `ScheduledDate`| `TIMESTAMP` | - | NULL | Ngày dự kiến thực hiện |
 
-#### 2.11 Bảng `Boundaries` (Định nghĩa các vùng biên nhiệt độ camera)
+#### 6.11 Bảng `Boundaries` (Định nghĩa các vùng biên nhiệt độ camera)
 ```sql
 CREATE TABLE "Boundaries" (
     "Id" UUID PRIMARY KEY,
@@ -592,7 +452,7 @@ Dưới đây là nhật ký đầy đủ tất cả các commit từ thời đi
 
 ---
 
-## IV. CÔNG ĐOẠN KIỂM THỬ & SỬ A LỖI (TESTING)
+## IV. CÔNG ĐOẠN KIỂM THỬ & SỬA LỖI (TESTING)
 
 ### 1. Danh sách ca kiểm thử chi tiết hoàn chỉnh
 *(Xem bảng chi tiết 12 ca kiểm thử đã được phê duyệt ở phần trên).*
