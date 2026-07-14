@@ -1,10 +1,10 @@
 # HỒ SƠ KỸ THUẬT CHI TIẾT DỰ ÁN
-## HỆ THỐNG GIÁM SÁT TRẠM BIẾN ÁP (STATIONOS - POWER MONITOR)
+## HỆ THỐNG GIÁM SÁT TRẠM BIẾN ÁP (POWER MONITOR)
 
 ---
 
 > [!IMPORTANT]
-> Tài liệu kỹ thuật chi tiết này được biên soạn cho dự án **StationOS - Power Monitor (Phiên bản v3.x)** nhằm phục vụ công tác nghiệm thu bàn giao và chứng minh quy trình công nghệ phát triển phần mềm độc lập để hưởng các chính sách ưu đãi thuế VAT của Bộ Tài chính/Tổng cục Thuế Việt Nam.
+> Tài liệu kỹ thuật chi tiết này được biên soạn cho dự án **POWER MONITOR (Phiên bản v3.x)** nhằm phục vụ công tác nghiệm thu bàn giao và chứng minh quy trình công nghệ phát triển phần mềm độc lập để hưởng các chính sách ưu đãi thuế VAT của Bộ Tài chính/Tổng cục Thuế Việt Nam.
 
 ---
 
@@ -54,19 +54,19 @@
 ## II. CÔNG ĐOẠN PHÂN TÍCH & THIẾT KẾ
 
 ### 1. Sơ đồ kiến trúc hệ thống (System Architecture Diagram)
-![Sơ đồ kiến trúc hệ thống StationOS](docs/diagrams/architecture_diagram.png)
+![Sơ đồ kiến trúc hệ thống POWER MONITOR](docs/diagrams/architecture_diagram.png)
 
 ### 2. Sơ đồ Use Case (Use Case Diagram)
-![Sơ đồ Use Case hệ thống StationOS](docs/diagrams/usecase_diagram.png)
+![Sơ đồ Use Case hệ thống POWER MONITOR](docs/diagrams/usecase_diagram.png)
 
 ### 3. Sơ đồ Lớp (Class Diagram)
-![Sơ đồ lớp hệ thống StationOS](docs/diagrams/class_diagram.png)
+![Sơ đồ lớp hệ thống POWER MONITOR](docs/diagrams/class_diagram.png)
 
 ### 4. Sơ đồ Hoạt động (Activity Diagram)
-![Sơ đồ hoạt động hệ thống StationOS](docs/diagrams/activity_diagram.png)
+![Sơ đồ hoạt động hệ thống POWER MONITOR](docs/diagrams/activity_diagram.png)
 
 ### 5. Sơ đồ Trạng thái (State Diagram)
-![Sơ đồ trạng thái hệ thống StationOS](docs/diagrams/state_diagram.png)
+![Sơ đồ trạng thái hệ thống POWER MONITOR](docs/diagrams/state_diagram.png)
 
 ### 6. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
 ![Sơ đồ cơ sở dữ liệu thực tế ERD](docs/diagrams/erd_diagram.png)
@@ -448,23 +448,23 @@ Dưới đây là nhật ký đầy đủ tất cả các commit từ thời đi
   * `AnalyticsPage`: Tích hợp các biểu đồ phân tích sâu về phóng điện cục bộ (PD) và phân tích xu hướng nhiệt độ trạm.
   * `MaintenancePage`: Quản lý các phiếu giao việc, lịch trình bảo dưỡng định kỳ tự động và thủ công.
   * `UserManagementPage` & `AuditLogPage`: Quản trị người dùng theo phân quyền RBAC và ghi nhật ký hoạt động hệ thống (audit trail).
-* **Module `StationOS.Api` (Web API Controllers & Hubs)**:
+* **Module `POWER MONITOR - API` (StationOS.Api)**:
   * Điều phối các yêu cầu API từ Client, thực hiện xác thực bằng JWT Token.
   * `Realtime Hub (SignalR)`: Đẩy các gói tin dữ liệu tức thời và thông báo cảnh báo tức thì từ Worker nền lên giao diện Client mà không cần Refresh.
-* **Module `StationOS.Data` (Lớp Cơ sở Dữ liệu EF Core)**:
+* **Module `POWER MONITOR - Database` (StationOS.Data)**:
   * Ánh xạ các thực thể cấu hình thiết bị, nhật ký số liệu, cảnh báo, quy tắc (Rules) sang PostgreSQL.
   * Quản lý việc thiết lập chỉ mục (Indexes) trên các cột thời gian (`Time`/`Timestamp`) để tối ưu hóa hiệu suất truy vấn dữ liệu lớn.
-* **Module `StationOS.Services` (Nghiệp vụ Hệ thống)**:
+* **Module `POWER MONITOR - Services` (StationOS.Services)**:
   * `LicenseService`: Giải mã, kiểm tra chữ ký khóa bản quyền dựa trên chữ ký MAC address và Machine GUID để cấp quyền sử dụng thiết bị cảm biến và số lượng trạm theo đúng gói giấy phép.
   * `AuthService`: Băm mật khẩu người dùng, kiểm tra phân quyền RBAC (`Admin`, `Manager`, `Operator`).
-* **Module `StationOS.Workers` (Các Background Worker chạy nền)**:
+* **Module `POWER MONITOR - Workers` (StationOS.Workers)**:
   * `PlcPollingWorker`: Kết nối liên tục Siemens S7 và Modbus TCP để đọc mảng byte thô, xử lý thứ tự byte (Endianness) và cập nhật số liệu.
   * `CentralSyncWorker`: Quản lý hàng đợi đồng bộ dữ liệu (`SyncQueue`), tự động đóng gói dữ liệu đo lường, nhật ký cảnh báo và gửi về Trạm trung tâm qua HTTPS.
   * `RuleEvaluationWorker`: Bộ máy luật (Rule Engine) đánh giá tức thời các giá trị đo cảm biến theo các quy tắc do người vận hành cấu hình, kích hoạt ngõ ra Relay còi hú của PLC khi phát hiện vượt ngưỡng.
-* **Module `StationOS.Analytics` (Dự báo và Phân tích AI)**:
+* **Module `POWER MONITOR - Analytics` (StationOS.Analytics)**:
   * Triển khai thuật toán dự báo nhiệt độ máy biến áp và đầu cốt trong tương lai gần (5-10 phút) để cảnh báo sớm.
   * Phân tích tín hiệu phóng điện cục bộ (PD) từ cảm biến siêu âm, tính toán xác suất rủi ro lỗi cách điện.
-* **Module `Electron Desktop` (Trình đóng gói Thick Client)**:
+* **Module `Electron Desktop` (Trình đóng gói Thick Client - POWER MONITOR Launcher)**:
   * Quản lý vòng đời khởi chạy phần mềm desktop, tự động quản lý khởi động/dừng các tiến trình nền PostgreSQL, Backend API và dịch vụ truyền luồng video `go2rtc` dưới nền.
 
 ---

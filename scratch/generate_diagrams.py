@@ -102,7 +102,7 @@ def draw_state_box(draw, coords, label):
 # ==========================================
 img = Image.new('RGB', (960, 480), BG_COLOR)
 draw = ImageDraw.Draw(img)
-draw.text((20, 20), "SƠ ĐỒ KIẾN TRÚC HỆ THỐNG STATIONOS (ALL-IN-ONE)", fill=BORDER_COLOR, font=font_title)
+draw.text((20, 20), "SƠ ĐỒ KIẾN TRÚC HỆ THỐNG POWER MONITOR (ALL-IN-ONE)", fill=BORDER_COLOR, font=font_title)
 
 draw_container(draw, 40, 80, "CLIENT (Electron + React)", [
     "- UI Render: Port 6173",
@@ -142,11 +142,11 @@ img.save(os.path.join(output_dir, "architecture_diagram.png"))
 # ==========================================
 img = Image.new('RGB', (950, 550), BG_COLOR)
 draw = ImageDraw.Draw(img)
-draw.text((20, 20), "SƠ ĐỒ USE CASE HỆ THỐNG STATIONOS", fill=BORDER_COLOR, font=font_title)
+draw.text((20, 20), "SƠ ĐỒ USE CASE HỆ THỐNG POWER MONITOR", fill=BORDER_COLOR, font=font_title)
 
 # System boundary
 draw.rectangle([200, 60, 750, 520], outline=BORDER_COLOR, width=2)
-draw.text((210, 70), "Hệ thống StationOS (Trạm con)", fill=BORDER_COLOR, font=font_bold)
+draw.text((210, 70), "Hệ thống POWER MONITOR (Trạm con)", fill=BORDER_COLOR, font=font_bold)
 
 # Use Cases (widened ellipse, centered text)
 ucs = [
@@ -202,7 +202,7 @@ img.save(os.path.join(output_dir, "usecase_diagram.png"))
 # ==========================================
 img = Image.new('RGB', (1000, 580), BG_COLOR)
 draw = ImageDraw.Draw(img)
-draw.text((20, 20), "SƠ ĐỒ LỚP HỆ THỐNG STATIONOS (UML CLASS DIAGRAM)", fill=BORDER_COLOR, font=font_title)
+draw.text((20, 20), "SƠ ĐỒ LỚP HỆ THỐNG POWER MONITOR (UML CLASS DIAGRAM)", fill=BORDER_COLOR, font=font_title)
 
 draw_class_box(draw, 40, 80, "Station (Trạm)", [
     "+ Id: Guid",
