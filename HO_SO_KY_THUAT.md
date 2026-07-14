@@ -90,59 +90,108 @@ graph TD
 ```
 
 ### 2. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
-Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm 24 bảng dữ liệu, dưới đây là các bảng dữ liệu cốt lõi nhất được thiết kế chi tiết:
+Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm 11 bảng dữ liệu cốt lõi nhất được thiết kế chi tiết:
 
+#### 2.1 Bảng `Stations` (Danh sách các trạm giám sát)
 ```sql
--- 1. Bảng Stations (Danh sách các trạm giám sát)
 CREATE TABLE "Stations" (
     "Id" UUID PRIMARY KEY,
     "Code" VARCHAR(50) UNIQUE NOT NULL,
     "Name" VARCHAR(200) NOT NULL,
-    "Location" TEXT NULL, -- Lưu tọa độ GPS dưới dạng chuỗi JSON
+    "Location" TEXT NULL,
     "Status" VARCHAR(20) NOT NULL DEFAULT 'active'
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính tự sinh |
+| `Code` | `VARCHAR(50)` | - | UNIQUE, NOT NULL | Mã định danh trạm (VD: TBA_LA_01) |
+| `Name` | `VARCHAR(200)` | - | NOT NULL | Tên trạm biến áp |
+| `Location` | `TEXT` | - | NULL | Chuỗi JSON chứa kinh độ, vĩ độ |
+| `Status` | `VARCHAR(20)` | - | NOT NULL | Trạng thái trạm (`active`/`inactive`) |
 
--- 2. Bảng Devices (Danh sách thiết bị kết nối)
+#### 2.2 Bảng `Devices` (Danh sách thiết bị kết nối)
+```sql
 CREATE TABLE "Devices" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
     "Name" VARCHAR(150) NOT NULL,
-    "Type" VARCHAR(50) NOT NULL, -- 'camera_thermal', 'plc_s7', 'modbus_device'...
-    "Protocol" VARCHAR(50) NOT NULL, -- 'rtsp', 'plc_s7', 'modbus_tcp'
-    "Config" TEXT NOT NULL, -- Lưu cấu hình kết nối chi tiết (IP, Port, Username, Password) dạng JSON
+    "Type" VARCHAR(50) NOT NULL,
+    "Protocol" VARCHAR(50) NOT NULL,
+    "Config" TEXT NOT NULL,
     "IsOnline" BOOLEAN NOT NULL DEFAULT false,
     "Status" VARCHAR(50) NOT NULL DEFAULT 'unknown'
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính thiết bị |
+| `StationId` | `UUID` | FK | REFERENCES Stations | Trạm biến áp chứa thiết bị này |
+| `Name` | `VARCHAR(150)` | - | NOT NULL | Tên thiết bị |
+| `Type` | `VARCHAR(50)` | - | NOT NULL | Loại (`plc_s7`, `camera_thermal`, `modbus`) |
+| `Protocol` | `VARCHAR(50)` | - | NOT NULL | Giao thức (`snap7`, `rtsp`, `modbus_tcp`) |
+| `Config` | `TEXT` | - | NOT NULL | Chuỗi cấu hình JSON (IP, port, database...) |
+| `IsOnline` | `BOOLEAN` | - | NOT NULL | Trạng thái kết nối |
+| `Status` | `VARCHAR(50)` | - | NOT NULL | Trạng thái hoạt động |
 
--- 3. Bảng Users (Danh sách tài khoản & phân quyền)
+#### 2.3 Bảng `Users` (Danh sách tài khoản & phân quyền)
+```sql
 CREATE TABLE "Users" (
     "Id" UUID PRIMARY KEY,
     "Username" VARCHAR(100) UNIQUE NOT NULL,
     "PasswordHash" VARCHAR(256) NOT NULL,
-    "Role" VARCHAR(30) NOT NULL, -- 'Admin', 'Manager', 'Operator'
+    "Role" VARCHAR(30) NOT NULL,
     "FullName" VARCHAR(150) NULL,
     "Email" VARCHAR(100) NULL,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính người dùng |
+| `Username` | `VARCHAR(100)` | - | UNIQUE, NOT NULL | Tên đăng nhập |
+| `PasswordHash` | `VARCHAR(256)` | - | NOT NULL | Mật khẩu băm an toàn |
+| `Role` | `VARCHAR(30)` | - | NOT NULL | Vai trò phân quyền (`Admin`, `Manager`, `Operator`) |
+| `FullName` | `VARCHAR(150)` | - | NULL | Họ và tên đầy đủ |
+| `Email` | `VARCHAR(100)` | - | NULL | Hòm thư điện tử |
+| `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Ngày tạo tài khoản |
 
--- 4. Bảng SldFiles (Thông tin tệp sơ đồ một sợi SVG)
+#### 2.4 Bảng `SldFiles` (Thông tin tệp sơ đồ một sợi SVG)
+```sql
 CREATE TABLE "SldFiles" (
     "Id" UUID PRIMARY KEY,
     "Name" VARCHAR(200) NOT NULL,
-    "Path" VARCHAR(500) NOT NULL, -- Đường dẫn tương đối lưu file SVG (Ví dụ: /sld/7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg)
+    "Path" VARCHAR(500) NOT NULL,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính sơ đồ |
+| `Name` | `VARCHAR(200)` | - | NOT NULL | Tên bản vẽ sơ đồ |
+| `Path` | `VARCHAR(500)` | - | NOT NULL | Đường dẫn lưu trữ tệp SVG trên đĩa |
+| `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Thời điểm tải lên |
 
--- 5. Bảng SldPoints (Liên kết điểm đo với phần tử đồ họa SVG)
+#### 2.5 Bảng `SldPoints` (Liên kết điểm đo với phần tử đồ họa SVG)
+```sql
 CREATE TABLE "SldPoints" (
     "Id" UUID PRIMARY KEY,
     "SldFileId" UUID REFERENCES "SldFiles"("Id") ON DELETE CASCADE,
-    "ElementId" VARCHAR(100) NOT NULL, -- ID của thẻ text/path trong file SVG
-    "PointId" VARCHAR(100) NOT NULL, -- Liên kết đến PointId đo lường thực tế
+    "ElementId" VARCHAR(100) NOT NULL,
+    "PointId" VARCHAR(100) NOT NULL,
     "Description" VARCHAR(200) NULL
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính liên kết |
+| `SldFileId` | `UUID` | FK | REFERENCES SldFiles | Sơ đồ một sợi áp dụng |
+| `ElementId` | `VARCHAR(100)` | - | NOT NULL | ID thẻ DOM trong mã nguồn SVG |
+| `PointId` | `VARCHAR(100)` | - | NOT NULL | Mã điểm đo cảm biến |
+| `Description` | `VARCHAR(200)` | - | NULL | Chú thích điểm liên kết |
 
--- 6. Bảng SensorReadings (Dữ liệu tức thời của cảm biến)
+#### 2.6 Bảng `SensorReadings` (Dữ liệu tức thời của cảm biến)
+```sql
 CREATE TABLE "SensorReadings" (
     "Id" SERIAL PRIMARY KEY,
     "Time" TIMESTAMP NOT NULL,
@@ -151,16 +200,28 @@ CREATE TABLE "SensorReadings" (
     "PointId" VARCHAR(100) NOT NULL,
     "Value" DOUBLE PRECISION NULL,
     "Unit" VARCHAR(50) NULL,
-    "Quality" INTEGER NOT NULL -- 1 = Tốt, 2 = Mất kết nối thiết bị
+    "Quality" INTEGER NOT NULL
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `SERIAL` | PK | NOT NULL | Khóa tăng tự động |
+| `Time` | `TIMESTAMP` | - | NOT NULL | Thời gian lấy mẫu dữ liệu |
+| `StationId` | `UUID` | FK | REFERENCES Stations | Trạm biến áp đo được |
+| `DeviceId` | `UUID` | FK | REFERENCES Devices | Thiết bị thực hiện phép đo |
+| `PointId` | `VARCHAR(100)` | - | NOT NULL | Mã điểm đo (VD: `temp_pha_1`) |
+| `Value` | `DOUBLE PRECISION`| - | NULL | Giá trị số thực đo được |
+| `Unit` | `VARCHAR(50)` | - | NULL | Đơn vị đo (`°C`, `dB`...) |
+| `Quality` | `INTEGER` | - | NOT NULL | Chất lượng tín hiệu (`1`=Tốt, `2`=Mất kết nối) |
 
--- 7. Bảng Alerts (Nhật ký cảnh báo sự cố đang xảy ra)
+#### 2.7 Bảng `Alerts` (Nhật ký cảnh báo sự cố đang xảy ra)
+```sql
 CREATE TABLE "Alerts" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
     "PointId" VARCHAR(100) NOT NULL,
     "Message" VARCHAR(500) NOT NULL,
-    "Severity" VARCHAR(20) NOT NULL, -- 'warning', 'danger'
+    "Severity" VARCHAR(20) NOT NULL,
     "ValueTrigger" DOUBLE PRECISION NOT NULL,
     "RuleId" UUID REFERENCES "Rules"("Id") ON DELETE SET NULL,
     "Timestamp" TIMESTAMP NOT NULL,
@@ -168,52 +229,105 @@ CREATE TABLE "Alerts" (
     "AckBy" VARCHAR(100) NULL,
     "AckAt" TIMESTAMP NULL
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính cảnh báo |
+| `StationId` | `UUID` | FK | REFERENCES Stations | Trạm xảy ra cảnh báo |
+| `PointId` | `VARCHAR(100)` | - | NOT NULL | Điểm đo vượt ngưỡng |
+| `Message` | `VARCHAR(500)` | - | NOT NULL | Nội dung cảnh báo |
+| `Severity` | `VARCHAR(20)` | - | NOT NULL | Mức độ nguy hiểm (`warning`/`danger`) |
+| `ValueTrigger` | `DOUBLE` | - | NOT NULL | Giá trị kích hoạt cảnh báo |
+| `RuleId` | `UUID` | FK | REFERENCES Rules | Quy tắc được cấu hình áp dụng |
+| `Timestamp` | `TIMESTAMP` | - | NOT NULL | Thời gian xuất hiện sự cố |
+| `Acknowledged` | `BOOLEAN` | - | NOT NULL | Đã xác nhận cảnh báo chưa |
 
--- 8. Bảng Rules (Các quy tắc giám sát tự động)
+#### 2.8 Bảng `Rules` (Các quy tắc giám sát tự động)
+```sql
 CREATE TABLE "Rules" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
     "Name" VARCHAR(200) NOT NULL,
     "RuleSet" TEXT NULL,
-    "Condition" TEXT NOT NULL, -- Cấu hình điều kiện logic JSON
-    "Actions" TEXT NOT NULL, -- Hành động cảnh báo JSON
+    "Condition" TEXT NOT NULL,
+    "Actions" TEXT NOT NULL,
     "Enabled" BOOLEAN NOT NULL DEFAULT true
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính luật |
+| `StationId` | `UUID` | FK | REFERENCES Stations | Trạm áp dụng luật |
+| `Name` | `VARCHAR(200)` | - | NOT NULL | Tên quy tắc giám sát |
+| `Condition` | `TEXT` | - | NOT NULL | Biểu thức điều kiện logic dạng JSON |
+| `Actions` | `TEXT` | - | NOT NULL | Biểu thức hành động xử lý dạng JSON |
+| `Enabled` | `BOOLEAN` | - | NOT NULL | Quy tắc đang bật hay tắt |
 
--- 9. Bảng SyncQueues (Hàng đợi đồng bộ dữ liệu)
+#### 2.9 Bảng `SyncQueues` (Hàng đợi đồng bộ dữ liệu)
+```sql
 CREATE TABLE "SyncQueues" (
     "Id" BIGSERIAL PRIMARY KEY,
-    "EntityType" VARCHAR(50) NOT NULL, -- 'TelemetryData', 'Alert', 'Report'
+    "EntityType" VARCHAR(50) NOT NULL,
     "EntityId" UUID NOT NULL,
-    "Payload" TEXT NOT NULL, -- Nội dung thực thể dạng JSON để gửi lên API Trạm tổng
-    "Status" VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'sent', 'failed'
+    "Payload" TEXT NOT NULL,
+    "Status" VARCHAR(20) NOT NULL DEFAULT 'pending',
     "RetryCount" INTEGER NOT NULL DEFAULT 0,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "SentAt" TIMESTAMP NULL
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `BIGSERIAL` | PK | NOT NULL | Khóa tự tăng dạng số lớn |
+| `EntityType` | `VARCHAR(50)` | - | NOT NULL | Loại thực thể đồng bộ (`SensorReading`, `Alert`) |
+| `EntityId` | `UUID` | - | NOT NULL | Khóa chính của thực thể gốc |
+| `Payload` | `TEXT` | - | NOT NULL | Dữ liệu dạng JSON của thực thể cần đồng bộ |
+| `Status` | `VARCHAR(20)` | - | NOT NULL | Trạng thái đồng bộ (`pending`/`sent`/`failed`) |
+| `RetryCount` | `INTEGER` | - | NOT NULL | Số lần thử lại nếu lỗi kết nối |
+| `CreatedAt` | `TIMESTAMP` | - | NOT NULL | Thời gian tạo hàng đợi |
+| `SentAt` | `TIMESTAMP` | - | NULL | Thời gian gửi thành công |
 
--- 10. Bảng MaintenanceTasks (Lịch bảo trì thiết bị sinh tự động)
+#### 2.10 Bảng `MaintenanceTasks` (Lịch bảo trì thiết bị sinh tự động)
+```sql
 CREATE TABLE "MaintenanceTasks" (
     "Id" UUID PRIMARY KEY,
     "StationId" UUID REFERENCES "Stations"("Id") ON DELETE CASCADE,
     "Title" VARCHAR(250) NOT NULL,
-    "Type" VARCHAR(50) NOT NULL, -- 'inspection', 'repair'
-    "Status" VARCHAR(50) NOT NULL, -- 'pending', 'in_progress', 'completed'
+    "Type" VARCHAR(50) NOT NULL,
+    "Status" VARCHAR(50) NOT NULL,
     "AssignedTo" VARCHAR(100) NULL,
     "ScheduledDate" TIMESTAMP NULL,
     "Notes" TEXT NULL,
     "CreatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính nhiệm vụ |
+| `StationId` | `UUID` | FK | REFERENCES Stations | Trạm biến áp cần bảo trì |
+| `Title` | `VARCHAR(250)` | - | NOT NULL | Tên công việc cần thực hiện |
+| `Type` | `VARCHAR(50)` | - | NOT NULL | Phân loại bảo trì (`inspection`/`repair`) |
+| `Status` | `VARCHAR(50)` | - | NOT NULL | Trạng thái công việc (`pending`/`completed`) |
+| `AssignedTo` | `VARCHAR(100)` | - | NULL | Người chịu trách nhiệm thực hiện |
+| `ScheduledDate`| `TIMESTAMP` | - | NULL | Ngày dự kiến thực hiện |
 
--- 11. Bảng Boundaries (Định nghĩa các vùng biên nhiệt độ camera)
+#### 2.11 Bảng `Boundaries` (Định nghĩa các vùng biên nhiệt độ camera)
+```sql
 CREATE TABLE "Boundaries" (
     "Id" UUID PRIMARY KEY,
     "DeviceId" UUID REFERENCES "Devices"("Id") ON DELETE CASCADE,
     "PointId" VARCHAR(100) NOT NULL,
-    "PolygonCoordinates" TEXT NOT NULL, -- Tọa độ các đỉnh của đa giác ROI JSON
+    "PolygonCoordinates" TEXT NOT NULL,
     "Label" VARCHAR(100) NULL
 );
 ```
+| Tên trường | Kiểu dữ liệu | Khóa | Ràng buộc | Mô tả |
+|---|---|---|---|---|
+| `Id` | `UUID` | PK | NOT NULL | Khóa chính vùng biên |
+| `DeviceId` | `UUID` | FK | REFERENCES Devices | Thiết bị camera áp dụng vùng biên |
+| `PointId` | `VARCHAR(100)` | - | NOT NULL | ID điểm đo liên kết với vùng biên |
+| `PolygonCoordinates`| `TEXT` | - | NOT NULL | Chuỗi JSON chứa danh sách tọa độ đỉnh đa giác ROI |
+| `Label` | `VARCHAR(100)` | - | NULL | Nhãn tên vùng biên (Ví dụ: `Dau_Cap_Pha_A`) |
 
 ---
 
