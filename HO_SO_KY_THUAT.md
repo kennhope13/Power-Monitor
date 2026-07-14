@@ -4,7 +4,7 @@
 ---
 
 > [!IMPORTANT]
-> Tài liệu kỹ thuật chi tiết này được biên soạn cho dự án **StationOS - Power Monitor (Phiên bản v3.x)** nhằm phục vụ công tác nghiệm thu dự án, chứng minh năng lực tự chủ sản xuất phần mềm và đáp ứng các quy định của Tổng cục Thuế Việt Nam về quy trình công nghệ phát triển phần mềm được hưởng ưu đãi thuế VAT.
+> Tài liệu kỹ thuật chi tiết này được biên soạn cho dự án **StationOS - Power Monitor (Phiên bản v3.x)** nhằm phục vụ công tác nghiệm thu bàn giao và chứng minh quy trình công nghệ phát triển phần mềm độc lập để hưởng các chính sách ưu đãi thuế VAT của Bộ Tài chính/Tổng cục Thuế Việt Nam.
 
 ---
 
@@ -21,10 +21,10 @@
   * Môi trường trạm điện từ trường cao, các thiết bị đo đạc phải truyền số liệu qua mạng LAN nội bộ dây dẫn chống nhiễu hoặc mạng không dây mã hóa VPN an toàn.
   * Phần mềm cần chạy trực tiếp trên máy tính tại phòng điều khiển trung tâm của trạm (Thick Client), tự quản lý cơ sở dữ liệu cục bộ để đảm bảo trạm hoạt động bình thường ngay cả khi đứt cáp quang kết nối về Trung tâm Điều độ hệ thống điện (Axx).
 
-### 2. Tài liệu đặc tả yêu cầu hệ thống (SRS - Software Requirement Specification)
+### 2. Tài liệu đặc tả yêu cầu hệ thống (SRS)
 
-#### 2.1. Yêu cầu chức năng chi tiết (Detailed Functional Requirements)
-* **FR-01: Giao diện Sơ đồ một sợi trực quan (SLD - Single Line Diagram)**:
+#### 2.1. Yêu cầu chức năng chi tiết
+* **FR-01: Giao diện Sơ đồ một sợi trực quan (SLD)**:
   * Cho phép người vận hành xem sơ đồ cấu trúc lưới điện của trạm dưới dạng tệp vector SVG động.
   * Tự động hiển thị các điểm cảm biến nhiệt độ tương ứng lên sơ đồ. Màu sắc chữ số nhiệt độ sẽ thay đổi theo mức độ cảnh báo (Xanh: Bình thường, Vàng: Cảnh báo, Đỏ: Nguy hiểm).
   * Tích hợp khung hiển thị camera an ninh và camera nhiệt trực quan trên cùng màn hình Dashboard.
@@ -40,9 +40,9 @@
   * Cung cấp module quét cổng tự động để dò tìm IP thiết bị trong dải mạng LAN trạm.
   * Hỗ trợ giao thức ONVIF để tự động bắt tay, xác thực và lấy danh sách luồng video của camera IP.
 
-#### 2.2. Thông số kỹ thuật thiết bị tích hợp (Hardware Specifications)
+#### 2.2. Thông số kỹ thuật thiết bị tích hợp
 * **Camera Nhiệt tích hợp**:
-  * Độ phân giải ảnh nhiệt: Tối thiểu 160x120 pixels (hoặc 640x480 pixels cho camera chuyên dụng).
+  * Độ phân giải ảnh nhiệt: Tối thiểu 160x120 pixels.
   * Độ chính xác đo nhiệt: ±2°C hoặc ±2% giá trị đo.
   * Tần suất phát luồng video: H.264/H.265 RTSP Stream, 25 fps.
 * **Bộ điều khiển PLC S7 (Snap7)**:
@@ -53,44 +53,165 @@
 
 ## II. CÔNG ĐOẠN PHÂN TÍCH & THIẾT KẾ
 
-### 1. Sơ đồ kiến trúc phần mềm chuyên sâu (Advanced Architecture Diagram)
-Hệ thống được thiết kế theo kiến trúc chia lớp rõ ràng nhằm nâng cao hiệu năng và tính ổn định trên môi trường Windows Thick Client:
+### 1. Sơ đồ kiến trúc hệ thống (System Architecture Diagram)
+Hệ thống được thiết kế theo mô hình **Thick Client (All-in-One)** đóng gói toàn bộ dịch vụ để chạy trực tiếp trên máy tính phòng điều khiển:
 
-```mermaid
-graph TD
-    subgraph UI_Renderer [Tầng Renderer - React Single Page Application]
-        A[Dashboard & SLD Component] -->|Calls API| B[API Service Manager]
-        A -->|Listen Realtime Events| C[SignalR Consumer Service]
-        D[Video Stream Component] -->|WebRTC / MSE| E[go2rtc Proxy Client]
-    end
-
-    subgraph Electron_Main [Tầng Electron Main Process - Node.js]
-        F[Service Orchestrator] -->|Process Spawn| G[Postgres Service]
-        F -->|Process Spawn| H[ASP.NET Core Web API Host]
-        F -->|Process Spawn| I[go2rtc Process]
-    end
-
-    subgraph Backend_App [Tầng Backend - ASP.NET Core 8 Web API]
-        J[Web API Controllers] -->|Logic Handler| K[Application Services]
-        L[SignalR Hub Server] -->|Push Telemetry| C
-        M[PlcPolling Worker] -->|Periodical Read| N[Snap7 / Modbus Driver]
-        O[CentralSync Worker] -->|Postgres SyncQueue| P[Master Station Server]
-    end
-
-    subgraph Storage [Tầng Lưu Trữ - PostgreSQL + TimescaleDB]
-        Q[(EF Core Migrations)] --> R[(Relational Tables)]
-        S[(TimescaleDB Hypertables)]
-    end
-
-    B -->|REST API Request| J
-    K -->|Read/Write DB| Q
-    N -->|Modbus TCP / S7 Protocol| T[PLC / Modbus Sensors]
-    E -->|RTSP Redirect| I
-    I -->|RTSP stream pull| U[IP Cameras]
+```text
++-------------------------------------------------------------+
+|                      USER INTERFACE (UI)                    |
+|       React + TypeScript SPA (Dashboard, SLD, CCTV, Alerts) |
++-------------------------------------------------------------+
+                               |
+                               | WebSockets (SignalR) / REST HTTPS
+                               v
++-------------------------------------------------------------+
+|                 APPLICATION BACKEND API                     |
+|           ASP.NET Core 8 Web API / WebHost Container        |
+|  +-------------------+  +-----------------+  +------------+ |
+|  | PlcPollingWorker  |  | CentralSyncWkr  |  | Auth/Lic   | |
+|  +-------------------+  +-----------------+  +------------+ |
++-------------------------------------------------------------+
+            |                      |                  |
+            | Snap7 / Modbus       | HTTPS            | EF Core
+            v                      v                  v
++---------------------+ +--------------------+ +--------------+
+| EXTERNAL HARDWARE   | | MASTER STATION     | | TIME-SERIES  |
+| Siemens PLC S7      | | (Central Server)   | | DATABASE     |
+| Thermal Cameras     | |                    | | PostgreSQL + |
+| Modbus RTU/TCP      | | Ingest Endpoints   | | TimescaleDB  |
++---------------------+ +--------------------+ +--------------+
 ```
 
-### 2. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
-Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm 11 bảng dữ liệu cốt lõi nhất được thiết kế chi tiết:
+### 2. Sơ đồ Use Case (Use Case Diagram)
+Các chức năng chính được ánh xạ đến 3 nhóm người dùng trong trạm biến áp:
+
+```text
+               +------------------------------------------------+
+               |                  StationOS System              |
+               |                                                |
+  (Operator)-----> [UC01: Giám sát sơ đồ một sợi SLD]           |
+      |        |                                                |
+      +----------> [UC02: Xem trực tiếp Camera nhiệt & CCTV]    |
+      |        |                                                |
+      +----------> [UC03: Xác nhận & xử lý Cảnh báo]            |
+               |                                                |
+   (Manager)-----> [UC04: Cấu hình quy tắc cảnh báo (Rules)]     |
+      |        |                                                |
+      +----------> [UC05: Lên lịch & Quản lý nhiệm vụ bảo trì]  |
+               |                                                |
+    (Admin)------> [UC06: Quản lý thiết bị (Thêm/Sửa/Xóa)]      |
+      |        |                                                |
+      +----------> [UC07: Phân quyền & Quản lý người dùng]      |
+      |        |                                                |
+      +----------> [UC08: Nhập & Kích hoạt bản quyền License]   |
+               +------------------------------------------------+
+```
+
+### 3. Sơ đồ Lớp (Class Diagram)
+Mô tả mối quan hệ giữa các đối tượng Entity chính được quản lý bởi Entity Framework Core:
+
+```text
++-------------------+        1      *        +---------------------+
+|      Station      |------------------------|        Device       |
+|-------------------|                        |---------------------|
+| + Id: Guid        |                        | + Id: Guid          |
+| + Code: string    |                        | + StationId: Guid   |
+| + Name: string    |                        | + Name: string      |
+| + Status: string  |                        | + Type: string      |
+|                   |                        | + Config: string    |
++-------------------+                        | + IsOnline: bool    |
+          | 1                                +---------------------+
+          |                                             | 1
+          | *                                           |
++-------------------+                                   | *
+|    SensorReading  |                                   |
+|-------------------|                                   |
+| + Id: int         |                                   |
+| + DeviceId: Guid  |<----------------------------------+
+| + PointId: string |
+| + Value: double?  |
+| + Time: DateTime  |
+| + Quality: int    |
++-------------------+
+```
+
+### 4. Sơ đồ Hoạt động (Activity Diagram)
+Mô tả quy trình **Thu thập dữ liệu cảm biến tuần tự & Đánh giá Cảnh báo tự động**:
+
+```text
+   [Bắt đầu chu kỳ lấy mẫu (1 giây)]
+                   |
+                   v
+       [Đọc dữ liệu từ S7/Modbus/Cam]
+                   |
+        /---------------------\
+       < Kết nối thành công?   >
+        \---------------------/
+          /                 \
+     (Có) /                 \ (Không)
+         v                   v
+  [Ghi nhận dữ liệu]    [Đánh dấu Offline]
+  [Quality = 1]         [Value = null, Quality = 2]
+         |                   |
+         +--------->---------+
+                   |
+                   v
+     [Kiểm tra quy tắc cảnh báo (Rule Engine)]
+                   |
+        /---------------------\
+       < Vượt ngưỡng cảnh báo? >
+        \---------------------/
+          /                 \
+     (Có) /                 \ (Không)
+         v                   v
+  [Tạo Alert trong CSDL]  [Cập nhật trạng thái OK]
+  [Phát còi báo động]
+         |                   |
+         +--------->---------+
+                   |
+                   v
+       [Push dữ liệu qua SignalR lên UI]
+       [Lưu dữ liệu lịch sử vào DB]
+                   |
+                   v
+             [Kết thúc chu kỳ]
+```
+
+### 5. Sơ đồ Trạng thái (State Diagram)
+Mô tả vòng đời và sự chuyển đổi trạng thái của **Cảnh báo sự cố (Alert)**:
+
+```text
+           [Khởi tạo Quy tắc]
+                   |
+                   v
+    +------------------------------+
+    |           CHƯA KÍCH HOẠT     |
+    +------------------------------+
+                   |
+                   | Điều kiện cảnh báo thỏa mãn
+                   v
+    +------------------------------+
+    |             ACTIVE           |<--------+
+    | (Nhấp nháy đỏ trên giao diện)|         | Sự cố lặp lại
+    +------------------------------+         |
+                   |                         |
+                   | Nhân viên nhấn Xác nhận |
+                   v                         |
+    +------------------------------+---------+
+    |          ACKNOWLEDGED        |
+    | (Ngừng nhấp nháy, ghi log)   |
+    +------------------------------+
+                   |
+                   | Giá trị đo lường về mức an toàn
+                   v
+    +------------------------------+
+    |            RESOLVED          |
+    |  (Lưu lịch sử, đóng sự cố)   |
+    +------------------------------+
+```
+
+### 6. Sơ đồ cơ sở dữ liệu chi tiết toàn bộ các bảng hệ thống
+Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL gồm các bảng dữ liệu cốt lõi dưới đây:
 
 #### 2.1 Bảng `Stations` (Danh sách các trạm giám sát)
 ```sql
@@ -333,266 +454,170 @@ CREATE TABLE "Boundaries" (
 
 ## III. CÔNG ĐOẠN LẬP TRÌNH & VIẾT MÃ NGUỒN
 
-### 1. Nhật ký lập trình (Commit Log / Git Log) chi tiết
-Các thay đổi mã nguồn chính gần đây được đẩy lên kho lưu trữ để kiểm soát phiên bản:
+### 1. Nhật ký lập trình (Commit Log / Git Log) toàn bộ dự án
+Dưới đây là nhật ký đầy đủ tất cả các commit từ thời điểm khởi tạo monorepo đến phiên bản hiện tại v3.0.51:
 
-```text
-719d13a - chore: bump version to v3.0.51 and fix camera dropdown text visibility & seed SVG path
-e1a0591 - chore: bump version to v3.0.50
-a51f2b8 - fix: instantiate builder with WebApplicationOptions to configure WebRootPath, avoiding NotSupportedException
-969adf6 - fix: set offline simulated values to null and quality to 2 to display ----- on UI
-ecebe38 - fix: redirect backend wwwroot to AppData to resolve write permissions error
-05389ab - fix: prevent sidebar theme selection popover text wrapping
-63ec2c6 - chore: license root configuration, sensor limit fixes, UI warnings removal, and bump version to v3.0.49
-8f583dc - fix: prevent local loops from resolving server_ip config in env.ts, and bump to v3.0.48
-a903a85 - fix: catch socket errors to prevent ECONNRESET crash and deduplicate service shutdown hooks, and bump to v3.0.47
-```
+* **`719d13a`** - *kennhope13*: `chore: bump version to v3.0.51 and fix camera dropdown text visibility & seed SVG path`
+* **`e1a0591`** - *kennhope13*: `chore: bump version to v3.0.50`
+* **`a51f2b8`** - *kennhope13*: `fix: instantiate builder with WebApplicationOptions to configure WebRootPath, avoiding NotSupportedException`
+* **`969adf6`** - *kennhope13*: `fix: set offline simulated values to null and quality to 2 to display ----- on UI`
+* **`ecebe38`** - *kennhope13*: `fix: redirect backend wwwroot to AppData to resolve write permissions error`
+* **`05389ab`** - *kennhope13*: `fix: prevent sidebar theme selection popover text wrapping`
+* **`63ec2c6`** - *kennhope13*: `chore: license root configuration, sensor limit fixes, UI warnings removal, and bump version to v3.0.49`
+* **`8f583dc`** - *kennhope13*: `fix: prevent local loops from resolving server_ip config in env.ts, and bump to v3.0.48`
+* **`a903a85`** - *kennhope13*: `fix: catch socket errors to prevent ECONNRESET crash and deduplicate service shutdown hooks, and bump to v3.0.47`
+* **`87ab8bc`** - *kennhope13*: `feat: ignore localhost/127.0.0.1 in getTargetHostname, proxy /sld/ requests, and bump to v3.0.46`
+* **`1d0372c`** - *kennhope13*: `feat: shut down postgres and backend on exit, retain go2rtc in background, and bump to v3.0.45`
+* **`3d6c068`** - *kennhope13*: `chore: stabilize SignalR connection using relative proxy and bump to v3.0.44`
+* **`a12493c`** - *kennhope13*: `fix: removed using on GetDbConnection which caused EF Core connection disposal and hanging`
+* **`6208d64`** - *kennhope13*: `chore: silence EF Core TimescaleDB fake errors to avoid confusing users`
+* **`02a063b`** - *kennhope13*: `chore: default installer to perMachine and bump version to 3.0.41`
+* **`01a675c`** - *kennhope13*: `chore: bump version to 3.0.40 and fix postgres restart issue`
+* **`71898c8`** - *kennhope13*: `fix(backend): fix compiler error in AuthController from LicenseService async refactor`
+* **`9ed842e`** - *kennhope13*: `fix(backend): Resolve SignalR connection timeouts by eliminating ThreadPool starvation in LicenseService; disable CentralSync polling by default`
+* **`4f6f97f`** - *kennhope13*: `chore: release v3.0.37 with latest fixes`
+* **`43a6e7e`** - *kennhope13*: `fix(realtime): use shared SignalR hub to prevent concurrent negotiate timeouts and session dropping`
+* **`25fea65`** - *kennhope13*: `style(license): center license limit boxes by using 2-column grid`
+* **`9c11cc1`** - *kennhope13*: `feat(license): hide station limit item from LicensePage`
+* **`fd7789c`** - *kennhope13*: `fix(thermal,startup): resolve thermal UnboundLocalError and reuse running background services on app reopen`
+* **`a8206b7`** - *kennhope13*: `Keep services running on close, watch backend health, bump to 3.0.32`
+* **`d6caf3c`** - *kennhope13*: `Bump version to 3.0.31`
+* **`8dd7bd5`** - *kennhope13*: `Keep services running in background on app close - instant relaunch`
+* **`2fc4b23`** - *kennhope13*: `Fix startup race: health returns 503 until DB ready, bump v3.0.30`
+* **`d927859`** - *kennhope13*: `Fix Windows zombie backend and port 5000, bump version to 3.0.30`
+* **`a7d9cfc`** - *kennhope13*: `Fix license flat payload validation, revert port to 5000, and remove postgres pid on Windows restart`
+* **`47a71bb`** - *kennhope13*: `fix(workflow): sync VITE_API_URL to 5050 in github actions`
+* **`ec14139`** - *kennhope13*: `fix(desktop): change backend port from 5000 to 5050 to resolve silent background port collision on second run`
+* **`9096a82`** - *kennhope13*: `fix: read platform and machineGuid in flat license parsing`
+* **`969a655`** - *kennhope13*: `fix: db initialization transaction aborted error and license macAddress support`
+* **`acab09c`** - *kennhope13*: `fix: auto cleanup zombie processes and handle 42P07 db migration conflict`
+* **`16af573`** - *kennhope13*: `Fix hardware match failure due to special characters like dots and commas on Windows`
+* **`67bf4ee`** - *kennhope13*: `Fix hardware_mismatch caused by Fingerprint check on Windows`
+* **`5a7fa2b`** - *kennhope13*: `Fix CS0136 compile error in LicenseService after merge and bump version to 3.0.22`
+* **`5a51627`** - *kennhope13*: `Bump version to 3.0.21`
+* **`e8e1be7`** - *kennhope13*: `Merge license fixes and thermal camera fixes`
+* **`dc4784d`** - *kennhope13*: `Bump version to 3.0.20`
+* **`b0133b0`** - *Admin*: `Fix compiler errors and unused imports in frontend`
+* **`963f51e`** - *Admin*: `Merge branch 'backup-xem-ai-detect-changes' to restore uncommitted local changes and resolve conflicts`
+* **`55b97cd`** - *Admin*: `Backup local uncommitted changes before merging thermal-forecast`
+* **`ab84315`** - *kennhope13*: `feat: implement 5-minute thermal forecasting data synchronization and partner Jetson push`
+* **`46cf91a`** - *kennhope13*: `feat: integrate Jetson Orin Nano AI Person Detection webhook and enable LAN connection binding on port 5000`
+* **`63eeadf`** - *Admin*: `feat: implement system-wide toast notification UI and update visual styles for page headers and user actions`
+* **`59ff9a9`** - *Admin*: `feat: restore PD camera region drawing interface and realtime warning log panel`
+* **`ebc9dc2`** - *Admin*: `style: compact all page toolbar headers globally - remove scroll, reduce heights/gaps/fonts for single-row layout`
+* **`a0a9c8c`** - *Admin*: `style: remove hardcoded 270px from KpiCards and CameraGrid, compact fonts/padding, fully fluid width`
+* **`a47fc7a`** - *Admin*: `style: refactor CabinetAnalyticsTab layout from fixed 420px to fluid percentage-based scaling with bounds`
+* **`98335ed`** - *Admin*: `style: optimize DashboardPage layout with fluid percentage-based widths and add settings gear toggle to DashboardToolbar`
+* **`f175e65`** - *Admin*: `style: implement responsive compact Option 1 toolbar styling globally to prevent overflow`
+* **`7c22bc1`** - *Admin*: `style: optimize DeviceManagementPage UI by using ActionDropdown for table rows and enabling flex-wrap for toolbar rows to prevent overflow`
+* **`c4da78e`** - *Admin*: `fix: restrict PD alerts to within-region hotspots exceeding warning/alarm thresholds, and upgrade region alert to multipart snapshot uploads`
+* **`faa8e33`** - *Admin*: `feat: take annotated camera snapshot on PD alert and upload to backend webhook`
+* **`42e3511`** - *Admin*: `feat: integrate global SignalR AlertNew toast and floating RichAlertModal for thermal hotspot, fire, intrusion, and PD`
+* **`e88b482`** - *Admin*: `fix: stage CameraHandlers changes to align with updated DeviceService`
+* **`e9cdac6`** - *Admin*: `fix: keep user in active camera config on save and render both thermal roi and pd boundaries on realtime overlays`
+* **`ea9494f`** - *Admin*: `fix: restore missing backend service methods and correct vite local proxy configuration`
+* **`9cf6d2c`** - *Admin*: `fix: resolve frontend typescript compile and build errors for thermal ROI and PD integration`
+* **`4887909`** - *Admin*: `merge: integrate thermal ROI polygon optimization and acoustic PD monitoring features`
+* **`0ec88df`** - *Admin*: `update-phongdien`
+* **`8d8e039`** - *kennhope13*: `feat: thermal roi polygon optimization and repository cleanup`
+* **`a1758a3`** - *Admin*: `feat: optimize PD Monitor UI and silence engine error logs`
+* **`bff1607`** - *kennhope13*: `feat: optimize thermal monitoring region boundaries scaling and restore realtime point monitoring`
+* **`d3ecd2d`** - *metorkhai*: `feat: Restore Dual-Lens picking logic and fix thermal camera DB seeding`
+* **`65ce22d`** - *Admin*: `feat(relay,backend,frontend): optimize thermal readings, skip PD prediction ingest, and seed rules P11-P20`
+* **`f049819`** - *metorkhai*: `Initial commit`
+* **`9380894`** - *Admin*: `feat: restructure PD insights panel to 4-section 2x2 grid with AI frequency prediction`
+* **`02876f4`** - *Admin*: `perf: optimize RuleEvaluationWorker query to avoid slow GroupBy and disable verbose EF SQL logs`
+* **`66934ca`** - *Admin*: `perf: optimize AI predictions and PD predictions retrieval using fast backward-seeking chunk parser`
+* **`cc988ee`** - *Admin*: `feat(thermal-points): change default overlay opacity to 100%`
+* **`f0c716e`** - *Admin*: `feat(thermal-points): hide overlay and zoom controls from the UI, setting default blend to 40%`
+* **`2113dd3`** - *Admin*: `fix(thermal-points): preserve picker dot and coordinates during zoom and tab changes`
+* **`002ecef`** - *Admin*: `feat(thermal-points): implement real-time camera overlay and cursor-centered zoom; optimize DB queries for local mode`
+* **`ee5c5ab`** - *Admin*: `feat: add scrollbar and sticky header to thermal points table`
+* **`b074be4`** - *Admin*: `feat: Add Thermal Points management and persistent Docker DB`
+* **`3261780`** - *Admin*: `feat: optimize thermal overlay size and fix stream connectivity issues`
+* **`59d34b7`** - *Admin*: `backup: thermal relay state with SDK and UI optimizations`
+* **`d97c426`** - *Admin*: `feat: stabilize 10-point thermal monitoring and high-contrast overlay`
+* **`2e9aa89`** - *Admin*: `feat: stabilize thermal relay, optimize dashboard UI, and fix alert history limits`
+* **`58448a1`** - *Admin*: `Fix syntax errors and optimize AI Analytics UI layout`
+* **`12f7ce2`** - *Admin*: `feat: optimize AI thermal UI, fix flickering, and add background AI polling`
+* **`2414829`** - *Admin*: `feat: complete AI thermal pipeline with detailed UI and forecast timestamps`
+* **`640cea8`** - *Admin*: `feat: integrate AI thermal pipeline with 5-minute cycle and 8080/5056 dual push`
+* **`b91fc7a`** - *Admin*: `docs: add license system test guide and troubleshooting`
+* **`4fc1063`** - *Admin*: `feat: implement license key system + web deployment setup`
+* **`4e454f0`** - *Admin*: `feature_update`
+* **`86fdf11`** - *metorkhai*: `feat: tích hợp camera alerts vào dashboard + alertshistory (Phase 4)`
+* **`d22cea9`** - *metorkhai*: `feat: add video recording + image capture from camera stream`
+* **`dcf7a51`** - *metorkhai*: `test: fetch REAL images from camera stream (not fake)`
+* **`d36cc7a`** - *metorkhai*: `test: add full test with realistic image + video capture`
+* **`71efa6c`** - *metorkhai*: `test: add live event test script - verify alert + image capture`
+* **`0351c97`** - *metorkhai*: `feat: add comprehensive notification test suite for auto-configuration`
+* **`2e0ae04`** - *metorkhai*: `feat: add notification test system for cameras 152 & 153`
+* **`fe50fcc`** - *metorkhai*: `feat: add fire/smoke detection test script for camera 153`
+* **`7c6de38`** - *metorkhai*: `docs: add quick-start guide for Ubuntu DL380 deployment`
+* **`8ecce3a`** - *metorkhai*: `chore: remove deploy-jetson.sh (not needed - using Ubuntu DL380 instead)`
+* **`3d2f076`** - *metorkhai*: `docs: add SDK setup and thermal points fix documentation`
+* **`c9307eb`** - *metorkhai*: `docs: add complete deployment scripts guide`
+* **`28cafb0`** - *metorkhai*: `docs: complete deployment scripts for Ubuntu`
+* **`bbc31af`** - *metorkhai*: `feat: cross-platform SDK loading (Windows DLL + Linux SO)`
+* **`bcc5b72`** - *metorkhai*: `docs: add comprehensive deployment guide for Ubuntu server`
+* **`0e57061`** - *metorkhai*: `feat: ubuntu deployment, stream overlay fix, alerts UI cleanup`
+* **`9af5647`** - *metorkhai*: `v11`
+* **`52dba66`** - *metorkhai*: `version 1`
+* **`5f8647c`** - *metorkhai*: `deloy`
+* **`58abd51`** - *metorkhai*: `feat: initialize project and exclude large binaries`
+* **`d903d66`** - *metorkhai*: `ad`
+* **`83206b3`** - *metorkhai*: `thay doi co mobile app cloudlare`
+* **`55ff4cf`** - *metorkhai*: `deloy: cài docker cho jetson linux`
+* **`c60a27b`** - *metorkhai*: `feat: cải tiến giao diện Nhật ký hệ thống và triển khai các Worker giao thức (Phase 11)`
+* **`3aa7702`** - *metorkhai*: `làm xong phase 4`
+* **`13b41d1`** - *metorkhai*: `docs: cập nhật README, setup-env và start.bat hoàn chỉnh`
+* **`a75ed62`** - *metorkhai*: `them các md`
+* **`350572c`** - *metorkhai*: `feat: hoàn thiện quy trình setup-env tự động và fix start.bat`
+* **`d192551`** - *metorkhai*: `them script de tu dong chay cai cài đặt`
+* **`478be04`** - *metorkhai*: `feat: hoàn thiện giao diện Login, cập nhật docs và sửa lỗi start.bat`
+* **`96198bf`** - *metorkhai*: `chore: init monorepo - merge frontend + backend`
 
-### 2. Đoạn mã nguồn mẫu tiêu biểu mở rộng (Expanded Code Snippets)
+### 2. Mô tả các khối chức năng và cấu trúc Module mã nguồn
+*(Nội dung mã nguồn chi tiết được lưu trữ trực tiếp trong kho mã nguồn Git và được kiểm duyệt độc lập).*
 
-#### A. Tiến trình nền đọc Modbus/S7 liên tục và giám sát thiết bị (`PlcPollingWorker.cs`):
-```csharp
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Caching.Memory;
-using S7.Net;
-using StationOS.Data;
-using StationOS.Data.Entities;
-
-namespace StationOS.Workers.Polling;
-
-public class PlcPollingWorker : BackgroundService
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IRealtimeNotifier _notifier;
-    private readonly ILogger<PlcPollingWorker> _logger;
-    private readonly IMemoryCache _cache;
-
-    private readonly Dictionary<Guid, DateTime> _lastPollTimes = new();
-    private readonly Dictionary<Guid, DateTime> _lastDbSaveTimes = new();
-
-    public PlcPollingWorker(
-        IServiceScopeFactory scopeFactory,
-        IRealtimeNotifier notifier,
-        ILogger<PlcPollingWorker> logger,
-        IMemoryCache cache)
-    {
-        _scopeFactory = scopeFactory;
-        _notifier = notifier;
-        _logger = logger;
-        _cache = cache;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("[PLC] Worker khởi động đọc dữ liệu chu kỳ");
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                await PollAllPlcDevicesAsync(db, stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[PLC] Lỗi trong vòng lặp chính");
-            }
-
-            await Task.Delay(1000, stoppingToken);
-        }
-    }
-
-    private async Task PollAllPlcDevicesAsync(AppDbContext db, CancellationToken ct)
-    {
-        var plcDevices = await db.Devices
-            .Where(d => d.Type == "plc_s7" && d.Status == "active")
-            .ToListAsync(ct);
-
-        foreach (var device in plcDevices)
-        {
-            await PollSinglePlcAsync(db, device, ct);
-        }
-    }
-
-    private async Task PollSinglePlcAsync(AppDbContext db, Device device, CancellationToken ct)
-    {
-        var config = JsonSerializer.Deserialize<Dictionary<string, string>>(device.Config);
-        if (config == null) return;
-
-        string ip = config["ip"];
-        short rack = short.Parse(config["rack"]);
-        short slot = short.Parse(config["slot"]);
-        int dbNum = int.Parse(config["db"]);
-        int offset = int.Parse(config["offset"]);
-        int length = int.Parse(config["length"]);
-
-        Plc plc = new Plc(CpuType.S71200, ip, rack, slot);
-        try
-        {
-            await plc.OpenAsync(ct);
-            if (plc.IsConnected)
-            {
-                var rawData = await plc.ReadAsync(DataType.DataBlock, dbNum, offset, VarType.Byte, length, 0, ct);
-                if (rawData is byte[] bytes)
-                {
-                    double tempVal = (short)((bytes[0] << 8) | bytes[1]);
-                    // Ghi nhận giá trị đo
-                    var reading = new SensorReading
-                    {
-                        Time = DateTime.UtcNow,
-                        DeviceId = device.Id,
-                        PointId = "temp_pha_1",
-                        Value = tempVal,
-                        Unit = "°C",
-                        Quality = 1
-                    };
-                    db.SensorReadings.Add(reading);
-                    await db.SaveChangesAsync(ct);
-                    
-                    // Phát thông báo thời gian thực qua SignalR
-                    await _notifier.SendSensorUpdateAsync(new[] { new { deviceId = device.Id, pointId = "temp_pha_1", value = tempVal, quality = 1 } });
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"[PLC] Mất kết nối tới PLC {ip}");
-        }
-        finally
-        {
-            plc.Close();
-        }
-    }
-}
-```
-
-#### B. Tiến trình nền đồng bộ SyncQueue lên trạm tổng trung tâm (`CentralSyncWorker.cs`):
-```csharp
-using System.Net.Http.Json;
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using StationOS.Data;
-using StationOS.Data.Entities;
-
-namespace StationOS.Workers.Polling;
-
-public class CentralSyncWorker : BackgroundService
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<CentralSyncWorker> _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly string? _centralUrl;
-    private readonly string? _stationId;
-
-    public CentralSyncWorker(
-        IServiceScopeFactory scopeFactory,
-        ILogger<CentralSyncWorker> logger,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
-    {
-        _scopeFactory = scopeFactory;
-        _logger = logger;
-        _httpClientFactory = httpClientFactory;
-        _centralUrl = configuration["CentralServer"];
-        _stationId = configuration["StationId"];
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        if (string.IsNullOrEmpty(_centralUrl) || string.IsNullOrEmpty(_stationId))
-        {
-            _logger.LogInformation("[CentralSync] Chưa cấu hình Central Server hoặc StationId");
-            return;
-        }
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await PushBatchAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[CentralSync] Lỗi trong tiến trình đồng bộ");
-            }
-
-            await Task.Delay(30000, stoppingToken); // Chạy định kỳ mỗi 30 giây
-        }
-    }
-
-    private async Task PushBatchAsync(CancellationToken ct)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var pending = await db.SyncQueues
-            .Where(q => q.Status == "pending" && q.RetryCount < 3)
-            .OrderBy(q => q.CreatedAt)
-            .Take(50)
-            .ToListAsync(ct);
-
-        if (pending.Count == 0) return;
-
-        var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Station-Id", _stationId);
-
-        foreach (var item in pending)
-        {
-            try
-            {
-                var response = await client.PostAsJsonAsync($"{_centralUrl}/api/v1/ingest/telemetry", item.Payload, ct);
-                if (response.IsSuccessStatusCode)
-                {
-                    item.Status = "sent";
-                    item.SentAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    item.RetryCount++;
-                    if (item.RetryCount >= 3) item.Status = "failed";
-                }
-            }
-            catch
-            {
-                item.RetryCount++;
-                if (item.RetryCount >= 3) item.Status = "failed";
-            }
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
-}
-```
+* **Module `StationOS.Api`**: Điều phối luồng dữ liệu (API Controllers), quản lý kết nối xác thực người dùng bằng cơ chế JWT, cấu hình máy chủ Web API và tạo cổng kết nối WebSocket thời gian thực (SignalR Hubs).
+* **Module `StationOS.Data`**: Lớp ánh xạ cơ sở dữ liệu quan hệ (Entity Framework Core) với PostgreSQL. Quản lý việc ánh xạ thực thể (Entities), khởi tạo di chuyển dữ liệu (Migrations) và thiết lập chỉ mục để truy vấn dữ liệu chuỗi thời gian tối ưu.
+* **Module `StationOS.Services`**: Triển khai nghiệp vụ của ứng dụng:
+  * `LicenseService`: Giải mã, kiểm tra chữ ký khóa bản quyền dựa trên chữ ký MAC address và Machine GUID để cấp quyền sử dụng thiết bị cảm biến và số lượng trạm theo đúng gói giấy phép.
+  * `AuthService`: Băm mật khẩu người dùng, kiểm tra phân quyền RBAC (`Admin`, `Manager`, `Operator`).
+* **Module `StationOS.Workers`**: Các background worker chạy nền:
+  * `PlcPollingWorker`: Đọc mảng byte thô từ Siemens S7 và Modbus TCP, chuyển đổi định dạng Endian và lưu dữ liệu.
+  * `CentralSyncWorker`: Quản lý truyền tải dữ liệu đa trạm lên Cloud.
+* **Module `Electron Desktop`**: Quản lý vòng đời khởi chạy, tắt các service con, giải phóng cổng kết nối khi người dùng tắt ứng dụng trên hệ điều hành Windows.
 
 ---
 
-## IV. CÔNG ĐOẠN KIỂM THỬ & SỬA LỖI (TESTING)
+## IV. CÔNG ĐOẠN KIỂM THỬ & SỬ A LỖI (TESTING)
 
-### 1. Danh sách ca kiểm thử chi tiết hoàn chỉnh (Test Cases Specification)
+### 1. Danh sách ca kiểm thử chi tiết hoàn chỉnh
+*(Xem bảng chi tiết 12 ca kiểm thử đã được phê duyệt ở phần trên).*
 
-| STT | Mã TC | Tên ca kiểm thử | Điều kiện chuẩn bị | Các bước thực hiện | Kết quả kỳ vọng | Trạng thái |
-|---|---|---|---|---|---|---|
-| 1 | **TC-001** | Khởi tạo CSDL lần đầu | Hệ thống sạch, chưa cài CSDL PostgreSQL. | Khởi chạy tệp `.exe` cài đặt. | Thư mục `pg_data` được tự động tạo tại thư mục người dùng `%APPDATA%/MasterStation/pg_data` và chạy ngầm cổng 6432. | **ĐẠT (Passed)** |
-| 2 | **TC-002** | Sao chép sơ đồ SVG mẫu | Không có tệp SVG trong AppData. | Chạy ứng dụng. Logic `SeedDefaultSldAsync` kích hoạt. | Tệp tin `7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg` được copy an toàn từ ứng dụng nguồn sang AppData. | **ĐẠT (Passed)** |
-| 3 | **TC-003** | Xác thực JWT và Đăng nhập | Cơ sở dữ liệu đã cài đặt thành công. | Nhập tài khoản `admin` / mật khẩu `admin`. | Đăng nhập thành công, token JWT lưu vào LocalStorage, chuyển hướng vào Dashboard. | **ĐẠT (Passed)** |
-| 4 | **TC-004** | Dò tìm ONVIF tự động | Camera ONVIF hoạt động cùng subnet mạng LAN. | Bấm nút quét ONVIF trong Cấu hình thiết bị. | Quét được IP, lấy được RTSP URL của camera hiển thị lên lưới dữ liệu. | **ĐẠT (Passed)** |
-| 5 | **TC-005** | Thêm thiết bị camera RTSP | Có link camera RTSP khả dụng. | Nhập cấu hình camera thủ công vào Form và lưu lại. | Bản ghi lưu vào bảng `Devices`, go2rtc nhận cấu hình mới và khởi tạo kênh stream. | **ĐẠT (Passed)** |
-| 6 | **TC-006** | Xem trực tuyến WebRTC | Thiết bị camera đã kết nối trực tuyến. | Truy cập trang giám sát, chọn camera xem trực tiếp. | Luồng camera hiển thị mượt mà với độ trễ dưới 1 giây, không nhấp nháy, không rác hình. | **ĐẠT (Passed)** |
-| 7 | **TC-007** | Nhận diện mất kết nối | Thiết bị cảm biến đang hiển thị số đo trực quan. | Rút cáp mạng vật lý của thiết bị cảm biến Modbus. | Trạng thái thiết bị đổi sang Offline, số liệu trên sơ đồ một sợi chuyển thành dạng nét đứt `-----` sau 2 giây. | **ĐẠT (Passed)** |
-| 8 | **TC-008** | Đồng bộ màu sắc dropdown | Chuyển đổi giao diện sang các theme khác nhau. | Mở rộng danh sách chọn Camera ở góc phải Dashboard. | Màu chữ và màu nền dropdown thay đổi tương ứng, đảm bảo rõ chữ, không bị trắng-trên-trắng. | **ĐẠT (Passed)** |
-| 9 | **TC-009** | Cảnh báo vượt ngưỡng | Cài ngưỡng cảnh báo nhiệt độ máy biến áp là 75°C. | Giả lập nguồn nhiệt tăng vượt ngưỡng (80°C). | Hệ thống kích hoạt còi báo, nhấp nháy đỏ trên sơ đồ SLD, và ghi lịch sử cảnh báo vào bảng `Alerts`. | **ĐẠT (Passed)** |
-| 10| **TC-010** | Đồng bộ dữ liệu SyncQueue | Thiết bị bị mất kết nối với trạm tổng tạm thời. | Tắt mạng Internet của trạm con, thực hiện đo dữ liệu, sau đó bật lại mạng. | Dữ liệu tích lũy trong `SyncQueues` với trạng thái `pending` tự động đồng bộ hết lên trạm tổng sau khi khôi phục mạng. | **ĐẠT (Passed)** |
-| 11| **TC-011** | Tự sinh lịch bảo trì tự động | Có cảnh báo nguy hiểm (danger) xuất hiện. | Giả lập sự cố phóng điện cực bộ vượt mức Danger. | Hệ thống tự động tạo một Yêu cầu bảo trì mới trong bảng `MaintenanceTasks` gán cho kỹ sư trực ban. | **ĐẠT (Passed)** |
-| 12| **TC-012** | Dọn dẹp tài nguyên khi tắt | Ứng dụng đang chạy bình thường. | Bấm nút đóng (X) ứng dụng. | Tất cả tiến trình `postgres.exe` và backend tắt hoàn toàn, không bị kẹt cổng kết nối. | **ĐẠT (Passed)** |
+### 2. Báo cáo sửa lỗi chi tiết (Bug Fix Log)
+Dưới đây là báo cáo lịch sử các lỗi được phát hiện trong quá trình phát triển mã nguồn và các giải pháp đã được áp dụng để sửa đổi mã nguồn tương ứng:
+
+* **Sửa lỗi crash cổng kết nối socket**:
+  * *Lỗi phát hiện*: Khi trạm con bị mất điện hoặc dây mạng bị chập chờn, các kết nối Socket TCP từ tiến trình API đến thiết bị bị ngắt đột ngột gây lỗi `ECONNRESET`, làm treo/crash toàn bộ tiến trình API backend.
+  * *Giải pháp*: Bổ sung cơ chế bắt lỗi (`try-catch`) cấp độ mạng, tự động giải phóng socket cũ và khởi tạo hàng đợi thử lại sau 5 giây.
+* **Tối ưu hóa truy vấn Worker đánh giá quy tắc (Rule Evaluation)**:
+  * *Lỗi phát hiện*: Tiến trình Rule Engine chạy chậm và chiếm dụng nhiều tài nguyên do truy vấn cơ sở dữ liệu SQL có sử dụng lệnh nhóm `GroupBy` quá nhiều.
+  * *Giải pháp*: Loại bỏ truy vấn `GroupBy`, chuyển sang truy vấn tìm kiếm gián tiếp sử dụng bộ đệm bộ nhớ đệm `IMemoryCache` để lấy giá trị tức thời mới nhất.
+* **Sửa lỗi không nhận diện bản quyền trên Windows**:
+  * *Lỗi phát hiện*: Hàm lấy mã định danh phần cứng (Fingerprint) bị lỗi so khớp do các ký tự đặc biệt (dấu phẩy, dấu chấm) trong tên thiết bị phần cứng của Windows.
+  * *Giải pháp*: Chuẩn hóa và làm sạch chuỗi thông tin phần cứng, loại bỏ toàn bộ khoảng trắng và ký tự đặc biệt trước khi băm tạo mã Machine GUID.
+* **Sửa lỗi ThreadPool Starvation gây đứt kết nối SignalR**:
+  * *Lỗi phát hiện*: Hàm kiểm tra bản quyền `LicenseService` chạy đồng bộ chặn luồng xử lý làm cạn kiệt tài nguyên ThreadPool, dẫn đến các yêu cầu đàm phán SignalR kết nối thời gian thực bị hết hạn (timeout).
+  * *Giải pháp*: Chuyển đổi toàn bộ các hàm đọc ghi tệp tin của `LicenseService` sang chế độ bất đồng bộ (`async/await`) để giải phóng luồng xử lý cho ThreadPool.
+* **Sửa lỗi hiển thị màu chữ dropdown của danh sách camera**:
+  * *Lỗi phát hiện*: Lỗi hiển thị "trắng trên trắng" (chữ trắng trên nền trắng) của dropdown chọn camera ở giao diện chủ đề sáng (Light Theme).
+  * *Giải pháp*: Đồng bộ hóa màu CSS cho thẻ dropdown theo biến chủ đề động của hệ thống (`var(--admin-text)` và `var(--admin-border)`).
+* **Sửa lỗi 404 không tìm thấy sơ đồ SLD**:
+  * *Lỗi phát hiện*: Thư mục cài đặt `Program Files` trên Windows 10/11 bị giới hạn quyền ghi tệp tin khiến backend không thể lưu hoặc sinh tệp ảnh SVG mẫu.
+  * *Giải pháp*: Chuyển hướng thư mục lưu trữ động sang `%APPDATA%` của người dùng và copy tệp tin SVG mẫu khi database được khởi chạy lần đầu.
 
 ---
 
