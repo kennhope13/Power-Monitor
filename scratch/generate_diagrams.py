@@ -88,6 +88,15 @@ def draw_class_box(draw, x, y, title, lines, width=280, height=180):
         draw.text((x + 12, yy), line, fill=TEXT_COLOR, font=font)
         yy += 18
 
+def draw_state_box(draw, coords, label):
+    draw_rounded_rect(draw, coords, 5, BOX_BG, BORDER_COLOR)
+    x1, y1, x2, y2 = coords
+    w = draw.textlength(label, font=font_bold)
+    tx = x1 + (x2 - x1 - w) / 2
+    ty = y1 + (y2 - y1 - 14) / 2
+    draw.text((tx, ty), label, fill=TEXT_COLOR, font=font_bold)
+
+
 # ==========================================
 # 1. Architecture Diagram
 # ==========================================
@@ -322,40 +331,29 @@ img.save(os.path.join(output_dir, "activity_diagram.png"))
 # ==========================================
 # 5. State Diagram
 # ==========================================
-img = Image.new('RGB', (950, 420), BG_COLOR)
+img = Image.new('RGB', (1000, 420), BG_COLOR)
 draw = ImageDraw.Draw(img)
 draw.text((20, 20), "SƠ ĐỒ TRẠNG THÁI THIẾT BỊ VÀ VÒNG ĐỜI CẢNH BÁO", fill=BORDER_COLOR, font=font_title)
 
-# Device Connection state
-draw.text((60, 60), "1. Trạng thái kết nối thiết bị", fill=BORDER_COLOR, font=font_bold)
-draw_rounded_rect(draw, [40, 100, 200, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((78, 113), "UNKNOWN", fill=TEXT_COLOR, font=font_bold)
+# Device Connection state (Symmetrical layout)
+draw.text((40, 60), "1. Trạng thái kết nối thiết bị", fill=BORDER_COLOR, font=font_bold)
+draw_state_box(draw, [40, 100, 200, 140], "UNKNOWN")
+draw_state_box(draw, [300, 100, 460, 140], "ONLINE")
+draw_state_box(draw, [170, 220, 330, 260], "OFFLINE")
 
-draw_rounded_rect(draw, [320, 100, 480, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((368, 113), "ONLINE", fill=TEXT_COLOR, font=font_bold)
+draw_arrow(draw, (200, 120), (300, 120), "Ping OK")
+draw_arrow(draw, (380, 140), (290, 220), "Mất Ping")
+draw_arrow(draw, (170, 240), (120, 140), "Có Ping lại")
 
-draw_rounded_rect(draw, [180, 220, 340, 260], 5, BOX_BG, BORDER_COLOR)
-draw.text((228, 233), "OFFLINE", fill=TEXT_COLOR, font=font_bold)
+# Alert state (Symmetrical layout aligned with left side)
+draw.text((540, 60), "2. Vòng đời Cảnh báo sự cố (Alert)", fill=BORDER_COLOR, font=font_bold)
+draw_state_box(draw, [540, 100, 700, 140], "ACTIVE")
+draw_state_box(draw, [800, 100, 960, 140], "ACKNOWLEDGED")
+draw_state_box(draw, [670, 220, 830, 260], "RESOLVED")
 
-draw_arrow(draw, (200, 120), (320, 120), "Ping OK")
-draw_arrow(draw, (380, 140), (300, 220), "Mất Ping")
-draw_arrow(draw, (180, 240), (120, 140), "Có Ping lại")
-
-# Alert state
-draw.text((500, 60), "2. Vòng đời Cảnh báo sự cố (Alert)", fill=BORDER_COLOR, font=font_bold)
-
-draw_rounded_rect(draw, [500, 100, 660, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((552, 113), "ACTIVE", fill=TEXT_COLOR, font=font_bold)
-
-draw_rounded_rect(draw, [720, 100, 900, 140], 5, BOX_BG, BORDER_COLOR)
-draw.text((742, 113), "ACKNOWLEDGED", fill=TEXT_COLOR, font=font_bold)
-
-draw_rounded_rect(draw, [610, 220, 770, 260], 5, BOX_BG, BORDER_COLOR)
-draw.text((652, 233), "RESOLVED", fill=TEXT_COLOR, font=font_bold)
-
-draw_arrow(draw, (660, 120), (720, 120), "Xác nhận")
-draw_arrow(draw, (770, 140), (710, 220), "OK trở lại")
-draw_arrow(draw, (610, 240), (560, 140), "Reset")
+draw_arrow(draw, (700, 120), (800, 120), "Xác nhận")
+draw_arrow(draw, (880, 140), (790, 220), "OK trở lại")
+draw_arrow(draw, (670, 240), (620, 140), "Reset")
 
 img.save(os.path.join(output_dir, "state_diagram.png"))
 
