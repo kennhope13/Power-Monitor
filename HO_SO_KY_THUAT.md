@@ -460,13 +460,13 @@ Dưới đây là nhật ký đầy đủ tất cả các commit từ thời đi
 ### 2. Báo cáo sửa lỗi chi tiết (Bug Fix Log)
 Dưới đây là báo cáo lịch sử các lỗi được phát hiện trong quá trình phát triển mã nguồn và các giải pháp đã được áp dụng để sửa đổi mã nguồn tương ứng:
 
-* **Sửa lỗi crash cổng kết nối socket**:
+* **Sửa lỗi crash cổng kết nối socket (ECONNRESET)**:
   * *Lỗi phát hiện*: Khi trạm con bị mất điện hoặc dây mạng bị chập chờn, các kết nối Socket TCP từ tiến trình API đến thiết bị bị ngắt đột ngột gây lỗi `ECONNRESET`, làm treo/crash toàn bộ tiến trình API backend.
   * *Giải pháp*: Bổ sung cơ chế bắt lỗi (`try-catch`) cấp độ mạng, tự động giải phóng socket cũ và khởi tạo hàng đợi thử lại sau 5 giây.
 * **Tối ưu hóa truy vấn Worker đánh giá quy tắc (Rule Evaluation)**:
   * *Lỗi phát hiện*: Tiến trình Rule Engine chạy chậm và chiếm dụng nhiều tài nguyên do truy vấn cơ sở dữ liệu SQL có sử dụng lệnh nhóm `GroupBy` quá nhiều.
   * *Giải pháp*: Loại bỏ truy vấn `GroupBy`, chuyển sang truy vấn tìm kiếm gián tiếp sử dụng bộ đệm bộ nhớ đệm `IMemoryCache` để lấy giá trị tức thời mới nhất.
-* **Sửa lỗi không nhận diện bản quyền trên Windows**:
+* **Sửa lỗi không nhận diện bản quyền phần cứng**:
   * *Lỗi phát hiện*: Hàm lấy mã định danh phần cứng (Fingerprint) bị lỗi so khớp do các ký tự đặc biệt (dấu phẩy, dấu chấm) trong tên thiết bị phần cứng của Windows.
   * *Giải pháp*: Chuẩn hóa và làm sạch chuỗi thông tin phần cứng, loại bỏ toàn bộ khoảng trắng và ký tự đặc biệt trước khi băm tạo mã Machine GUID.
 * **Sửa lỗi ThreadPool Starvation gây đứt kết nối SignalR**:
@@ -475,9 +475,27 @@ Dưới đây là báo cáo lịch sử các lỗi được phát hiện trong q
 * **Sửa lỗi hiển thị màu chữ dropdown của danh sách camera**:
   * *Lỗi phát hiện*: Lỗi hiển thị "trắng trên trắng" (chữ trắng trên nền trắng) của dropdown chọn camera ở giao diện chủ đề sáng (Light Theme).
   * *Giải pháp*: Đồng bộ hóa màu CSS cho thẻ dropdown theo biến chủ đề động của hệ thống (`var(--admin-text)` và `var(--admin-border)`).
-* **Sửa lỗi 404 không tìm thấy sơ đồ SLD**:
+* **Sửa lỗi 404 không tìm thấy sơ đồ SLD và ghi tệp tin**:
   * *Lỗi phát hiện*: Thư mục cài đặt `Program Files` trên Windows 10/11 bị giới hạn quyền ghi tệp tin khiến backend không thể lưu hoặc sinh tệp ảnh SVG mẫu.
   * *Giải pháp*: Chuyển hướng thư mục lưu trữ động sang `%APPDATA%` của người dùng và copy tệp tin SVG mẫu khi database được khởi chạy lần đầu.
+* **Sửa lỗi xung đột cổng 5000 khi chạy nhiều tiến trình trên Windows**:
+  * *Lỗi phát hiện*: Khi khởi chạy ứng dụng lần thứ hai hoặc tiến trình chạy ngầm trước đó chưa được kill hoàn toàn, cổng 5000 bị chiếm dụng làm treo backend.
+  * *Giải pháp*: Thay đổi cổng mặc định của backend từ 5000 sang 5050 để tránh xung đột cổng cục bộ.
+* **Sửa lỗi treo/chết luồng CSDL khi đóng kết nối EF Core**:
+  * *Lỗi phát hiện*: Sử dụng lệnh `using` sai cách trên kết nối `GetDbConnection` dẫn đến việc EF Core tự động đóng kết nối cơ sở dữ liệu vật lý quá sớm, làm các truy vấn tiếp theo bị treo.
+  * *Giải pháp*: Loại bỏ block `using` không đúng chỗ và để EF Core tự quản lý vòng đời của DbConnection.
+* **Sửa lỗi mã hóa UTF8 khi khởi tạo CSDL trên Windows**:
+  * *Lỗi phát hiện*: Lệnh khởi tạo database `initdb` mặc định sử dụng mã hóa hệ thống của Windows (WIN1252), gây lỗi font khi chèn dữ liệu tiếng Việt có dấu.
+  * *Giải pháp*: Ép buộc tiến trình `initdb` của PostgreSQL chạy với tham số `-E UTF8` để đảm bảo lưu trữ và truy vấn tiếng Việt chính xác.
+* **Sửa lỗi lệch tọa độ vùng biên Roi và điểm đo nhiệt khi Zoom**:
+  * *Lỗi phát hiện*: Khi người vận hành thu phóng sơ đồ nhiệt hoặc thay đổi tab hiển thị, các điểm chọn đo nhiệt độ và tọa độ đa giác bị dịch chuyển lệch vị trí.
+  * *Giải pháp*: Lưu lại tọa độ tương đối theo tỷ lệ phần trăm (percentage-based coordinates) và cập nhật lại điểm vẽ động ngay khi thay đổi tỷ lệ zoom.
+* **Sửa lỗi quyền ghi tệp tin khi lưu trữ tệp tin CSDL cục bộ**:
+  * *Lỗi phát hiện*: Khi đóng gói ứng dụng Electron dưới dạng Thick Client cài vào thư mục `Program Files`, tiến trình Postgres không có quyền ghi dữ liệu vào thư mục gốc gây lỗi crash khởi động.
+  * *Giải pháp*: Thay đổi đường dẫn lưu trữ thư mục dữ liệu `pg_data` sang thư mục `%APPDATA%` chuyên dụng của người dùng.
+* **Sửa lỗi tràn chữ thanh công cụ toolbar trên màn hình độ phân giải thấp**:
+  * *Lỗi phát hiện*: Trên các màn hình vận hành công nghiệp (độ phân giải 1366x768 hoặc thấp hơn), thanh công cụ trang quản trị thiết bị bị tràn và che mất các nút chức năng.
+  * *Giải pháp*: Thiết lập thuộc tính CSS `flex-wrap` và điều chỉnh lại khoảng cách padding động để các nút tự xuống dòng mượt mà.
 
 ---
 
