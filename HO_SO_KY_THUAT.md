@@ -440,15 +440,32 @@ Dưới đây là nhật ký đầy đủ tất cả các commit từ thời đi
 ### 2. Mô tả các khối chức năng và cấu trúc Module mã nguồn
 *(Nội dung mã nguồn chi tiết được lưu trữ trực tiếp trong kho mã nguồn Git và được kiểm duyệt độc lập).*
 
-* **Module `StationOS.Api`**: Điều phối luồng dữ liệu (API Controllers), quản lý kết nối xác thực người dùng bằng cơ chế JWT, cấu hình máy chủ Web API và tạo cổng kết nối WebSocket thời gian thực (SignalR Hubs).
-* **Module `StationOS.Data`**: Lớp ánh xạ cơ sở dữ liệu quan hệ (Entity Framework Core) với PostgreSQL. Quản lý việc ánh xạ thực thể (Entities), khởi tạo di chuyển dữ liệu (Migrations) và thiết lập chỉ mục để truy vấn dữ liệu chuỗi thời gian tối ưu.
-* **Module `StationOS.Services`**: Triển khai nghiệp vụ của ứng dụng:
+* **Lớp Giao diện & Trải nghiệm Người dùng (Frontend AppShell & UI Pages)**:
+  * `DashboardPage`: Hiển thị các chỉ số KPI vận hành, biểu đồ cảnh báo tổng quan và danh sách trạng thái kết nối các thiết bị ngoại vi của trạm con.
+  * `RealtimeMonitorPage`: Tải sơ đồ một sợi động SVG, ánh xạ thời gian thực giá trị nhiệt độ lên bản vẽ, tích hợp lưới hiển thị camera IP và camera nhiệt.
+  * `DeviceManagementPage`: Quản lý danh sách thiết bị kết nối, cấu hình IP/Cổng, dải thanh ghi Modbus, hoặc cấu hình vùng giám sát đa giác (ROI) trên camera nhiệt.
+  * `AlertsHistoryPage`: Tra cứu nhật ký cảnh báo chi tiết theo thời gian, lọc theo mức độ nguy hiểm và hỗ trợ xác nhận (Acknowledge) cảnh báo.
+  * `AnalyticsPage`: Tích hợp các biểu đồ phân tích sâu về phóng điện cục bộ (PD) và phân tích xu hướng nhiệt độ trạm.
+  * `MaintenancePage`: Quản lý các phiếu giao việc, lịch trình bảo dưỡng định kỳ tự động và thủ công.
+  * `UserManagementPage` & `AuditLogPage`: Quản trị người dùng theo phân quyền RBAC và ghi nhật ký hoạt động hệ thống (audit trail).
+* **Module `StationOS.Api` (Web API Controllers & Hubs)**:
+  * Điều phối các yêu cầu API từ Client, thực hiện xác thực bằng JWT Token.
+  * `Realtime Hub (SignalR)`: Đẩy các gói tin dữ liệu tức thời và thông báo cảnh báo tức thì từ Worker nền lên giao diện Client mà không cần Refresh.
+* **Module `StationOS.Data` (Lớp Cơ sở Dữ liệu EF Core)**:
+  * Ánh xạ các thực thể cấu hình thiết bị, nhật ký số liệu, cảnh báo, quy tắc (Rules) sang PostgreSQL.
+  * Quản lý việc thiết lập chỉ mục (Indexes) trên các cột thời gian (`Time`/`Timestamp`) để tối ưu hóa hiệu suất truy vấn dữ liệu lớn.
+* **Module `StationOS.Services` (Nghiệp vụ Hệ thống)**:
   * `LicenseService`: Giải mã, kiểm tra chữ ký khóa bản quyền dựa trên chữ ký MAC address và Machine GUID để cấp quyền sử dụng thiết bị cảm biến và số lượng trạm theo đúng gói giấy phép.
   * `AuthService`: Băm mật khẩu người dùng, kiểm tra phân quyền RBAC (`Admin`, `Manager`, `Operator`).
-* **Module `StationOS.Workers`**: Các background worker chạy nền:
-  * `PlcPollingWorker`: Đọc mảng byte thô từ Siemens S7 và Modbus TCP, chuyển đổi định dạng Endian và lưu dữ liệu.
-  * `CentralSyncWorker`: Quản lý truyền tải dữ liệu đa trạm lên Cloud.
-* **Module `Electron Desktop`**: Quản lý vòng đời khởi chạy, tắt các service con, giải phóng cổng kết nối khi người dùng tắt ứng dụng trên hệ điều hành Windows.
+* **Module `StationOS.Workers` (Các Background Worker chạy nền)**:
+  * `PlcPollingWorker`: Kết nối liên tục Siemens S7 và Modbus TCP để đọc mảng byte thô, xử lý thứ tự byte (Endianness) và cập nhật số liệu.
+  * `CentralSyncWorker`: Quản lý hàng đợi đồng bộ dữ liệu (`SyncQueue`), tự động đóng gói dữ liệu đo lường, nhật ký cảnh báo và gửi về Trạm trung tâm qua HTTPS.
+  * `RuleEvaluationWorker`: Bộ máy luật (Rule Engine) đánh giá tức thời các giá trị đo cảm biến theo các quy tắc do người vận hành cấu hình, kích hoạt ngõ ra Relay còi hú của PLC khi phát hiện vượt ngưỡng.
+* **Module `StationOS.Analytics` (Dự báo và Phân tích AI)**:
+  * Triển khai thuật toán dự báo nhiệt độ máy biến áp và đầu cốt trong tương lai gần (5-10 phút) để cảnh báo sớm.
+  * Phân tích tín hiệu phóng điện cục bộ (PD) từ cảm biến siêu âm, tính toán xác suất rủi ro lỗi cách điện.
+* **Module `Electron Desktop` (Trình đóng gói Thick Client)**:
+  * Quản lý vòng đời khởi chạy phần mềm desktop, tự động quản lý khởi động/dừng các tiến trình nền PostgreSQL, Backend API và dịch vụ truyền luồng video `go2rtc` dưới nền.
 
 ---
 
