@@ -196,6 +196,17 @@ Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL g
 ### 1. Nhật ký lập trình (Commit Log / Git Log) toàn bộ dự án
 Dưới đây là nhật ký đầy đủ tất cả các commit từ thời điểm khởi tạo monorepo đến phiên bản hiện tại v3.0.51:
 
+* **`f38daf2`** - *kennhope13*: `docs: remove SQL CREATE TABLE blocks from DB schema section`
+* **`8e682bd`** - *kennhope13*: `docs: rename StationOS references to POWER MONITOR in document and diagrams`
+* **`40499d2`** - *kennhope13*: `docs: expand technical structure to fully document all UI pages and AI modules`
+* **`16da6e0`** - *kennhope13*: `docs: improve state diagram symmetry and center box text alignment`
+* **`689ddb9`** - *kennhope13*: `docs: replace Trạm Tổng with Trạm Trung tâm in document and diagrams`
+* **`8c7b39f`** - *kennhope13*: `docs: adjust diagram box sizes and center text alignment to prevent text clipping`
+* **`7292e48`** - *kennhope13*: `docs: integrate PIL-based technical diagram generation and embed PNG images in md and docx`
+* **`d7bf03f`** - *kennhope13*: `docs: integrate 5 ASCII diagrams, complete git commit history, detailed bug reports, and remove raw source code blocks`
+* **`3013640`** - *kennhope13*: `docs: finalize technical docs with 12 structured word tables and beautiful layout`
+* **`a15c4b4`** - *kennhope13*: `docs: update detailed technical documentation with comprehensive schemas and code snippets`
+* **`500966a`** - *kennhope13*: `docs: add detailed technical documentation in markdown and word docx formats`
 * **`719d13a`** - *kennhope13*: `chore: bump version to v3.0.51 and fix camera dropdown text visibility & seed SVG path`
 * **`e1a0591`** - *kennhope13*: `chore: bump version to v3.0.50`
 * **`a51f2b8`** - *kennhope13*: `fix: instantiate builder with WebApplicationOptions to configure WebRootPath, avoiding NotSupportedException`
@@ -236,6 +247,99 @@ Dưới đây là nhật ký đầy đủ tất cả các commit từ thời đi
 * **`5a51627`** - *kennhope13*: `Bump version to 3.0.21`
 * **`e8e1be7`** - *kennhope13*: `Merge license fixes and thermal camera fixes`
 * **`dc4784d`** - *kennhope13*: `Bump version to 3.0.20`
+* **`bfb4c3e`** - *kennhope13*: `Fix EF Core migration failure caused by EnsureCreated`
+* **`3e4057c`** - *kennhope13*: `Fix database init on Windows`
+* **`591f6c1`** - *kennhope13*: `feat: update license UI and desktop build fixes`
+* **`b3abdd0`** - *kennhope13*: `Fix license flat JSON parsing and signature verification`
+* **`d4fcc25`** - *kennhope13*: `Fix thermal telemetry ingestion for Camera 152 and stability improvements`
+* **`559afba`** - *kennhope13*: `fix: explicit port 5000 binding for backend on Windows and fallback to 127.0.0.1 in frontend to resolve localhost resolution issues`
+* **`ccc0b47`** - *kennhope13*: `fix: fallback to local UI server on port 4173 in Electron if Vite is not running`
+* **`9b49718`** - *kennhope13*: `fix: Windows startup crash - DB not created, UTF8 encoding, race condition`
+* **`24b3fc7`** - *kennhope13*: `fix(desktop): bind ASPNETCORE_URLS to 0.0.0.0 instead of 127.0.0.1, bump to 3.0.18`
+* **`6c6b6c8`** - *kennhope13*: `fix(desktop): split stdout and stderr redirects in spawnHiddenWin32 to prevent file sharing violations, bump to 3.0.17`
+* **`cbf37a0`** - *kennhope13*: `fix(desktop): set WinExe OutputType and use spawnHiddenWin32 for silent startup, bump to 3.0.16`
+* **`c060a17`** - *kennhope13*: `fix(station-setup): correctly normalize Vietnamese 'Đ/đ' characters to fix default station detection and hide cmd window on Windows`
+* **`45954f4`** - *kennhope13*: `build(cleanup): remove obsolete build-thin-client.bat and thin-client-ui directory`
+* **`aba972d`** - *kennhope13*: `build(win): bump version to 3.0.15, hide cmd windows, optimize installer size, and fix compiler errors`
+* **`ca5723e`** - *kennhope13*: `fix(frontend): resolve TS2532 compilation error in GeneralTab`
+* **`c2f19a1`** - *kennhope13*: `build(electron): remove debug UI logs and hide CMD windows for production release`
+* **`85e0647`** - *kennhope13*: `style(login): update nomenclature from server to station for standalone mode`
+* **`515ac06`** - *kennhope13*: `feat(frontend): allow renaming station from General Settings tab`
+* **`80f105d`** - *kennhope13*: `fix(backend): remove hardcoded Long An station and devices from default seed data`
+* **`474c5d3`** - *kennhope13*: `fix(backend): generate missing migration for Permissions column in User entity`
+* **`9079e34`** - *kennhope13*: `fix(electron): force initdb to use UTF8 encoding to prevent WIN1252 character errors during DB seeding`
+* **`cf7b975`** - *kennhope13*: `fix(backend): initialize database before Hangfire dashboard to prevent database not exist error`
+* **`5009cd0`** - *kennhope13*: `feat(electron): show backend and frontend logs directly on the loading screen`
+* **`b3681ae`** - *kennhope13*: `fix(electron): force .NET backend to listen on port 5000 instead of default 8080`
+* **`848d327`** - *kennhope13*: `fix(backend): retry database migration on startup to wait for PostgreSQL`
+* **`718bd28`** - *kennhope13*: `fix(electron): move postgres data dir to userData to avoid permission error on Windows`
+* **`7e82c9e`** - *kennhope13*: `feat: convert windows app to thick client (master station) with bundled backend, pg_portable, go2rtc`
+* **`f7638cd`** - *kennhope13*: `fix: use correct logo.svg for windows shortcut icon`
+* **`16dd331`** - *kennhope13*: `fix: use high-res 512x512 png icon to let electron-builder auto convert`
+* **`062bbe7`** - *kennhope13*: `fix: update windows icon to .ico format`
+* **`4df82c0`** - *kennhope13*: `fix: make windows desktop app run properly as a thin client`
+* **`25f2167`** - *kennhope13*: `fix: add write permission for gh release`
+* **`8202435`** - *kennhope13*: `fix: update github action to use electron builder`
+* **`0b4338c`** - *kennhope13*: `fix: resolve TS build errors and update desktop shortcut script`
+* **`b0f4ea2`** - *kennhope13*: `fix: plc integration and UI updates`
+* **`b61e9a6`** - *kennhope13*: `23:39 01-07-2026 thêm tủ mới plc`
+* **`baadf49`** - *kennhope13*: `Add desktop shortcut creation script (2026-06-30)`
+* **`e911411`** - *kennhope13*: `Fix desktop shortcut startup freeze and optimize health check orchestration`
+* **`23fcd89`** - *kennhope13*: `Performance boost: compiled queries, 60‑s cache, pagination, compiled camera query`
+* **`e86305a`** - *kennhope13*: `Fix station ID and province mismatch, clean up mock stations, and support dynamic local station seed`
+* **`54b888b`** - *kennhope13*: `feat: lock maintenance task creation on sub-stations and configure hierarchical rbac`
+* **`6e0c7b8`** - *kennhope13*: `feat: remove login session and concurrent limits for substation deployment`
+* **`394fdc4`** - *kennhope13*: `feat: change password, migrate admin credentials, and update app icon with transparent rounded rectangle`
+* **`75b2d83`** - *kennhope13*: `feat: cập nhật User entity hỗ trợ Permissions + license fix - 17/06/2026`
+* **`f44378d`** - *kennhope13*: `feat: bypass concurrent session limit for master station (multi) and admins`
+* **`a954893`** - *kennhope13*: `style: replace desktop application icon with green lightning bolt logo`
+* **`d65673a`** - *kennhope13*: `feat: release license session in real-time when SignalR connection drops`
+* **`7d56342`** - *kennhope13*: `feat: call backend logout API to release session and clear refresh token`
+* **`c96d0d6`** - *kennhope13*: `feat: implement concurrent session limit blocking and license upgrade warning`
+* **`057f3f5`** - *kennhope13*: `feat: Giftcode license - custom users, 5/10 parts validation, and electron wrapper - 16/06/2026`
+* **`3715336`** - *kennhope13*: `feat: Giftcode license integration and UI refinements with custom key support`
+* **`d567572`** - *kennhope13*: `change-go2rtc`
+* **`5408cb8`** - *kennhope13*: `fix: change server IP binding to 0.0.0.0 for LAN access and update configs`
+* **`c97580f`** - *kennhope13*: `feat: include static ffmpeg binaries for native H265 WebRTC transcoding support`
+* **`dc17c79`** - *kennhope13*: `feat: migrate go2rtc to native binary to support passwordless auto-start in electron`
+* **`762b474`** - *kennhope13*: `feat: implement manual alert forwarding to central, format measurement values, and fix electron startup race conditions`
+* **`0b320f9`** - *kennhope13*: `feat: pack electron app, local UI proxy server and alerts history UI refinements - thu bay 13/06/2026`
+* **`4fa0aba`** - *kennhope13*: `fix: audit log layout, hover, dropdown theme sync, admin fullname, Jetson H265 fix`
+* **`399fd31`** - *admin*: `feat: add Single Sign-On auto-login from URL token parameter in App.tsx`
+* **`4cafc60`** - *admin*: `fix: restore system history data visibility by defaulting to all time range and fixing all time range preset bug`
+* **`92ae0a8`** - *admin*: `feat: restore thermal analytics pipeline and configure dynamic startup`
+* **`bc42c00`** - *admin*: `fix: make Tauri commands async to prevent thread blocks on navigation`
+* **`842c74e`** - *admin*: `fix: bypass connection health checks in connection manager to avoid hang`
+* **`a3f11f5`** - *admin*: `feat: simplify thin client login page, focus on local/localhost connections`
+* **`81b2eee`** - *admin*: `fix: resolve compilation errors in UserManagementPage and cleanup unused vars`
+* **`96ab300`** - *admin*: `feat: optimize thin client UI, fix global Tauri API injection, and improve multi-site overview`
+* **`0c028a8`** - *admin*: `fix(desktop): enable withGlobalTauri in config and add safety check to prevent JS crash on load`
+* **`3fca27f`** - *admin*: `fix(desktop): handle host unreachable error properly on connect screen`
+* **`241b13e`** - *admin*: `feat(desktop): bundle tailscale setup installer as resource and add quick install button`
+* **`4fe6c17`** - *admin*: `feat: add Tailscale VPN helper and open_url command to Tauri desktop connection screen`
+* **`f7a8360`** - *admin*: `style: refine multi-station navigation back buttons and logos`
+* **`f8d6024`** - *admin*: `feat: integrate real-time PD telemetry indicator into region overlays and clean up UI build issues`
+* **`ec9729d`** - *admin*: `đa trạm và fix ai nhiệt độ`
+* **`27c2a26`** - *admin*: `feat: bypass license, optimize telemetry ingestion to memory cache, persist active station selection, and resolve scoping conflicts`
+* **`00e37a2`** - *admin*: `fix(thermal-pred): fix thermal forecast loop indentation and dynamic frontend retrieval`
+* **`7a428c5`** - *admin*: `feat: optimize PD boundaries detection logic and fix deletion constraint`
+* **`7c8a43b`** - *Admin*: `chore: persist db volume using name stationos-main in compose`
+* **`7ce6507`** - *Admin*: `fix: override beforeBuildCommand to empty for thin client build`
+* **`3b6fb8a`** - *Admin*: `fix: remove invalid NSIS config fields (shortcutName not in Tauri 2 schema)`
+* **`2012ab0`** - *Admin*: `chore: sync all latest changes before push to App-Station-Monitor`
+* **`b9d2ab9`** - *Admin*: `feat: add thin client Windows installer with GitHub Actions CI`
+* **`2890455`** - *Admin*: `Update forecasting horizon from 5 steps to 1 step to show only the next 5-minute prediction`
+* **`b045b0a`** - *Admin*: `Fix thermal history bucketing: include date in bucket key to ensure correct chronological sorting`
+* **`b240dd5`** - *Admin*: `Optimize AppShell header layout: apply square corners (borderRadius: 0) and remove unused imports`
+* **`a8d71a9`** - *Admin*: `Optimize dashboard alert panel: add squared edges and auto-trigger live camera view on alarm events`
+* **`797e7fe`** - *Admin*: `chore: remove redundant camera linkage configuration tab from SettingsPage`
+* **`571df39`** - *Admin*: `chore: remove redundant theme configuration tab from SettingsPage`
+* **`f782c4b`** - *Admin*: `style: implement collapsible inline theme selector in AppShell`
+* **`209ed00`** - *Admin*: `style: replace native theme select with custom styled theme selector`
+* **`b08855e`** - *Admin*: `chore: remove rule-engine from sidebar navigation`
+* **`a8c158e`** - *Admin*: `feat: implement quick rule engine configuration, optimize storage monitor worker, and clean up thermal monitoring labels`
+* **`380ef91`** - *Admin*: `feat(ui): optimize alert panel layout horizontal columns and vertical tight styling`
+* **`220455a`** - *Admin*: `feat(thermal): implement real-time dynamic sync and clashing-free point ID assignment on deletion`
 * **`b0133b0`** - *Admin*: `Fix compiler errors and unused imports in frontend`
 * **`963f51e`** - *Admin*: `Merge branch 'backup-xem-ai-detect-changes' to restore uncommitted local changes and resolve conflicts`
 * **`55b97cd`** - *Admin*: `Backup local uncommitted changes before merging thermal-forecast`
