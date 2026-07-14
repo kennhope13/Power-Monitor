@@ -194,8 +194,9 @@ Hệ thống quản lý dữ liệu thông qua cơ sở dữ liệu PostgreSQL g
 ## III. CÔNG ĐOẠN LẬP TRÌNH & VIẾT MÃ NGUỒN
 
 ### 1. Nhật ký lập trình (Commit Log / Git Log) toàn bộ dự án
-Dưới đây là nhật ký đầy đủ tất cả các commit từ thời điểm khởi tạo monorepo đến phiên bản hiện tại v3.0.51:
+Dưới đây là nhật ký đầy đủ tất cả các commit từ thời điểm khởi tạo monorepo đến phiên bản hiện tại v3.0.52:
 
+* **`f9a23b5`** - *kennhope13*: `chore: bump version to v3.0.52 and add table scroll padding spacer`
 * **`f38daf2`** - *kennhope13*: `docs: remove SQL CREATE TABLE blocks from DB schema section`
 * **`8e682bd`** - *kennhope13*: `docs: rename StationOS references to POWER MONITOR in document and diagrams`
 * **`40499d2`** - *kennhope13*: `docs: expand technical structure to fully document all UI pages and AI modules`
@@ -502,7 +503,7 @@ Dưới đây là báo cáo lịch sử các lỗi được phát hiện trong q
 ## V. CÔNG ĐOẠN BÀN GIAO & HƯỚNG DẪN SỬ DỤNG
 
 ### 1. Hướng dẫn cài đặt cho kỹ sư vận hành
-1. Giải nén hoặc kích hoạt trực tiếp tệp cài đặt chính thức: **`Station Monitor Setup 3.0.51.exe`**.
+1. Giải nén hoặc kích hoạt trực tiếp tệp cài đặt chính thức: **`Station Monitor Setup 3.0.52.exe`**.
 2. Thực hiện các bước cài đặt mặc định theo trình hướng dẫn cài đặt NSIS.
 3. Chạy biểu tượng ứng dụng **Station Monitor** ngoài Desktop với quyền Administrator.
 

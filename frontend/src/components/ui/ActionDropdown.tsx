@@ -12,19 +12,43 @@ interface ActionDropdownProps {
 export default function ActionDropdown({ children }: ActionDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState({ top: 0, left: 0, openUp: false });
+
+  const updatePosition = React.useCallback(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const dropdownHeight = 260; // Chiều cao ước tính của menu 7 items
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < dropdownHeight && rect.top > dropdownHeight;
+
+    setCoords({
+      top: openUp ? rect.top - 4 : rect.bottom + 4,
+      left: rect.right - 140,
+      openUp
+    });
+  }, []);
 
   useEffect(() => {
-    // Đóng menu khi người dùng click ra ngoài vùng dropdown
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
+
     if (isOpen) {
+      updatePosition();
       document.addEventListener('mousedown', handleClickOutside);
+      // Lắng nghe sự kiện cuộn ở mọi phần tử cha (bao gồm cả bảng cuộn)
+      window.addEventListener('scroll', updatePosition, { capture: true, passive: true });
+      window.addEventListener('resize', updatePosition);
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', updatePosition, { capture: true });
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen, updatePosition]);
 
   return (
     <div className="action-dropdown-wrap" style={{ position: 'relative', display: 'inline-block' }} ref={menuRef}>
@@ -47,18 +71,21 @@ export default function ActionDropdown({ children }: ActionDropdownProps) {
           className="action-dropdown-list" 
           style={{ 
             position: 'fixed', 
-            top: menuRef.current?.getBoundingClientRect().bottom ? menuRef.current.getBoundingClientRect().bottom + 4 : 0,
-            left: menuRef.current?.getBoundingClientRect().right ? menuRef.current.getBoundingClientRect().right - 140 : 0,
+            top: coords.top,
+            left: coords.left,
+            transform: coords.openUp ? 'translateY(-100%)' : 'none',
             background: 'var(--admin-panel)',
             border: '1px solid var(--admin-border)',
             borderRadius: 0,
             boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)',
             zIndex: 9999,
             minWidth: 140,
+            maxHeight: 240, // Giới hạn chiều cao để bật tính năng cuộn nếu quá dài
+            overflowY: 'auto',
             padding: 4,
             display: 'flex',
             flexDirection: 'column',
-            animation: 'dropdownFadeIn 0.15s ease-out'
+            animation: coords.openUp ? 'dropdownFadeInUp 0.15s ease-out' : 'dropdownFadeIn 0.15s ease-out'
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -73,6 +100,19 @@ export default function ActionDropdown({ children }: ActionDropdownProps) {
         @keyframes dropdownFadeIn {
           from { opacity: 0; transform: translateY(-10px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes dropdownFadeInUp {
+          from { opacity: 0; transform: translateY(calc(-100% + 10px)); }
+          to { opacity: 1; transform: translateY(-100%); }
+        }
+        /* Custom scrollbar cho ActionDropdown */
+        .action-dropdown-list::-webkit-scrollbar {
+          width: 4px;
+          height: 4px;
+        }
+        .action-dropdown-list::-webkit-scrollbar-thumb {
+          background: var(--admin-scrollbar);
+          border-radius: 2px;
         }
       `}</style>
     </div>
