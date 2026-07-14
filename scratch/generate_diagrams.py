@@ -177,9 +177,14 @@ draw.line([100, 360, 280, 262], fill=BORDER_COLOR, width=1)
 draw.line([100, 360, 280, 332], fill=BORDER_COLOR, width=1)
 
 # Right External System
-draw.rectangle([770, 220, 890, 300], fill=BOX_BG, outline=BORDER_COLOR, width=2)
-draw.text((782, 240), "Hệ thống\nTrạm Tổng\n(Central API)", fill=TEXT_COLOR, font=font_bold)
-draw.line([620, 332, 770, 260], fill=BORDER_COLOR, width=1)
+draw.rectangle([760, 220, 900, 300], fill=BOX_BG, outline=BORDER_COLOR, width=2)
+lines_ext = ["Hệ thống", "Trạm Trung tâm", "(Central API)"]
+yy_ext = 230
+for line_ext in lines_ext:
+    w_ext = draw.textlength(line_ext, font=font_bold)
+    draw.text((830 - w_ext/2, yy_ext), line_ext, fill=TEXT_COLOR, font=font_bold)
+    yy_ext += 20
+draw.line([620, 332, 760, 260], fill=BORDER_COLOR, width=1)
 
 img.save(os.path.join(output_dir, "usecase_diagram.png"))
 
