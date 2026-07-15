@@ -48,7 +48,8 @@ export default function RealtimeMonitorPage() {
   const [expandedProvinces, setExpandedProvinces] = useState<Record<string, boolean>>({});
   const [expandedStations, setExpandedStations] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isPopout = new URLSearchParams(window.location.search).get('popout') === 'true';
+  const [sidebarOpen, setSidebarOpen] = useState(!isPopout);
 
   // States for grid layout dropdown selector
   const [showGridDropdown, setShowGridDropdown] = useState(false);
@@ -1406,215 +1407,217 @@ export default function RealtimeMonitorPage() {
     <div className="rtm-page">
 
       {/* ── Toolbar ── */}
-      <div className="page-toolbar-row dash-header">
-        <div className="page-title-cell">
-          <h2>GIÁM SÁT CAMERA TRỰC TIẾP</h2>
-        </div>
+      {!isPopout && (
+        <div className="page-toolbar-row dash-header">
+          <div className="page-title-cell">
+            <h2>GIÁM SÁT CAMERA TRỰC TIẾP</h2>
+          </div>
 
-        <div className="page-toolbar-group">
-          {!isCentralFleetView && (
-            <>
-              {/* Single Unified Grid & Presets Dropdown */}
-              <div style={{ position: 'relative' }} ref={dropdownRef}>
-                <button
-                  className={`nvr-lb ${showGridDropdown ? 'active' : ''}`}
-                  onClick={() => setShowGridDropdown(prev => !prev)}
-                  title="Cấu hình bố cục & mẫu giám sát"
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: 'auto', padding: '0 12px', fontSize: 11, fontWeight: 700 }}
-                >
-                  <LayoutGrid size={14} />
-                  <span>BỐ CỤC ({gridCols}×{gridRows})</span>
-                  <ChevronDown size={12} style={{ transform: showGridDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
+          <div className="page-toolbar-group">
+            {!isCentralFleetView && (
+              <>
+                {/* Single Unified Grid & Presets Dropdown */}
+                <div style={{ position: 'relative' }} ref={dropdownRef}>
+                  <button
+                    className={`nvr-lb ${showGridDropdown ? 'active' : ''}`}
+                    onClick={() => setShowGridDropdown(prev => !prev)}
+                    title="Cấu hình bố cục & mẫu giám sát"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, width: 'auto', padding: '0 12px', fontSize: 11, fontWeight: 700 }}
+                  >
+                    <LayoutGrid size={14} />
+                    <span>BỐ CỤC ({gridCols}×{gridRows})</span>
+                    <ChevronDown size={12} style={{ transform: showGridDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                  </button>
 
-                {showGridDropdown && (
-                  <div className="rtm-grid-dropdown" style={{ width: 310 }}>
-                    {/* Quick Section */}
-                    <div className="rtm-dropdown-section">
-                      <div className="rtm-dropdown-section-title">BỐ CỤC NHANH</div>
-                      <div className="rtm-quick-grid">
-                        {([
-                          [1, 1], [2, 1], [2, 2], [3, 2],
-                          [4, 2], [3, 3], [4, 3], [5, 3],
-                          [4, 4], [5, 4], [6, 4], [6, 5]
-                        ] as [number, number][]).map(([c, r]) => (
-                          <button
-                            key={`${c}x${r}`}
-                            className={`rtm-quick-btn ${gridCols === c && gridRows === r ? 'active' : ''}`}
-                            onClick={() => {
-                              changeGridSize(c, r);
-                              setShowGridDropdown(false);
-                            }}
-                          >
-                            {c}×{r}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Interactive Selection Grid */}
-                    <div className="rtm-dropdown-section">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span className="rtm-dropdown-section-title">CHỌN Ô LƯỚI</span>
-                        <span className="rtm-dropdown-info">
-                          {hoveredCol !== null && hoveredRow !== null 
-                            ? `${hoveredCol + 1}×${hoveredRow + 1} (${(hoveredCol + 1) * (hoveredRow + 1)} Ô)`
-                            : `${gridCols}×${gridRows} (${gridCols * gridRows} Ô)`
-                          }
-                        </span>
-                      </div>
-                      <div 
-                        className="rtm-hover-grid-container"
-                        onMouseLeave={() => {
-                          setHoveredCol(null);
-                          setHoveredRow(null);
-                        }}
-                      >
-                        {Array.from({ length: 6 }).map((_, rIdx) => (
-                          <div key={rIdx} className="rtm-hover-grid-row">
-                            {Array.from({ length: 8 }).map((_, cIdx) => {
-                              const isHovered = hoveredCol !== null && hoveredRow !== null && cIdx <= hoveredCol && rIdx <= hoveredRow;
-                              const isSelected = hoveredCol === null && cIdx < gridCols && rIdx < gridRows;
-                              return (
-                                <div
-                                  key={cIdx}
-                                  className={`rtm-hover-grid-cell ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
-                                  onMouseEnter={() => {
-                                    setHoveredCol(cIdx);
-                                    setHoveredRow(rIdx);
-                                  }}
-                                  onClick={() => {
-                                    changeGridSize(cIdx + 1, rIdx + 1);
-                                    setShowGridDropdown(false);
-                                  }}
-                                />
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Custom Input Section */}
-                    <div className="rtm-dropdown-section">
-                      <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>NHẬP TÙY CHỈNH</div>
-                      <div className="rtm-custom-inputs">
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          value={customCols}
-                          onChange={(e) => setCustomCols(e.target.value)}
-                          className="rtm-custom-input-field"
-                        />
-                        <span style={{ color: 'var(--admin-text-muted)', fontSize: 10 }}>×</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          value={customRows}
-                          onChange={(e) => setCustomRows(e.target.value)}
-                          className="rtm-custom-input-field"
-                        />
-                        <button
-                          className="rtm-custom-apply-btn"
-                          onClick={() => {
-                            const c = parseInt(customCols, 10);
-                            const r = parseInt(customRows, 10);
-                            if (c > 0 && r > 0) {
-                              changeGridSize(c, r);
-                              setShowGridDropdown(false);
-                            }
-                          }}
-                        >
-                          ÁP DỤNG
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Presets Section */}
-                    <div className="rtm-dropdown-section" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-                      <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>MẪU BỐ CỤC (PRESETS)</div>
-                      <div className="rtm-presets-save" style={{ marginTop: 0, display: 'flex', gap: 6 }}>
-                        <input
-                          type="text"
-                          className="rtm-preset-input"
-                          placeholder="Tên mẫu..."
-                          value={presetInput}
-                          onChange={(e) => setPresetInput(e.target.value)}
-                          style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--admin-border)', borderRadius: 0, color: '#fff', padding: '0 8px', fontSize: 11, height: 28 }}
-                        />
-                        <button 
-                          className="rtm-preset-btn" 
-                          onClick={handleSavePreset}
-                          style={{ height: 28, borderRadius: 0, background: 'var(--admin-accent)', border: 'none', color: 'var(--admin-text-on-accent)', fontSize: 11, fontWeight: 'bold', padding: '0 12px', cursor: 'pointer' }}
-                        >
-                          Lưu
-                        </button>
-                      </div>
-                      {presets.length > 0 && (
-                        <div className="rtm-presets-list" style={{ marginTop: 10, maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {presets.map(p => (
-                            <div 
-                              key={p.id} 
-                              className="rtm-preset-item"
+                  {showGridDropdown && (
+                    <div className="rtm-grid-dropdown" style={{ width: 310 }}>
+                      {/* Quick Section */}
+                      <div className="rtm-dropdown-section">
+                        <div className="rtm-dropdown-section-title">BỐ CỤC NHANH</div>
+                        <div className="rtm-quick-grid">
+                          {([
+                            [1, 1], [2, 1], [2, 2], [3, 2],
+                            [4, 2], [3, 3], [4, 3], [5, 3],
+                            [4, 4], [5, 4], [6, 4], [6, 5]
+                          ] as [number, number][]).map(([c, r]) => (
+                            <button
+                              key={`${c}x${r}`}
+                              className={`rtm-quick-btn ${gridCols === c && gridRows === r ? 'active' : ''}`}
                               onClick={() => {
-                                handleLoadPreset(p);
+                                changeGridSize(c, r);
                                 setShowGridDropdown(false);
                               }}
-                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 0, cursor: 'pointer', transition: 'all 0.15s' }}
-                              onMouseEnter={e => { e.currentTarget.style.background = 'var(--admin-hover)'; e.currentTarget.style.borderColor = 'var(--admin-accent)'; }}
-                              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'; }}
                             >
-                              <span style={{ fontSize: 11, color: 'var(--admin-text)', fontWeight: 600 }}>{p.name} ({p.gridCols || p.gridSize}×{p.gridRows || p.gridSize})</span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <button
-                                  className="rtm-preset-popout"
-                                  onClick={(e) => openPresetInPopout(e, p.id)}
-                                  title="Mở mẫu này trong cửa sổ mới"
-                                  style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
-                                  onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-accent)'}
-                                  onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
-                                >
-                                  <ExternalLink size={12} />
-                                </button>
-                                <button 
-                                  className="rtm-preset-del" 
-                                  onClick={(e) => handleDeletePreset(e, p.id)}
-                                  title="Xóa mẫu"
-                                  style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
-                                  onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-danger)'}
-                                  onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
+                              {c}×{r}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Interactive Selection Grid */}
+                      <div className="rtm-dropdown-section">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span className="rtm-dropdown-section-title">CHỌN Ô LƯỚI</span>
+                          <span className="rtm-dropdown-info">
+                            {hoveredCol !== null && hoveredRow !== null 
+                              ? `${hoveredCol + 1}×${hoveredRow + 1} (${(hoveredCol + 1) * (hoveredRow + 1)} Ô)`
+                              : `${gridCols}×${gridRows} (${gridCols * gridRows} Ô)`
+                            }
+                          </span>
+                        </div>
+                        <div 
+                          className="rtm-hover-grid-container"
+                          onMouseLeave={() => {
+                            setHoveredCol(null);
+                            setHoveredRow(null);
+                          }}
+                        >
+                          {Array.from({ length: 6 }).map((_, rIdx) => (
+                            <div key={rIdx} className="rtm-hover-grid-row">
+                              {Array.from({ length: 8 }).map((_, cIdx) => {
+                                const isHovered = hoveredCol !== null && hoveredRow !== null && cIdx <= hoveredCol && rIdx <= hoveredRow;
+                                const isSelected = hoveredCol === null && cIdx < gridCols && rIdx < gridRows;
+                                return (
+                                  <div
+                                    key={cIdx}
+                                    className={`rtm-hover-grid-cell ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
+                                    onMouseEnter={() => {
+                                      setHoveredCol(cIdx);
+                                      setHoveredRow(rIdx);
+                                    }}
+                                    onClick={() => {
+                                      changeGridSize(cIdx + 1, rIdx + 1);
+                                      setShowGridDropdown(false);
+                                    }}
+                                  />
+                                );
+                              })}
                             </div>
                           ))}
                         </div>
-                      )}
-                    </div>
+                      </div>
 
+                      {/* Custom Input Section */}
+                      <div className="rtm-dropdown-section">
+                        <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>NHẬP TÙY CHỈNH</div>
+                        <div className="rtm-custom-inputs">
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={customCols}
+                            onChange={(e) => setCustomCols(e.target.value)}
+                            className="rtm-custom-input-field"
+                          />
+                          <span style={{ color: 'var(--admin-text-muted)', fontSize: 10 }}>×</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={customRows}
+                            onChange={(e) => setCustomRows(e.target.value)}
+                            className="rtm-custom-input-field"
+                          />
+                          <button
+                            className="rtm-custom-apply-btn"
+                            onClick={() => {
+                              const c = parseInt(customCols, 10);
+                              const r = parseInt(customRows, 10);
+                              if (c > 0 && r > 0) {
+                                changeGridSize(c, r);
+                                setShowGridDropdown(false);
+                              }
+                            }}
+                          >
+                            ÁP DỤNG
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Presets Section */}
+                      <div className="rtm-dropdown-section" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+                        <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>MẪU BỐ CỤC (PRESETS)</div>
+                        <div className="rtm-presets-save" style={{ marginTop: 0, display: 'flex', gap: 6 }}>
+                          <input
+                            type="text"
+                            className="rtm-preset-input"
+                            placeholder="Tên mẫu..."
+                            value={presetInput}
+                            onChange={(e) => setPresetInput(e.target.value)}
+                            style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--admin-border)', borderRadius: 0, color: '#fff', padding: '0 8px', fontSize: 11, height: 28 }}
+                          />
+                          <button 
+                            className="rtm-preset-btn" 
+                            onClick={handleSavePreset}
+                            style={{ height: 28, borderRadius: 0, background: 'var(--admin-accent)', border: 'none', color: 'var(--admin-text-on-accent)', fontSize: 11, fontWeight: 'bold', padding: '0 12px', cursor: 'pointer' }}
+                          >
+                            Lưu
+                          </button>
+                        </div>
+                        {presets.length > 0 && (
+                          <div className="rtm-presets-list" style={{ marginTop: 10, maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {presets.map(p => (
+                              <div 
+                                key={p.id} 
+                                className="rtm-preset-item"
+                                onClick={() => {
+                                  handleLoadPreset(p);
+                                  setShowGridDropdown(false);
+                                }}
+                                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 0, cursor: 'pointer', transition: 'all 0.15s' }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'var(--admin-hover)'; e.currentTarget.style.borderColor = 'var(--admin-accent)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'; }}
+                              >
+                                <span style={{ fontSize: 11, color: 'var(--admin-text)', fontWeight: 600 }}>{p.name} ({p.gridCols || p.gridSize}×{p.gridRows || p.gridSize})</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <button
+                                    className="rtm-preset-popout"
+                                    onClick={(e) => openPresetInPopout(e, p.id)}
+                                    title="Mở mẫu này trong cửa sổ mới"
+                                    style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
+                                    onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-accent)'}
+                                    onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
+                                  >
+                                    <ExternalLink size={12} />
+                                  </button>
+                                  <button 
+                                    className="rtm-preset-del" 
+                                    onClick={(e) => handleDeletePreset(e, p.id)}
+                                    title="Xóa mẫu"
+                                    style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
+                                    onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-danger)'}
+                                    onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  )}
+                </div>
+
+                {expandedCamId && (
+                  <div className="nvr-back-btn visible" onClick={() => toggleExpand(expandedCamId)}>
+                    ← Quay về lưới
                   </div>
                 )}
-              </div>
-
-              {expandedCamId && (
-                <div className="nvr-back-btn visible" onClick={() => toggleExpand(expandedCamId)}>
-                  ← Quay về lưới
-                </div>
-              )}
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Main Area ── */}
       <div className="rtm-main" style={{ position: 'relative', display: 'flex', overflow: 'hidden' }}>
-        {sidebarOpen && renderSidebar()}
+        {!isPopout && sidebarOpen && renderSidebar()}
 
         {/* Floating Sidebar Toggle Tab */}
-        {!isCentralFleetView && (
+        {!isCentralFleetView && !isPopout && (
           <button 
             className="rtm-sidebar-toggle-tab"
             onClick={() => setSidebarOpen(!sidebarOpen)}
