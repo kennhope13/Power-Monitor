@@ -6,7 +6,7 @@
 // ============================================================
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Map as MapIcon, AlertTriangle, Activity, Server, CheckCircle, Video, Radio, ShieldCheck, Clock, Search } from 'lucide-react';
+import { Map as MapIcon, AlertTriangle, Activity, Server, CheckCircle, Video, Radio, ShieldCheck, Clock, Search, LayoutGrid, ChevronDown, ChevronLeft, ExternalLink, Trash2 } from 'lucide-react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import { stationApi, CameraDevice, RoiPoint, Boundary } from '@/services/StationApiService';
 import { GO2RTC_URL, AI_ENGINE_URL, API_BASE_URL } from '@/utils/env';
@@ -19,16 +19,44 @@ import { ALERT_STATUS } from '@/types/enums';
 import { Device } from '@/types/api.types';
 import './RealtimeMonitorPage.css';
 
-type Layout = 'l1' | 'l4' | 'l9';
-
 /**
  * Trang giám sát camera trực tiếp — hiển thị lưới stream WebRTC với overlay nhiệt/PD,
  * bảng sự kiện AI theo thời gian thực và đồng hồ trạng thái thiết bị.
  */
 export default function RealtimeMonitorPage() {
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
-  const [layout, setLayout] = useState<Layout>('l4');
-  const [selectedCamFilter, setSelectedCamFilter] = useState('');
+  const [gridCols, setGridCols] = useState<number>(() => {
+    const saved = localStorage.getItem('rtm_grid_cols');
+    return saved ? parseInt(saved, 10) : 2;
+  });
+  const [gridRows, setGridRows] = useState<number>(() => {
+    const saved = localStorage.getItem('rtm_grid_rows');
+    return saved ? parseInt(saved, 10) : 2;
+  });
+  const gridSize = Math.max(gridCols, gridRows);
+  const [selectedCellIdx, setSelectedCellIdx] = useState<number | null>(0);
+  const [gridAssignments, setGridAssignments] = useState<Record<number, string | null>>({});
+  const [presets, setPresets] = useState<{
+    id: string;
+    name: string;
+    gridSize?: number;
+    gridCols?: number;
+    gridRows?: number;
+    assignments: Record<number, string | null>;
+  }[]>([]);
+  const [presetInput, setPresetInput] = useState('');
+  const [expandedProvinces, setExpandedProvinces] = useState<Record<string, boolean>>({});
+  const [expandedStations, setExpandedStations] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // States for grid layout dropdown selector
+  const [showGridDropdown, setShowGridDropdown] = useState(false);
+  const [hoveredCol, setHoveredCol] = useState<number | null>(null);
+  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+  const [customCols, setCustomCols] = useState<string>('2');
+  const [customRows, setCustomRows] = useState<string>('2');
+  const dropdownRef = useRef<HTMLDivElement>(null);
   
   const [expandedCamId, setExpandedCamId] = useState<string | null>(null);
   
@@ -66,7 +94,7 @@ export default function RealtimeMonitorPage() {
 
   const expandCameraVariants = (cams: CameraDevice[], stationName?: string) => {
     const initialStatus: Record<string, string> = {};
-    cams.forEach(c => initialStatus[c.id.toLowerCase()] = c.status || 'unknown');
+    cams.forEach(c => initialStatus[c.id.toLowerCase()] = (c.status || 'unknown').toLowerCase());
 
     const expandedCams: CameraDevice[] = [];
     cams.forEach(c => {
@@ -193,6 +221,64 @@ export default function RealtimeMonitorPage() {
     }).catch(console.error);
   }, [stations, fetchDevices, fetchAlerts, getFirstStationId]);
 
+  // Load presets on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('rtm_presets');
+      if (stored) {
+        setPresets(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error('Failed to load presets', e);
+    }
+  }, []);
+
+  // Check for preset query parameter to auto-load preset
+  useEffect(() => {
+    if (presets.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const presetId = params.get('preset');
+    if (presetId) {
+      const found = presets.find(p => p.id === presetId);
+      if (found) {
+        const cols = found.gridCols || found.gridSize || 2;
+        const rows = found.gridRows || found.gridSize || 2;
+        setGridCols(cols);
+        setGridRows(rows);
+        setGridAssignments(found.assignments);
+        setSelectedCellIdx(0);
+      }
+    }
+  }, [presets]);
+
+  // Click outside to close dropdown hook
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowGridDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  // Auto assign cameras to grid cells on initial load
+  useEffect(() => {
+    if (cameras.length > 0 && Object.keys(gridAssignments).length === 0) {
+      const initial: Record<number, string | null> = {};
+      const count = gridCols * gridRows;
+      for (let i = 0; i < count; i++) {
+        const cam = cameras[i];
+        if (cam) {
+          initial[i] = cam.id;
+        } else {
+          initial[i] = null;
+        }
+      }
+      setGridAssignments(initial);
+    }
+  }, [cameras, gridCols, gridRows]);
+
   // 2. Periodic ROI/PD Boundary Refresh
   useEffect(() => {
     if (cameras.length === 0) return;
@@ -256,7 +342,7 @@ export default function RealtimeMonitorPage() {
   useEffect(() => {
     const hubConnection = getRealtimeHub();
     hubConnection.on('DeviceStatus', (data: { deviceId: string; status: string }) => {
-      setDeviceStatus(prev => ({ ...prev, [data.deviceId.toLowerCase()]: data.status }));
+      setDeviceStatus(prev => ({ ...prev, [data.deviceId.toLowerCase()]: data.status.toLowerCase() }));
     });
     
     hubConnection.on('SensorUpdate', (data: any[]) => {
@@ -284,8 +370,6 @@ export default function RealtimeMonitorPage() {
   }, []);
 
   // Helpers
-  const cellCount = layout === 'l1' ? 1 : layout === 'l4' ? 4 : 9;
-  const displayCams = selectedCamFilter ? cameras.filter(c => c.id === selectedCamFilter) : cameras;
   const isCentralFleetView = false;
   const stationCameraStats = useMemo(() => {
     const grouped = new Map<string, {
@@ -786,15 +870,212 @@ export default function RealtimeMonitorPage() {
     });
   };
 
+  // Helper to extract province
+  const getProvinceOfStation = (stationName: string) => {
+    const st = stations.find(s => s.name.toLowerCase() === stationName.toLowerCase());
+    if (st && st.location) {
+      try {
+        const loc = JSON.parse(st.location);
+        if (loc.address) {
+          const addr = loc.address.toLowerCase();
+          if (addr.includes('hà nội') || addr.includes('ha noi')) return 'Hà Nội';
+          if (addr.includes('hồ chí minh') || addr.includes('ho chi minh') || addr.includes('tphcm') || addr.includes('hcm')) return 'TP. Hồ Chí Minh';
+          if (addr.includes('đà nẵng') || addr.includes('da nang')) return 'Đà Nẵng';
+          if (addr.includes('hải phòng') || addr.includes('hai phong')) return 'Hải Phòng';
+          if (addr.includes('cần thơ') || addr.includes('can tho')) return 'Cần Thơ';
+          
+          const parts = loc.address.split(',');
+          if (parts.length > 0) {
+            const last = parts[parts.length - 1].trim();
+            if (last) return last;
+          }
+        }
+      } catch (e) {}
+    }
+    if (stationName.toLowerCase().includes('hà nội') || stationName.toLowerCase().includes('hn')) return 'Hà Nội';
+    if (stationName.toLowerCase().includes('hồ chí minh') || stationName.toLowerCase().includes('hcm')) return 'TP. Hồ Chí Minh';
+    if (stationName.toLowerCase().includes('đà nẵng') || stationName.toLowerCase().includes('dn')) return 'Đà Nẵng';
+    return 'Miền Bắc'; // Default region fallback
+  };
+
+  const filteredCameras = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+
+    return cameras.filter(cam => {
+      const stationName = (cam as any).stationName || 'Không rõ trạm';
+      const province = getProvinceOfStation(stationName);
+
+      return !q || 
+        cam.name.toLowerCase().includes(q) || 
+        stationName.toLowerCase().includes(q) || 
+        province.toLowerCase().includes(q);
+    });
+  }, [cameras, searchQuery, stations]);
+
+  const handleAssignCamera = (camId: string, idx: number) => {
+    setGridAssignments(prev => ({
+      ...prev,
+      [idx]: camId
+    }));
+  };
+
+  const changeGridSize = (cols: number, rows: number) => {
+    setGridCols(cols);
+    setGridRows(rows);
+    localStorage.setItem('rtm_grid_cols', String(cols));
+    localStorage.setItem('rtm_grid_rows', String(rows));
+    if (selectedCellIdx !== null && selectedCellIdx >= cols * rows) {
+      setSelectedCellIdx(0);
+    }
+  };
+
+
+
+  const openPresetInPopout = (e: React.MouseEvent, presetId: string) => {
+    e.stopPropagation();
+    window.open(
+      window.location.pathname + `?popout=true&preset=${presetId}`,
+      '_blank',
+      'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no,titlebar=no'
+    );
+    setShowGridDropdown(false);
+  };
+
+  const handleSavePreset = () => {
+    const name = presetInput.trim();
+    if (!name) return;
+    const newPreset = {
+      id: `preset-${Date.now()}`,
+      name,
+      gridCols,
+      gridRows,
+      assignments: { ...gridAssignments }
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    localStorage.setItem('rtm_presets', JSON.stringify(updated));
+    setPresetInput('');
+  };
+
+  const handleLoadPreset = (preset: typeof presets[0]) => {
+    const cols = preset.gridCols || preset.gridSize || 2;
+    const rows = preset.gridRows || preset.gridSize || 2;
+    setGridCols(cols);
+    setGridRows(rows);
+    localStorage.setItem('rtm_grid_cols', String(cols));
+    localStorage.setItem('rtm_grid_rows', String(rows));
+    setGridAssignments(preset.assignments);
+    setSelectedCellIdx(0);
+  };
+
+  const handleDeletePreset = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = presets.filter(p => p.id !== id);
+    setPresets(updated);
+    localStorage.setItem('rtm_presets', JSON.stringify(updated));
+  };
+
+  const renderSidebar = () => {
+    const handleDragStart = (e: React.DragEvent, camId: string) => {
+      e.dataTransfer.setData('text/plain', camId);
+    };
+
+    const handleCameraClick = (camId: string) => {
+      if (selectedCellIdx !== null) {
+        handleAssignCamera(camId, selectedCellIdx);
+        setSelectedCellIdx((selectedCellIdx + 1) % (gridCols * gridRows));
+      } else {
+        let targetIdx = 0;
+        for (let i = 0; i < gridCols * gridRows; i++) {
+          if (!gridAssignments[i]) {
+            targetIdx = i;
+            break;
+          }
+        }
+        handleAssignCamera(camId, targetIdx);
+      }
+    };
+
+    return (
+      <div className="rtm-sidebar">
+        <div className="rtm-sidebar-content" style={{ paddingTop: 10 }}>
+          {filteredCameras.length === 0 ? (
+            <div style={{ padding: 12, textAlign: 'center', color: 'var(--admin-text-muted)', fontSize: 11 }}>
+              Không tìm thấy kết quả
+            </div>
+          ) : (
+            filteredCameras.map(cam => {
+              const stationName = (cam as any).stationName || 'Không rõ trạm';
+              const baseId = cam.id.replace(/_(optical|thermal)$/, '').toLowerCase();
+              const status = deviceStatus[baseId] || 'unknown';
+              
+              const getCamIcon = () => {
+                if (cam.type === 'camera_pd') return '⚡';
+                if (cam.type === 'camera_thermal' || cam.id.endsWith('_thermal')) return '🔥';
+                return '📹';
+              };
+
+              return (
+                <div
+                  key={cam.id}
+                  className={`rtm-tree-node rtm-camera-node ${status === 'offline' ? 'offline' : ''}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, cam.id)}
+                  onClick={() => handleCameraClick(cam.id)}
+                  title="Click để gán vào ô đã chọn hoặc kéo-thả vào ô lưới"
+                >
+                  <span>{getCamIcon()}</span>
+                  <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', flex: 1 }} title={cam.name}>
+                    {cam.name.replace(/^hikvision\s*[-–—_]*\s*/i, '').trim()}
+                  </span>
+                  <span className={`nvr-dot ${status}`} style={{ width: 6, height: 6, marginLeft: 'auto', flexShrink: 0 }} />
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  };
+
   /** Render một ô camera trong lưới NVR — bao gồm stream, overlay và HUD. */
   const renderCell = (cam: CameraDevice | undefined, idx: number) => {
     const ch = String(idx + 1).padStart(2, '0');
+    const isSelected = selectedCellIdx === idx;
+    
+    const handleCellClick = () => {
+      setSelectedCellIdx(idx);
+    };
+
+    const handleCellDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      const camId = e.dataTransfer.getData('text/plain');
+      if (camId) {
+        handleAssignCamera(camId, idx);
+      }
+    };
+
+    const handleClearCell = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setGridAssignments(prev => ({
+        ...prev,
+        [idx]: null
+      }));
+    };
+
     if (!cam) {
       return (
-        <div key={`empty-${idx}`} className="nvr-cell">
-          <div className="nvr-nosig">
-            <span className="nvr-nosig-ico"></span>
-            <span className="nvr-nosig-txt">Không có tín hiệu</span>
+        <div 
+          key={`empty-${idx}`} 
+          className={`nvr-cell ${isSelected ? 'selected-cell' : ''}`}
+          onClick={handleCellClick}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleCellDrop}
+        >
+          <div className="nvr-cell-placeholder">
+            <span style={{ fontSize: '24px', opacity: 0.35 }}>📹</span>
+            <span className="nvr-cell-placeholder-txt">Kênh {ch} trống</span>
+            <span className="nvr-cell-placeholder-sub">Kéo thả camera hoặc click chọn để gán</span>
           </div>
           <div className="nvr-ch">CH{ch}</div>
         </div>
@@ -805,10 +1086,23 @@ export default function RealtimeMonitorPage() {
     const go2rtcId = cfg.go2rtc_id || '';
     if (!go2rtcId) {
       return (
-        <div key={cam.id} className="nvr-cell">
+        <div 
+          key={cam.id} 
+          className={`nvr-cell ${isSelected ? 'selected-cell' : ''}`}
+          onClick={handleCellClick}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleCellDrop}
+        >
           <div className="nvr-nosig">
-            <span className="nvr-nosig-ico">️</span>
+            <span className="nvr-nosig-ico">⚠️</span>
             <span className="nvr-nosig-txt">Chưa cấu hình</span>
+            <button 
+              className="nvr-abtn nvr-abtn-clear" 
+              style={{ marginTop: 8, pointerEvents: 'all' }} 
+              onClick={handleClearCell}
+            >
+              Gỡ bỏ
+            </button>
           </div>
           <div className="nvr-ch">CH{ch} · {cam.name}</div>
         </div>
@@ -825,14 +1119,13 @@ export default function RealtimeMonitorPage() {
     const status = deviceStatus[baseDeviceId] || 'unknown';
     
     const isAI = !!aiStreamCells[cam.id];
-    const isOptical = cam.id.endsWith('_optical'); // Nhận diện camera quang học trong bộ đôi
+    const isOptical = cam.id.endsWith('_optical');
 
     const hasAlert = alerts.some(alert => {
       const alertDevId = typeof alert.deviceId === 'string' ? alert.deviceId.toLowerCase() : '';
       if (!alertDevId) return false;
       const baseCamIdLower = cam.id.replace(/_(optical|thermal)$/, '').toLowerCase();
 
-      // 1. Direct match
       if (alertDevId === baseCamIdLower) {
         const alertMsg = typeof alert.message === 'string' ? alert.message.toLowerCase() : '';
         const isThermalAlert = alertMsg.match(/nhiệt|nhiet|roi|thermal|quá nhiệt|qua nhiet|temp/);
@@ -843,7 +1136,6 @@ export default function RealtimeMonitorPage() {
         return true;
       }
 
-      // 2. cabinetId match
       const origCam = devices.find((d: Device) => d.id.toLowerCase() === baseCamIdLower);
       if (origCam) {
         const camCfg = (origCam as any).config || {};
@@ -858,7 +1150,6 @@ export default function RealtimeMonitorPage() {
           return true;
         }
         
-        // 3. zone match fallback
         const camZone = typeof camCfg.zone === 'string' ? camCfg.zone.trim().toLowerCase() : '';
         if (camZone) {
           const alertDev = devices.find((d: Device) => d.id.toLowerCase() === alertDevId);
@@ -881,12 +1172,40 @@ export default function RealtimeMonitorPage() {
     const rawStreamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
     const aiStreamUrl = `${AI_ENGINE_URL}/stream/${activeId}`;
 
+    const readings = roiReadings[baseDeviceId] || {};
+    let maxTemp: number | undefined;
+    Object.values(readings).forEach(val => {
+      if (typeof val === 'number') {
+        if (maxTemp === undefined || val > maxTemp) {
+          maxTemp = val;
+        }
+      }
+    });
+
+    const isThermal = cam.id.endsWith('_thermal') || cam.type === 'camera_thermal';
+    const isPd = cam.type === 'camera_pd';
+    const aiState = aiStatsMap[baseDeviceId] || {};
+    const pdDb = aiState.detection?.db ?? (typeof aiState.db === 'number' ? aiState.db : undefined);
+
+    const overlayStats = (() => {
+      if (isThermal && maxTemp !== undefined) {
+        return `Max: ${maxTemp.toFixed(1)}°C`;
+      }
+      if (isPd && pdDb !== undefined) {
+        return `${pdDb.toFixed(1)} dB`;
+      }
+      return null;
+    })();
+
     return (
       <div 
         key={cam.id} 
-        className={`nvr-cell ${isExpanded ? 'expanded' : ''} ${hasAlert ? 'alarm-triggered' : ''}`} 
+        className={`nvr-cell ${isExpanded ? 'expanded' : ''} ${hasAlert ? 'alarm-triggered' : ''} ${isSelected ? 'selected-cell' : ''}`} 
         style={{ display: (expandedCamId && !isExpanded) ? 'none' : 'block' }}
         onDoubleClick={() => toggleExpand(cam.id)}
+        onClick={handleCellClick}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleCellDrop}
       >
         <div className={`nvr-stream-wrapper ${isOptical ? 'nvr-sync-zoom' : ''}`}>
           {isAI ? (
@@ -919,12 +1238,10 @@ export default function RealtimeMonitorPage() {
                 zIndex: 2
               }}
             >
-              {/* VVR Dashed Bounding Box for Optical Stream */}
               {(() => {
-                const isThermal = cam.id.endsWith('_thermal') || cam.type === 'camera_thermal';
-                if (isThermal) return null;
+                const isThermalCell = cam.id.endsWith('_thermal') || cam.type === 'camera_thermal';
+                if (isThermalCell) return null;
 
-                // Resolve linked thermal camera for CCTV/optical streams
                 let targetCam = cam;
                 let targetBaseDeviceId = cam.id.replace(/_(optical|thermal)$/, '').toLowerCase();
                 if (cam.type !== 'camera_dual' && !cam.id.includes('_optical')) {
@@ -953,7 +1270,6 @@ export default function RealtimeMonitorPage() {
                 const vvr = isFocalEqual ? { x: 0, y: 0, width: 1, height: 1 } : (vvrCache[targetBaseDeviceId]
                   ?? (vvrRaw && typeof vvrRaw.x === 'number' ? vvrRaw : { x: 0.20, y: 0.084, width: 0.63, height: 0.841 }));
                 
-                // Only show dashed box if it's not the full 1:1 view
                 if (vvr.x === 0 && vvr.y === 0 && vvr.width === 1 && vvr.height === 1) return null;
 
                 const pct = (val: number) => `${val * 100}%`;
@@ -978,7 +1294,6 @@ export default function RealtimeMonitorPage() {
               >
                 {renderOverlayBoundaries(cam)}
                 {renderOverlayPdBoundaries(cam)}
-                {/* Marker đốm PD */}
                 {(() => {
                   const baseId = cam.id.replace(/_(optical|thermal)$/, '').toLowerCase();
                   const det = aiStatsMap[baseId]?.detection;
@@ -996,6 +1311,8 @@ export default function RealtimeMonitorPage() {
             </div>
           )}
         </div>
+
+
         
         <div className="nvr-hud-t">
           <div className="nvr-cam-info">
@@ -1057,29 +1374,33 @@ export default function RealtimeMonitorPage() {
             >
               ⛶
             </button>
+            <button 
+              className="nvr-abtn nvr-abtn-clear" 
+              title="Gỡ camera khỏi ô" 
+              onClick={handleClearCell}
+            >
+              🗑️
+            </button>
           </div>
         </div>
       </div>
     );
   };
 
-  /** Phóng to/thu nhỏ ô camera — khi thu nhỏ sẽ reset bộ lọc camera. */
   const toggleExpand = (camId: string) => {
     if (expandedCamId === camId) {
       setExpandedCamId(null);
-      setSelectedCamFilter(''); // Reset filter when un-expanding
     } else {
       setExpandedCamId(camId);
-      setSelectedCamFilter(camId);
     }
   };
 
-  /** Tải ảnh chụp tức thời từ go2rtc về máy người dùng. */
   const takeSnapshot = (srcId: string) => {
     const url = `${GO2RTC_URL}/api/frame.jpeg?src=${encodeURIComponent(srcId)}`;
     Object.assign(document.createElement('a'), { href: url, download: `snap_${Date.now()}.jpg`, target: '_blank' }).click();
   };
 
+  const cellCount = gridCols * gridRows;
 
   return (
     <div className="rtm-page">
@@ -1093,50 +1414,259 @@ export default function RealtimeMonitorPage() {
         <div className="page-toolbar-group">
           {!isCentralFleetView && (
             <>
-          <button className={`nvr-lb ${layout === 'l1' ? 'active' : ''}`} onClick={() => setLayout('l1')} title="1×1">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><rect width="13" height="13" rx="1.5"/></svg>
-          </button>
-          <button className={`nvr-lb ${layout === 'l4' ? 'active' : ''}`} onClick={() => setLayout('l4')} title="2×2">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
-              <rect x="0" y="0" width="5.5" height="5.5" rx=".8"/><rect x="7.5" y="0" width="5.5" height="5.5" rx=".8"/>
-              <rect x="0" y="7.5" width="5.5" height="5.5" rx=".8"/><rect x="7.5" y="7.5" width="5.5" height="5.5" rx=".8"/>
-            </svg>
-          </button>
-          <button className={`nvr-lb ${layout === 'l9' ? 'active' : ''}`} onClick={() => setLayout('l9')} title="3×3">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
-              <rect x="0" y="0" width="3.2" height="3.2" rx=".5"/><rect x="4.9" y="0" width="3.2" height="3.2" rx=".5"/><rect x="9.8" y="0" width="3.2" height="3.2" rx=".5"/>
-              <rect x="0" y="4.9" width="3.2" height="3.2" rx=".5"/><rect x="4.9" y="4.9" width="3.2" height="3.2" rx=".5"/><rect x="9.8" y="4.9" width="3.2" height="3.2" rx=".5"/>
-              <rect x="0" y="9.8" width="3.2" height="3.2" rx=".5"/><rect x="4.9" y="9.8" width="3.2" height="3.2" rx=".5"/><rect x="9.8" y="9.8" width="3.2" height="3.2" rx=".5"/>
-            </svg>
-          </button>
+              {/* Single Unified Grid & Presets Dropdown */}
+              <div style={{ position: 'relative' }} ref={dropdownRef}>
+                <button
+                  className={`nvr-lb ${showGridDropdown ? 'active' : ''}`}
+                  onClick={() => setShowGridDropdown(prev => !prev)}
+                  title="Cấu hình bố cục & mẫu giám sát"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: 'auto', padding: '0 12px', fontSize: 11, fontWeight: 700 }}
+                >
+                  <LayoutGrid size={14} />
+                  <span>BỐ CỤC ({gridCols}×{gridRows})</span>
+                  <ChevronDown size={12} style={{ transform: showGridDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </button>
 
-          <div className="rtm-sep" />
-          <ToolbarSelect
-            value={selectedCamFilter}
-            onChange={v => { setSelectedCamFilter(v); if (v) setLayout('l1'); else setLayout('l4'); }}
-            options={[{ value: '', label: 'Tất cả camera' }, ...cameras.map(c => ({ value: c.id, label: (c as any).stationName ? `${(c as any).stationName} · ${c.name}` : c.name }))]}
-            width={180}
-          />
+                {showGridDropdown && (
+                  <div className="rtm-grid-dropdown" style={{ width: 310 }}>
+                    {/* Quick Section */}
+                    <div className="rtm-dropdown-section">
+                      <div className="rtm-dropdown-section-title">BỐ CỤC NHANH</div>
+                      <div className="rtm-quick-grid">
+                        {([
+                          [1, 1], [2, 1], [2, 2], [3, 2],
+                          [4, 2], [3, 3], [4, 3], [5, 3],
+                          [4, 4], [5, 4], [6, 4], [6, 5]
+                        ] as [number, number][]).map(([c, r]) => (
+                          <button
+                            key={`${c}x${r}`}
+                            className={`rtm-quick-btn ${gridCols === c && gridRows === r ? 'active' : ''}`}
+                            onClick={() => {
+                              changeGridSize(c, r);
+                              setShowGridDropdown(false);
+                            }}
+                          >
+                            {c}×{r}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
-          {expandedCamId && (
-            <div className="nvr-back-btn visible" onClick={() => toggleExpand(expandedCamId)}>
-              ← Quay về lưới
-            </div>
-          )}
+                    {/* Interactive Selection Grid */}
+                    <div className="rtm-dropdown-section">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span className="rtm-dropdown-section-title">CHỌN Ô LƯỚI</span>
+                        <span className="rtm-dropdown-info">
+                          {hoveredCol !== null && hoveredRow !== null 
+                            ? `${hoveredCol + 1}×${hoveredRow + 1} (${(hoveredCol + 1) * (hoveredRow + 1)} Ô)`
+                            : `${gridCols}×${gridRows} (${gridCols * gridRows} Ô)`
+                          }
+                        </span>
+                      </div>
+                      <div 
+                        className="rtm-hover-grid-container"
+                        onMouseLeave={() => {
+                          setHoveredCol(null);
+                          setHoveredRow(null);
+                        }}
+                      >
+                        {Array.from({ length: 6 }).map((_, rIdx) => (
+                          <div key={rIdx} className="rtm-hover-grid-row">
+                            {Array.from({ length: 8 }).map((_, cIdx) => {
+                              const isHovered = hoveredCol !== null && hoveredRow !== null && cIdx <= hoveredCol && rIdx <= hoveredRow;
+                              const isSelected = hoveredCol === null && cIdx < gridCols && rIdx < gridRows;
+                              return (
+                                <div
+                                  key={cIdx}
+                                  className={`rtm-hover-grid-cell ${isHovered ? 'hovered' : ''} ${isSelected ? 'selected' : ''}`}
+                                  onMouseEnter={() => {
+                                    setHoveredCol(cIdx);
+                                    setHoveredRow(rIdx);
+                                  }}
+                                  onClick={() => {
+                                    changeGridSize(cIdx + 1, rIdx + 1);
+                                    setShowGridDropdown(false);
+                                  }}
+                                />
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Custom Input Section */}
+                    <div className="rtm-dropdown-section">
+                      <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>NHẬP TÙY CHỈNH</div>
+                      <div className="rtm-custom-inputs">
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={customCols}
+                          onChange={(e) => setCustomCols(e.target.value)}
+                          className="rtm-custom-input-field"
+                        />
+                        <span style={{ color: 'var(--admin-text-muted)', fontSize: 10 }}>×</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={customRows}
+                          onChange={(e) => setCustomRows(e.target.value)}
+                          className="rtm-custom-input-field"
+                        />
+                        <button
+                          className="rtm-custom-apply-btn"
+                          onClick={() => {
+                            const c = parseInt(customCols, 10);
+                            const r = parseInt(customRows, 10);
+                            if (c > 0 && r > 0) {
+                              changeGridSize(c, r);
+                              setShowGridDropdown(false);
+                            }
+                          }}
+                        >
+                          ÁP DỤNG
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Presets Section */}
+                    <div className="rtm-dropdown-section" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+                      <div className="rtm-dropdown-section-title" style={{ marginBottom: 8 }}>MẪU BỐ CỤC (PRESETS)</div>
+                      <div className="rtm-presets-save" style={{ marginTop: 0, display: 'flex', gap: 6 }}>
+                        <input
+                          type="text"
+                          className="rtm-preset-input"
+                          placeholder="Tên mẫu..."
+                          value={presetInput}
+                          onChange={(e) => setPresetInput(e.target.value)}
+                          style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--admin-border)', borderRadius: 0, color: '#fff', padding: '0 8px', fontSize: 11, height: 28 }}
+                        />
+                        <button 
+                          className="rtm-preset-btn" 
+                          onClick={handleSavePreset}
+                          style={{ height: 28, borderRadius: 0, background: 'var(--admin-accent)', border: 'none', color: 'var(--admin-text-on-accent)', fontSize: 11, fontWeight: 'bold', padding: '0 12px', cursor: 'pointer' }}
+                        >
+                          Lưu
+                        </button>
+                      </div>
+                      {presets.length > 0 && (
+                        <div className="rtm-presets-list" style={{ marginTop: 10, maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {presets.map(p => (
+                            <div 
+                              key={p.id} 
+                              className="rtm-preset-item"
+                              onClick={() => {
+                                handleLoadPreset(p);
+                                setShowGridDropdown(false);
+                              }}
+                              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 0, cursor: 'pointer', transition: 'all 0.15s' }}
+                              onMouseEnter={e => { e.currentTarget.style.background = 'var(--admin-hover)'; e.currentTarget.style.borderColor = 'var(--admin-accent)'; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'; }}
+                            >
+                              <span style={{ fontSize: 11, color: 'var(--admin-text)', fontWeight: 600 }}>{p.name} ({p.gridCols || p.gridSize}×{p.gridRows || p.gridSize})</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <button
+                                  className="rtm-preset-popout"
+                                  onClick={(e) => openPresetInPopout(e, p.id)}
+                                  title="Mở mẫu này trong cửa sổ mới"
+                                  style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
+                                  onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-accent)'}
+                                  onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
+                                >
+                                  <ExternalLink size={12} />
+                                </button>
+                                <button 
+                                  className="rtm-preset-del" 
+                                  onClick={(e) => handleDeletePreset(e, p.id)}
+                                  title="Xóa mẫu"
+                                  style={{ background: 'none', border: 'none', color: 'var(--admin-text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2px 6px' }}
+                                  onMouseEnter={e => e.currentTarget.style.color = 'var(--admin-danger)'}
+                                  onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-muted)'}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+              </div>
+
+              {expandedCamId && (
+                <div className="nvr-back-btn visible" onClick={() => toggleExpand(expandedCamId)}>
+                  ← Quay về lưới
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
 
       {/* ── Main Area ── */}
-      <div className="rtm-main">
-          <div className="nvr-wrap">
-            <div className={`nvr-grid ${layout}`}>
-              {Array.from({ length: cellCount }).map((_, i) => renderCell(displayCams[i], i))}
-            </div>
-          </div>
+      <div className="rtm-main" style={{ position: 'relative', display: 'flex', overflow: 'hidden' }}>
+        {sidebarOpen && renderSidebar()}
 
-        {/* Events Panel — tạm ẩn */}
+        {/* Floating Sidebar Toggle Tab */}
+        {!isCentralFleetView && (
+          <button 
+            className="rtm-sidebar-toggle-tab"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            title={sidebarOpen ? "Ẩn danh sách" : "Hiện danh sách"}
+            style={{
+              position: 'absolute',
+              left: sidebarOpen ? 190 : 0,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 18,
+              height: 48,
+              background: 'var(--admin-panel)',
+              border: '1px solid var(--admin-border)',
+              borderLeft: sidebarOpen ? 'none' : '1px solid var(--admin-border)',
+              borderRadius: '0 6px 6px 0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              zIndex: 300,
+              color: 'rgba(255, 255, 255, 0.6)',
+              transition: 'left 0.1s ease',
+              boxShadow: sidebarOpen ? '2px 0 5px rgba(0,0,0,0.2)' : '2px 0 5px rgba(0,0,0,0.5)'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--admin-accent)'}
+            onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)'}
+          >
+            <ChevronLeft size={14} style={{ transform: sidebarOpen ? 'none' : 'rotate(180deg)' }} />
+          </button>
+        )}
+
+        <div className="nvr-wrap">
+          <div 
+            className="nvr-grid"
+            style={{
+              display: 'grid',
+              gap: '2px',
+              height: '100%',
+              width: '100%',
+              position: 'relative',
+              boxSizing: 'border-box',
+              gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+              gridTemplateRows: `repeat(${gridRows}, 1fr)`
+            }}
+          >
+            {Array.from({ length: cellCount }).map((_, i) => {
+              const camId = gridAssignments[i];
+              const cam = cameras.find(c => c.id === camId);
+              return renderCell(cam, i);
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Lightbox */}

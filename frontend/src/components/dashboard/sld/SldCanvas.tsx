@@ -462,6 +462,10 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       if (!hoveredNodeId || editMode) return null;
       const p = points.find(pt => pt.id === hoveredNodeId);
       if (!p) return null;
+      const pointName = `${p.label || ''} ${p.deviceName || ''}`.toLowerCase();
+      const isCamera = p.deviceType?.startsWith('camera')
+        || /camera|hikvision|quang học/.test(pointName);
+      if (isCamera) return null;
       
       const allDeviceSensors = getDeviceSensors(p.deviceId);
       const { sx, sy } = toScreenPos(p.x, p.y, transform);

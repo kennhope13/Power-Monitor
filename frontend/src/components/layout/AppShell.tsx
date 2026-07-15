@@ -570,6 +570,14 @@ export default function AppShell() {
       });
 
   const themeClass = `theme-${theme}`;
+  const isPopout = new URLSearchParams(location.search).get('popout') === 'true';
+  if (isPopout) {
+    return (
+      <div className={`app-shell admin-container ${themeClass}`} style={{ background: 'var(--admin-bg)', height: '100vh', width: '100vw', padding: 0, margin: 0, overflow: 'hidden' }}>
+        <Outlet />
+      </div>
+    );
+  }
 
   return (
     <div className={`app-shell admin-container ${themeClass}`}>

@@ -1,7 +1,7 @@
 {
     "name": "station-os",
     "private": true,
-    "version": "3.0.52",
+    "version": "3.0.53",
     "license": "UNLICENSED",
     "type": "module",
     "main": "electron/main.cjs",
