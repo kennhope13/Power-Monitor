@@ -6,6 +6,7 @@
 // ============================================================
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Map as MapIcon, AlertTriangle, Activity, Server, CheckCircle, Video, Radio, ShieldCheck, Clock, Search, LayoutGrid, ChevronDown, ChevronLeft, ExternalLink, Trash2 } from 'lucide-react';
 import ToolbarSelect from '@/components/ui/ToolbarSelect';
 import { stationApi, CameraDevice, RoiPoint, Boundary } from '@/services/StationApiService';
@@ -48,7 +49,8 @@ export default function RealtimeMonitorPage() {
   const [expandedProvinces, setExpandedProvinces] = useState<Record<string, boolean>>({});
   const [expandedStations, setExpandedStations] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  const isPopout = new URLSearchParams(window.location.search).get('popout') === 'true';
+  const location = useLocation();
+  const isPopout = new URLSearchParams(location.search).get('popout') === 'true';
   const [sidebarOpen, setSidebarOpen] = useState(!isPopout);
 
   // States for grid layout dropdown selector
@@ -935,7 +937,7 @@ export default function RealtimeMonitorPage() {
   const openPresetInPopout = (e: React.MouseEvent, presetId: string) => {
     e.stopPropagation();
     window.open(
-      window.location.pathname + `?popout=true&preset=${presetId}`,
+      window.location.origin + `/realtime?popout=true&preset=${presetId}`,
       '_blank',
       'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no,titlebar=no'
     );
