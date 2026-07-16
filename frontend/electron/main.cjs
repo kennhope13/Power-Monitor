@@ -935,6 +935,42 @@ ipcMain.handle('save-server-ip', (event, ip) => {
     const filePath = path.join(userData, 'server_ip.json');
     fs.writeFileSync(filePath, JSON.stringify({ ip }));
     log('[IPC] Saved server_ip:', ip);
+
+    // Tự động khởi động lại Backend với IP mới nếu đang chạy trên Windows
+    if (process.platform === 'win32') {
+      const root = findProjectRoot();
+      if (root) {
+        log('[IPC] Đang tắt Backend cũ để áp dụng IP mới...');
+        try {
+          spawnSync('powershell', ['-Command', 'Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }'], { windowsHide: true });
+          spawnSync('taskkill', ['/F', '/IM', 'StationOS.Api.exe', '/T'], { windowsHide: true });
+        } catch (e) {
+          log('[IPC] Lỗi khi tắt Backend cũ:', e.message);
+        }
+
+        let urls = 'http://127.0.0.1:5000';
+        if (ip && ip.trim()) {
+          const bindIp = ip.trim();
+          if (bindIp !== '127.0.0.1' && bindIp !== 'localhost') {
+            urls = `http://127.0.0.1:5000;http://${bindIp}:5000`;
+          }
+        }
+
+        log('[IPC] Khởi chạy lại Backend với URLs:', urls);
+        spawnHiddenWin32(
+          path.join(root, 'backend', 'StationOS.Api.exe'),
+          ['--urls', urls],
+          path.join(root, 'backend'),
+          path.join(userData, 'backend.log'),
+          path.join(userData, 'backend_err.log'),
+          { 
+            PGCLIENTENCODING: 'UTF8',
+            STATIONOS_LICENSE_ROOT: path.join(userData, 'Licenses'),
+            STATIONOS_WEB_ROOT: path.join(userData, 'wwwroot')
+          }
+        );
+      }
+    }
     return true;
   } catch (e) {
     log('[IPC] Error saving server_ip:', e.message);
