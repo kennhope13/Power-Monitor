@@ -185,6 +185,9 @@ export default function GeneralTab() {
       const trimmedStationName = stationName.trim();
 
       localStorage.setItem('server_ip', trimmedServerIp);
+      if ((window as any).electronAPI) {
+        (window as any).electronAPI.invoke('save-server-ip', trimmedServerIp);
+      }
       localStorage.setItem('station_name', trimmedStationName);
 
       await Promise.all([

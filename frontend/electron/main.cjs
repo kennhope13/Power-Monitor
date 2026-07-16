@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const { spawn, spawnSync, execSync }  = require('child_process');
 const path  = require('path');
 const fs    = require('fs');
@@ -381,9 +381,28 @@ async function startAllServices(root) {
     ensureDatabaseExists(pgBinDir);
 
     // ── Bước 5: Khởi động Backend (SAU KHI PostgreSQL sẵn sàng + DB đã tạo) ──
+    // Read saved server_ip from server_ip.json to bind the backend to it in addition to localhost
+    let urls = 'http://127.0.0.1:5000';
+    try {
+      const filePath = path.join(userData, 'server_ip.json');
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(content);
+        if (parsed && parsed.ip && parsed.ip.trim()) {
+          const bindIp = parsed.ip.trim();
+          if (bindIp !== '127.0.0.1' && bindIp !== 'localhost') {
+            urls = `http://127.0.0.1:5000;http://${bindIp}:5000`;
+            log('[Startup] Binding backend to multiple URLs:', urls);
+          }
+        }
+      }
+    } catch (e) {
+      log('[Startup] Error reading server_ip.json:', e.message);
+    }
+
     spawnHiddenWin32(
       path.join(root, 'backend', 'StationOS.Api.exe'),
-      ['--urls', 'http://127.0.0.1:5000'],
+      ['--urls', urls],
       path.join(root, 'backend'),
       path.join(userData, 'backend.log'),
       path.join(userData, 'backend_err.log'),
@@ -735,6 +754,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
 
@@ -907,6 +927,20 @@ async function createWindow() {
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
+
+// Register IPC handler to save server_ip config file
+ipcMain.handle('save-server-ip', (event, ip) => {
+  try {
+    const userData = app.getPath('userData');
+    const filePath = path.join(userData, 'server_ip.json');
+    fs.writeFileSync(filePath, JSON.stringify({ ip }));
+    log('[IPC] Saved server_ip:', ip);
+    return true;
+  } catch (e) {
+    log('[IPC] Error saving server_ip:', e.message);
+    return false;
+  }
+});
 
 // ─────────────────────────────────────────────
 app.whenReady().then(() => {

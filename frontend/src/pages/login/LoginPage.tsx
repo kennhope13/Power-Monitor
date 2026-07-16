@@ -93,6 +93,9 @@ export default function LoginPage() {
     await new Promise(r => setTimeout(r, 600));
 
     localStorage.setItem('server_ip', trimmedIp);
+    if ((window as any).electronAPI) {
+      (window as any).electronAPI.invoke('save-server-ip', trimmedIp);
+    }
     localStorage.setItem('station_name', trimmedStationName);
     window.dispatchEvent(new Event('station-config-updated'));
 
