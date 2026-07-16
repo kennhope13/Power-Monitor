@@ -155,6 +155,13 @@ public sealed record LicenseStatusDto(
     string? BaseLicenseId,
     string? HardwareFingerprint);
 
+public sealed record ManagedQuotaData(
+    [property: System.Text.Json.Serialization.JsonPropertyName("cameras")] int Cameras,
+    [property: System.Text.Json.Serialization.JsonPropertyName("sensors")] int Sensors,
+    [property: System.Text.Json.Serialization.JsonPropertyName("sourceStationId")] Guid? SourceStationId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("sourceStationName")] string? SourceStationName
+);
+
 internal sealed record LegacyLicenseRecord(
     string Key,
     string Tier,

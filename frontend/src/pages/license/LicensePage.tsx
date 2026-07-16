@@ -255,7 +255,13 @@ export default function LicensePage() {
             <>
               <div className="status-row status-row-section">
                 <span>Quyền được cấp</span>
-                <span>{status.source === 'file' ? 'File license' : 'License key'}</span>
+                <span>
+                  {status.source === 'managed' 
+                    ? 'Do Trạm tổng quản lý' 
+                    : status.source === 'file' 
+                      ? 'File license' 
+                      : 'License key'}
+                </span>
               </div>
               <div className="license-limit-grid">
                 <div className="license-limit-item">

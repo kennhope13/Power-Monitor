@@ -316,6 +316,13 @@ public class LicenseService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         db.Licenses.RemoveRange(db.Licenses);
+        
+        var managedQuota = await db.SystemSettings.FirstOrDefaultAsync(s => s.Key == "managed_quota");
+        if (managedQuota != null)
+        {
+            db.SystemSettings.Remove(managedQuota);
+        }
+
         await db.SaveChangesAsync();
 
         if (Directory.Exists(_licenseRoot))
@@ -469,6 +476,51 @@ public class LicenseService
         var actual = _hardware.Build();
         var warnings = new List<string>();
         var usage = await GetLicenseUsageAsync();
+
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var managedQuotaSetting = await db.SystemSettings
+                .FirstOrDefaultAsync(s => s.Key == "managed_quota");
+            if (managedQuotaSetting != null)
+            {
+                try
+                {
+                    var quota = JsonSerializer.Deserialize<ManagedQuotaData>(managedQuotaSetting.Value, JsonOptions);
+                    if (quota != null && quota.Cameras >= 0 && quota.Sensors >= 0)
+                    {
+                        var status = new LicenseStatusDto(
+                            "managed", // Tier
+                            9999, // MaxUsers
+                            Math.Max(quota.Cameras, quota.Sensors), // MaxDevices
+                            quota.Cameras, // MaxCameras
+                            quota.Sensors, // MaxSensors
+                            9999, // MaxRoiPoints
+                            9999, // MaxRoiRegions
+                            9999, // MaxPdRegions
+                            usage.Stations,
+                            usage.Cameras,
+                            usage.Sensors,
+                            DateTime.MaxValue, // ExpiresAt
+                            managedQuotaSetting.UpdatedAt, // ActivatedAt
+                            CountLimitedSessions(),
+                            true, // IsValid
+                            "managed", // Source
+                            "active", // State
+                            $"Quota được quản lý bởi {quota.SourceStationName ?? "Master Station"}", // Message
+                            0, // AddonCount
+                            quota.SourceStationId?.ToString(), // BaseLicenseId
+                            actual.Fingerprint
+                        );
+                        return new LicenseSnapshot(status, DateTime.UtcNow);
+                    }
+                }
+                catch
+                {
+                    // Fallback to file/legacy license if deserialization fails
+                }
+            }
+        }
 
         var basePath = Path.Combine(_licenseRoot, "base.lic");
         if (File.Exists(basePath))
