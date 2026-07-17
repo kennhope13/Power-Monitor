@@ -922,9 +922,31 @@ async function createWindow() {
     log('Renderer gone:', details.reason, details.exitCode);
   });
 
-  // F12 mở/đóng DevTools
-  mainWindow.webContents.on('before-input-event', (_e, input) => {
-    if (input.key === 'F12') mainWindow.webContents.toggleDevTools();
+  // Chặn phím tắt quay lại/tiếp tục/tải lại trang (Back/Forward/Reload) và cho phép F12
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const key = input.key.toLowerCase();
+    
+    // Chặn F5 và Ctrl + R / Ctrl + Shift + R (Reload)
+    if (key === 'f5' || (input.control && key === 'r')) {
+      event.preventDefault();
+    }
+    
+    // Chặn Alt + ArrowLeft / ArrowRight (Back/Forward)
+    if (input.alt && (input.key === 'ArrowLeft' || input.key === 'ArrowRight')) {
+      event.preventDefault();
+    }
+    
+    // F12 mở/đóng DevTools
+    if (input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
+
+  // Chặn nút Back/Forward trên chuột (Mouse 4, Mouse 5)
+  mainWindow.on('app-command', (event, cmd) => {
+    if (cmd === 'browser-backward' || cmd === 'browser-forward') {
+      event.preventDefault();
+    }
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
