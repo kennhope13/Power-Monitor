@@ -11,6 +11,17 @@ import { useNavigate } from 'react-router-dom';
 import { authService } from '@/services/AuthService';
 import './LoginPage.css';
 
+const waitForBackend = async (maxAttempts = 15): Promise<boolean> => {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await fetch('http://127.0.0.1:5000/health', { method: 'GET' });
+      if (res.status === 200) return true;
+    } catch {}
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+};
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('stationadmin');
@@ -92,10 +103,28 @@ export default function LoginPage() {
     // Delay 600ms để tránh cảm giác phản hồi quá nhanh (UX)
     await new Promise(r => setTimeout(r, 600));
 
-    localStorage.setItem('server_ip', trimmedIp);
-    if ((window as any).electronAPI) {
-      (window as any).electronAPI.invoke('save-server-ip', trimmedIp);
+    const oldIp = localStorage.getItem('server_ip') || '';
+    const ipChanged = trimmedIp !== oldIp;
+
+    if (ipChanged) {
+      setErrorMsg('Đang cấu hình lại IP và khởi động lại dịch vụ...');
+      localStorage.setItem('server_ip', trimmedIp);
+      if ((window as any).electronAPI) {
+        await (window as any).electronAPI.invoke('save-server-ip', trimmedIp);
+      }
+      
+      // Đợi backend khởi động lại và phản hồi health check ok
+      const backendReady = await waitForBackend();
+      if (!backendReady) {
+        setLoading(false);
+        setErrorMsg('Không thể kết nối tới Backend sau khi đổi IP. Vui lòng kiểm tra lại.');
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 400);
+        return;
+      }
+      setErrorMsg('');
     }
+
     localStorage.setItem('station_name', trimmedStationName);
     window.dispatchEvent(new Event('station-config-updated'));
 
