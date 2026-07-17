@@ -931,7 +931,7 @@ async function createWindow() {
 }
 
 // Register IPC handler to save server_ip config file
-ipcMain.handle('save-server-ip', (event, ip) => {
+ipcMain.handle('save-server-ip', async (event, ip) => {
   try {
     const userData = app.getPath('userData');
     const filePath = path.join(userData, 'server_ip.json');
@@ -949,6 +949,10 @@ ipcMain.handle('save-server-ip', (event, ip) => {
         } catch (e) {
           log('[IPC] Lỗi khi tắt Backend cũ:', e.message);
         }
+
+        // Đợi 1 giây để Windows giải phóng hoàn toàn cổng 5000
+        log('[IPC] Đang đợi cổng 5000 giải phóng...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         let urls = 'http://127.0.0.1:5000';
         if (ip && ip.trim()) {
