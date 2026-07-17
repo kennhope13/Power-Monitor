@@ -11,6 +11,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using StationOS.Data;
+using StationOS.Data.Entities;
 using StationOS.Services;
 
 namespace StationOS.Api.Controllers;
@@ -20,8 +23,13 @@ namespace StationOS.Api.Controllers;
 public class LicenseController : ControllerBase
 {
     private readonly LicenseService _license;
+    private readonly AppDbContext _db;
 
-    public LicenseController(LicenseService license) => _license = license;
+    public LicenseController(LicenseService license, AppDbContext db)
+    {
+        _license = license;
+        _db = db;
+    }
 
     [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Any)]
     [HttpGet("status")]
@@ -225,6 +233,48 @@ public class LicenseController : ControllerBase
     {
         await _license.ClearAllLicensesAsync();
         return Ok(new { message = "Đã xoá toàn bộ license. Hệ thống sẵn sàng để kích hoạt giftcode mới." });
+    }
+
+    [Authorize(Roles = "admin")]
+    [HttpPost("managed-quota")]
+    public async Task<IActionResult> UpdateManagedQuota([FromBody] ManagedQuotaData req)
+    {
+        if (req.Cameras < 0 || req.Sensors < 0)
+        {
+            return BadRequest(new { message = "Số lượng camera và sensor không được phép âm." });
+        }
+
+        var station = await _db.Stations.FirstOrDefaultAsync();
+        var stationId = station?.Id ?? Guid.Empty;
+
+        var key = "managed_quota";
+        var jsonValue = System.Text.Json.JsonSerializer.Serialize(req);
+
+        var existing = await _db.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == key);
+
+        if (existing == null)
+        {
+            _db.SystemSettings.Add(new SystemSettings
+            {
+                StationId = stationId,
+                Key = key,
+                Value = jsonValue,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+        else
+        {
+            existing.StationId = stationId;
+            existing.Value = jsonValue;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+
+        _license.InvalidateSnapshot();
+
+        return Ok(req);
     }
 }
 
