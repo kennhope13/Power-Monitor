@@ -391,8 +391,10 @@ async function startAllServices(root) {
         if (parsed && parsed.ip && parsed.ip.trim()) {
           const bindIp = parsed.ip.trim();
           if (bindIp !== '127.0.0.1' && bindIp !== 'localhost') {
-            urls = `http://127.0.0.1:5000;http://${bindIp}:5000`;
-            log('[Startup] Binding backend to multiple URLs:', urls);
+            // Thay vì dùng bindIp cụ thể dễ bị crash (SocketException 10049) khi đổi mạng/nhập nhầm,
+            // ta bind thẳng vào 0.0.0.0 để lắng nghe trên tất cả card mạng đang hoạt động.
+            urls = 'http://127.0.0.1:5000;http://0.0.0.0:5000';
+            log('[Startup] Binding backend to multiple URLs (LAN mode):', urls);
           }
         }
       }
@@ -952,7 +954,8 @@ ipcMain.handle('save-server-ip', (event, ip) => {
         if (ip && ip.trim()) {
           const bindIp = ip.trim();
           if (bindIp !== '127.0.0.1' && bindIp !== 'localhost') {
-            urls = `http://127.0.0.1:5000;http://${bindIp}:5000`;
+            // Thay vì dùng bindIp cụ thể dễ bị crash, ta bind vào 0.0.0.0
+            urls = 'http://127.0.0.1:5000;http://0.0.0.0:5000';
           }
         }
 
