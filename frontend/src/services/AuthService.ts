@@ -14,6 +14,38 @@ const API_BASE = `${API_BASE_URL}/api/v1`;
  * Dịch vụ xác thực người dùng — xử lý đăng nhập, đăng xuất và quản lý phiên JWT.
  */
 class AuthService {
+    private buildUserFromToken(token: string, fallbackUsername = ''): User {
+        const base64url = token.split('.')[1] ?? '';
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder('utf-8').decode(jsonBytes));
+
+        return {
+            user_id: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] ?? '',
+            username: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ?? fallbackUsername,
+            fullname: payload['fullName'] ?? fallbackUsername,
+            email: '',
+            role: (payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? 'operator') as UserRole,
+            active: true,
+            created_at: new Date().toISOString(),
+            is_restricted: payload['isRestricted'] === 'true' || !!payload['stationIds'],
+            station_ids: payload['stationIds'] ? payload['stationIds'].split(',') : undefined
+        };
+    }
+
+    /** Dùng khi trạm trung tâm mở trạm cục bộ kèm sẵn JWT token hợp lệ trên URL. */
+    public acceptExternalToken(token: string, refreshToken?: string): boolean {
+        try {
+            const user = this.buildUserFromToken(token);
+            useAuthStore.getState().setSession(user, token, refreshToken);
+            localStorage.setItem('station_token', token);
+            return true;
+        } catch (err) {
+            console.error('[AuthService] acceptExternalToken error:', err);
+            return false;
+        }
+    }
+
     /**
      * Đăng nhập bằng tên đăng nhập và mật khẩu, lưu JWT token vào store và localStorage.
      */
@@ -38,25 +70,7 @@ class AuthService {
 
             const data = await res.json();
             const token: string = data.token ?? '';
-
-            // Decode JWT payload
-            const base64url = token.split('.')[1] ?? '';
-            const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-            const payload = JSON.parse(new TextDecoder('utf-8').decode(jsonBytes));
-            
-            const user: User = {
-                user_id: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] ?? '',
-                username: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ?? username,
-                fullname: payload['fullName'] ?? username,
-                email: '',
-                role: (payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? 'operator') as UserRole,
-                active: true,
-                created_at: new Date().toISOString(),
-                is_restricted: payload['isRestricted'] === 'true' || !!payload['stationIds'],
-                station_ids: payload['stationIds'] ? payload['stationIds'].split(',') : undefined
-            };
-
+            const user = this.buildUserFromToken(token, username);
             const refreshToken = data.refreshToken ?? '';
 
             // Cập nhật Zustand Store
@@ -139,28 +153,7 @@ class AuthService {
 
             const data = await res.json();
             const token: string = data.token ?? '';
-
-            // Decode JWT payload
-            const base64url = token.split('.')[1] ?? '';
-            const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-            const payload = JSON.parse(new TextDecoder('utf-8').decode(jsonBytes));
-            
-            const uName = payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ?? data.user?.username ?? '';
-            const fName = payload['fullName'] ?? data.user?.fullName ?? uName;
-
-            const user: User = {
-                user_id: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] ?? '',
-                username: uName,
-                fullname: fName,
-                email: '',
-                role: (payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? 'operator') as UserRole,
-                active: true,
-                created_at: new Date().toISOString(),
-                is_restricted: payload['isRestricted'] === 'true' || !!payload['stationIds'],
-                station_ids: payload['stationIds'] ? payload['stationIds'].split(',') : undefined
-            };
-
+            const user = this.buildUserFromToken(token, data.user?.username ?? '');
             const newRefreshToken = data.refreshToken ?? '';
 
             // Cập nhật Zustand Store

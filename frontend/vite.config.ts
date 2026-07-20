@@ -53,6 +53,11 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/sld': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+      },
       '/ws': {
         target: 'http://127.0.0.1:5000',
         ws: true,
@@ -87,6 +92,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/media': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/sld': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         secure: false,

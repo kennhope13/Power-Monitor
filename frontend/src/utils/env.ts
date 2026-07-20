@@ -52,6 +52,13 @@ export const GO2RTC_URL: string = (() => {
 const rawApi = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
 /** URL gốc của backend REST API và SignalR — tự thay localhost bằng hostname thực. */
 export const API_BASE_URL: string = (() => {
+  if (typeof window !== 'undefined' && window.location) {
+    const port = window.location.port;
+    if (port === '4173' || port === '5173') {
+      return '';
+    }
+  }
+
   const host = getTargetHostname();
   if (host) {
     return `http://${host}:5000`;

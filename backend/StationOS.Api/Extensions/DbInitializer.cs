@@ -134,9 +134,17 @@ public static class DbInitializer
         // Backfill MaintenanceTasks và Reports chưa có trong SyncQueue
         await BackfillSyncQueueAsync(db);
 
+        var config = services.GetRequiredService<IConfiguration>();
+        var stationIdStr = config["StationId"];
+        Guid? configuredStationId = null;
+        if (Guid.TryParse(stationIdStr, out var parsedStationId))
+        {
+            configuredStationId = parsedStationId;
+        }
+
         await SeedDefaultStationAsync(db);
         await MigrateS7DevicesAsync(db);
-        await SeedDefaultSldAsync(db);
+        await SeedDefaultSldAsync(db, configuredStationId);
 
 
         var authService = services.GetRequiredService<AuthService>();
@@ -596,10 +604,13 @@ public static class DbInitializer
         Console.WriteLine($"[Migrate] Hoàn tất migrate rules. plcDev1={plcDev1?.Id} plcDev2={plcDev2?.Id}");
     }
 
-    private static async Task SeedDefaultSldAsync(AppDbContext db)
+    private static async Task SeedDefaultSldAsync(AppDbContext db, Guid? configuredStationId)
     {
-        // Find the station (TBA-LA01 or TBA-TA01 or any station)
-        var station = await db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-LA01" || s.Code == "TBA-TA01") 
+        // Find the station
+        var station = (configuredStationId.HasValue 
+                          ? await db.Stations.FirstOrDefaultAsync(s => s.Id == configuredStationId.Value) 
+                          : null)
+                      ?? await db.Stations.FirstOrDefaultAsync(s => s.Code == "TBA-LA01" || s.Code == "TBA-TA01") 
                       ?? await db.Stations.FirstOrDefaultAsync();
         
         if (station == null)
@@ -631,12 +642,13 @@ public static class DbInitializer
         }
 
         // Check if active SldFile already exists
-        var activeSld = await db.SldFiles.FirstOrDefaultAsync(f => f.StationId == station.Id && f.IsActive);
+        var sldId = Guid.Parse("12f06284-49c5-439f-8d9d-b085e22be720");
+        var activeSld = await db.SldFiles.FirstOrDefaultAsync(f => f.Id == sldId || (f.StationId == station.Id && f.IsActive));
         if (activeSld == null)
         {
             activeSld = new StationOS.Data.Entities.SldFile
             {
-                Id = Guid.Parse("12f06284-49c5-439f-8d9d-b085e22be720"),
+                Id = sldId,
                 StationId = station.Id,
                 Version = 1,
                 SvgUrl = "/sld/7497ff6f-28c2-47a5-ba28-6b15f8a84c9c.svg",
@@ -646,6 +658,13 @@ public static class DbInitializer
             db.SldFiles.Add(activeSld);
             await db.SaveChangesAsync();
             Console.WriteLine($"[SeedSLD] Đã khởi tạo SldFile mẫu cho trạm {station.Name}");
+        }
+        else if (activeSld.Id == sldId && (activeSld.StationId != station.Id || !activeSld.IsActive))
+        {
+            activeSld.StationId = station.Id;
+            activeSld.IsActive = true;
+            await db.SaveChangesAsync();
+            Console.WriteLine($"[SeedSLD] Đã cập nhật SldFile mẫu cho trạm {station.Name}");
         }
 
         // Find devices

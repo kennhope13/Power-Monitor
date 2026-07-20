@@ -61,6 +61,12 @@ export default function LoginPage() {
     const embedUser = params.get('u');
     const embedPass = params.get('p');
     const nextPath = resolveNextPath();
+    const token = params.get('token');
+
+    if (token && authService.acceptExternalToken(token)) {
+      navigate(nextPath || '/dashboard', { replace: true });
+      return;
+    }
 
     if (authService.isAuthenticated()) {
       navigate(nextPath || '/dashboard', { replace: true });
