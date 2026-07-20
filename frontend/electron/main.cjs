@@ -28,6 +28,40 @@ const preferLocalUi = process.env.STATION_ELECTRON_LOCAL_UI === '1'
   || process.env.STATION_ELECTRON_NO_FRONTEND === '1';
 let forceLocalUi = preferLocalUi;
 
+function readStationConfig() {
+  const userData = app.getPath('userData');
+  let config = { serverIp: '', stationName: '' };
+
+  try {
+    const configPath = path.join(userData, 'station_config.json');
+    if (fs.existsSync(configPath)) {
+      const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      config = {
+        serverIp: typeof saved.serverIp === 'string' ? saved.serverIp.trim() : '',
+        stationName: typeof saved.stationName === 'string' ? saved.stationName.trim() : ''
+      };
+    }
+
+    // Backward compatibility with releases that only persisted the server IP.
+    if (!config.serverIp) {
+      const legacyPath = path.join(userData, 'server_ip.json');
+      if (fs.existsSync(legacyPath)) {
+        const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+        config.serverIp = typeof legacy.ip === 'string' ? legacy.ip.trim() : '';
+      }
+    }
+  } catch (e) {
+    log('[Config] Error reading station config:', e.message);
+  }
+
+  return config;
+}
+
+function writeStationConfig(config) {
+  const filePath = path.join(app.getPath('userData'), 'station_config.json');
+  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+}
+
 function getTargetUrl() {
   return (app.isPackaged || forceLocalUi)
     ? `http://127.0.0.1:${localUiPort ?? 4173}`
@@ -953,6 +987,23 @@ async function createWindow() {
 }
 
 // Register IPC handler to save server_ip config file
+ipcMain.handle('get-station-config', async () => readStationConfig());
+
+ipcMain.handle('save-station-config', async (event, config) => {
+  try {
+    const normalized = {
+      serverIp: typeof config?.serverIp === 'string' ? config.serverIp.trim() : '',
+      stationName: typeof config?.stationName === 'string' ? config.stationName.trim() : ''
+    };
+    writeStationConfig(normalized);
+    log('[IPC] Saved persistent station config');
+    return true;
+  } catch (e) {
+    log('[IPC] Error saving station config:', e.message);
+    return false;
+  }
+});
+
 ipcMain.handle('save-server-ip', async (event, ip) => {
   try {
     const userData = app.getPath('userData');
@@ -1037,4 +1088,3 @@ app.on('before-quit', () => {
     stopAppServices();
   }
 });
-

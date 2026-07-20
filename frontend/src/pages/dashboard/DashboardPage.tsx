@@ -418,6 +418,7 @@ export default function DashboardPage() {
         showLabels={showLabels}
         colorMatrix={sldColorMatrix}
         sensors={sensors}
+        devices={devices}
         rules={rules}
         sensorThresholds={sensorThresholds}
         selectedNodeId={selectedNode?.id}

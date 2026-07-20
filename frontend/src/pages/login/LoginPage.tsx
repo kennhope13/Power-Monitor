@@ -9,6 +9,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '@/services/AuthService';
+import { loadPersistentStationConfig, savePersistentStationConfig } from '@/utils/station-config';
 import './LoginPage.css';
 
 const waitForBackend = async (maxAttempts = 15): Promise<boolean> => {
@@ -36,10 +37,13 @@ export default function LoginPage() {
   const [stationName, setStationName] = useState('');
 
   useEffect(() => {
-    const storedServerIp = localStorage.getItem('server_ip') || '';
-    const storedStationName = localStorage.getItem('station_name') || '';
-    setServerIp(storedServerIp);
-    setStationName(storedStationName);
+    let active = true;
+    loadPersistentStationConfig().then(config => {
+      if (!active) return;
+      setServerIp(config.serverIp);
+      setStationName(config.stationName);
+    });
+    return () => { active = false; };
   }, []);
 
   
@@ -106,9 +110,11 @@ export default function LoginPage() {
     const oldIp = localStorage.getItem('server_ip') || '';
     const ipChanged = trimmedIp !== oldIp;
 
+    // Lưu native trước khi đăng nhập để cấu hình vẫn còn sau khi đóng/cập nhật app.
+    await savePersistentStationConfig({ serverIp: trimmedIp, stationName: trimmedStationName });
+
     if (ipChanged) {
       setErrorMsg('Đang cấu hình lại IP và khởi động lại dịch vụ...');
-      localStorage.setItem('server_ip', trimmedIp);
       if ((window as any).electronAPI) {
         await (window as any).electronAPI.invoke('save-server-ip', trimmedIp);
       }
@@ -125,7 +131,6 @@ export default function LoginPage() {
       setErrorMsg('');
     }
 
-    localStorage.setItem('station_name', trimmedStationName);
     window.dispatchEvent(new Event('station-config-updated'));
 
     const result = await authService.login(username.trim(), password);

@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { stationApi } from '@/services/StationApiService';
-import { SldPoint, SensorPoint, Rule } from '@/types/api.types';
+import { Device, SldPoint, SensorPoint, Rule } from '@/types/api.types';
 import { API_BASE_URL } from '@/utils/env';
 
 interface SldCanvasProps {
@@ -11,6 +11,7 @@ interface SldCanvasProps {
   sensors?: SensorPoint[];
   rules?: Rule[];
   sensorThresholds?: Record<string, { warn: number | null; alarm: number | null }>;
+  devices?: Device[];
   selectedNodeId?: string;
   onNodeSelect?: (point: SldPoint | null) => void;
   onPointsChanged?: () => void;
@@ -53,7 +54,7 @@ const SLD_TOP_OFFSET = 80;
 function getTheme() { return document.documentElement.dataset.theme || 'dark'; }
 
 const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
-  ({ stationId, editMode = false, showLabels = false, colorMatrix, sensors = [], rules = [], sensorThresholds = {}, selectedNodeId, onNodeSelect, onPointsChanged, onNodeDropped }, ref) => {
+  ({ stationId, editMode = false, showLabels = false, colorMatrix, sensors = [], rules = [], sensorThresholds = {}, devices = [], selectedNodeId, onNodeSelect, onPointsChanged, onNodeDropped }, ref) => {
     const viewportRef = useRef<HTMLDivElement>(null);
 
     const [transform, setTransform] = useState({ vs: 1, vx: 0, vy: 0, vr: 0 });
@@ -80,6 +81,17 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
       });
       return m;
     }, [sensors]);
+
+    // Một số backend/bản cài cũ không trả deviceType trong SLD point.
+    // Dùng danh sách thiết bị làm nguồn dự phòng để icon giống nhau trên mọi máy.
+    const deviceTypeById = useMemo(() => {
+      const map = new Map<string, string>();
+      devices.forEach(device => map.set(device.id.toLowerCase(), device.type));
+      return map;
+    }, [devices]);
+
+    const resolveDeviceType = (point: SldPoint) =>
+      point.deviceType || (point.deviceId ? deviceTypeById.get(point.deviceId.toLowerCase()) : undefined);
 
     const transformRef = useRef(transform);
     const pointsRef = useRef<SldPoint[]>([]);
@@ -566,9 +578,10 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
               {points.map(p => {
                 const deviceSensors = getDeviceSensors(p.deviceId);
                 const cfg = { ...DEFAULT_BADGE, ...(badgeCfgs[p.id] || {}) };
-                const isCam = p.deviceType?.startsWith('camera');
+                const deviceType = resolveDeviceType(p);
+                const isCam = deviceType?.startsWith('camera');
                 const camTypeLabel = isCam
-                  ? ({ camera_thermal: 'Nhiệt', camera_pd: 'PD', camera_dual: 'Kép', camera_optical: 'Thường' }[p.deviceType ?? ''] ?? 'Cam')
+                  ? ({ camera_thermal: 'Nhiệt', camera_pd: 'PD', camera_dual: 'Kép', camera_optical: 'Thường' }[deviceType ?? ''] ?? 'Cam')
                   : null;
                 const label = p.label || (isCam ? camTypeLabel! : deviceSensors.length > 0 ? `${deviceSensors.length} điểm` : '--');
                 const r = isCam ? Math.max(p.r, 5) : p.r;
@@ -577,7 +590,7 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
                 const badgeR = isCam ? r * 0.65 : p.r;
                 const { bx, by } = getBadgeOffset(cfg.pos, transform.vs, badgeR, bw, bh);
                 const isSelected = selectedNodeId === p.id;
-                const dotColor = getDotColor(p.deviceType, p.deviceStatus, p.deviceId, p.pointId);
+                const dotColor = getDotColor(deviceType, p.deviceStatus, p.deviceId, p.pointId);
                 const isAlerted = dotColor !== 'var(--admin-success)' && dotColor !== 'var(--admin-accent)';
                 const badgeTextColor = isAlerted
                   ? dotColor
@@ -585,14 +598,14 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
                 const pid = (p.pointId || '').toLowerCase();
                 const isThermal = pid.includes('nhiet_do') || pid.startsWith('temp');
                 const isPd = pid === 'phong_dien' || pid === 'pd' || (pid.startsWith('pd') && !isThermal);
-                const isPlcAll = p.deviceType === 'plc_s7' && (pid === (p.deviceId || '').toLowerCase());
+                const isPlc = deviceType === 'plc_s7' || deviceType === 'cabinet';
                 const pulsing = !isCam && getDeviceWorstLevel(p.deviceId);
                 // Màu icon cố định — không trùng với màu vàng/cam của sơ đồ
                 const iconColor = isAlerted ? dotColor
                   : isCam ? '#60a5fa'
                   : isThermal ? '#f87171'
                   : isPd ? '#a78bfa'
-                  : isPlcAll ? '#34d399'
+                  : isPlc ? '#34d399'
                   : dotColor;
                 const hitR = Math.max(r * 2.5, 14);
                 return (
@@ -618,6 +631,16 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
                             fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} strokeLinejoin="round" />
                         </g>
                       </g>
+                    ) : isPlc ? (
+                      /* ── PLC chip icon (outline) ── */
+                      <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
+                        <rect x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} rx={0}
+                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
+                        {([-0.4, 0.4] as number[]).flatMap(dy => ([-0.4, 0.4] as number[]).map(dx => (
+                          <circle key={`${dx},${dy}`} cx={p.x + r * dx} cy={p.y + r * dy} r={r * 0.15}
+                            fill="none" stroke={iconColor} strokeWidth={0.8} />
+                        )))}
+                      </g>
                     ) : isThermal ? (
                       /* ── THERMAL icon (outline nhiệt kế) ── */
                       <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
@@ -632,16 +655,6 @@ const SldCanvas = forwardRef<SldCanvasRef, SldCanvasProps>(
                         <polygon
                           points={`${p.x + r * 0.25},${p.y - r} ${p.x - r * 0.15},${p.y + r * 0.05} ${p.x + r * 0.15},${p.y + r * 0.05} ${p.x - r * 0.25},${p.y + r}`}
                           fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} strokeLinejoin="round" />
-                      </g>
-                    ) : isPlcAll ? (
-                      /* ── PLC chip icon (outline) ── */
-                      <g style={pulsing ? { animation: 'sldDotPulse 1.2s ease-in-out infinite' } : undefined}>
-                        <rect x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} rx={r * 0.2}
-                          fill="none" stroke={iconColor} strokeWidth={isSelected ? 1.8 : 1} />
-                        {([-0.4, 0.4] as number[]).flatMap(dy => ([-0.4, 0.4] as number[]).map(dx => (
-                          <circle key={`${dx},${dy}`} cx={p.x + r * dx} cy={p.y + r * dy} r={r * 0.15}
-                            fill="none" stroke={iconColor} strokeWidth={0.8} />
-                        )))}
                       </g>
                     ) : (
                       /* ── DEFAULT dot (outline) ── */

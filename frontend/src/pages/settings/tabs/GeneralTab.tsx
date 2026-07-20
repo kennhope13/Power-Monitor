@@ -13,6 +13,7 @@ import { useState, useEffect } from 'react';
 import { stationApi } from '@/services/StationApiService';
 import { showToast } from '@/utils/toast';
 import { getDisplayStationName, getStoredStationName } from '@/utils/station-setup';
+import { loadPersistentStationConfig, savePersistentStationConfig } from '@/utils/station-config';
 
 export default function GeneralTab() {
   const [plcPoll, setPlcPoll] = useState('5');
@@ -37,7 +38,10 @@ export default function GeneralTab() {
 
   useEffect(() => {
     loadSettings();
-    setServerIp(localStorage.getItem('server_ip') || '');
+    loadPersistentStationConfig().then(config => {
+      setServerIp(config.serverIp);
+      if (config.stationName) setStationName(config.stationName);
+    });
   }, []);
 
   const loadSettings = () => {
@@ -184,11 +188,10 @@ export default function GeneralTab() {
       const trimmedServerIp = serverIp.trim();
       const trimmedStationName = stationName.trim();
 
-      localStorage.setItem('server_ip', trimmedServerIp);
-      if ((window as any).electronAPI) {
-        (window as any).electronAPI.invoke('save-server-ip', trimmedServerIp);
+      await savePersistentStationConfig({ serverIp: trimmedServerIp, stationName: trimmedStationName });
+      if (previousServerIp.trim() !== trimmedServerIp && (window as any).electronAPI) {
+        await (window as any).electronAPI.invoke('save-server-ip', trimmedServerIp);
       }
-      localStorage.setItem('station_name', trimmedStationName);
 
       await Promise.all([
         stationApi.updateSetting('plc_poll_interval_s', plcPoll),
