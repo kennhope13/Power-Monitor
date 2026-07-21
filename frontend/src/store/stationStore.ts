@@ -44,6 +44,12 @@ export const useStationStore = create<StationStore>((set, get) => ({
     inflight = stationService.getStations()
       .then(stations => {
         set({ stations, isLoading: false, lastFetchedAt: Date.now() });
+        if (stations.length > 0 && !localStorage.getItem('selected_station_id')) {
+          const firstId = stations[0]?.id;
+          if (firstId) {
+            localStorage.setItem('selected_station_id', firstId);
+          }
+        }
         return stations;
       })
       .catch(err => {

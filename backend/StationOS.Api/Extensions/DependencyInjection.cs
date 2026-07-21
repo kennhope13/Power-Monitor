@@ -72,6 +72,7 @@ public static class DependencyInjection
         services.AddScoped<StationOS.Services.Recording.EventRecordingService>();
         services.AddSingleton<LicenseService>();          // License key + concurrent sessions
         services.AddSingleton<CredentialEncryptionService>(); // AES-256-GCM cho device password
+        services.AddSingleton<InternalAuthService>();
 
         // ── Background Workers ────────────────────────────────────
         services.AddHostedService<PlcPollingWorker>();

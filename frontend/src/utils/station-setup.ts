@@ -30,7 +30,17 @@ export const getStoredStationName = (): string => {
 
 export const hasStoredServerIp = (): boolean => {
   if (typeof window === 'undefined' || !window.localStorage) return false;
-  return !!window.localStorage.getItem('server_ip')?.trim();
+  
+  if (window.localStorage.getItem('server_ip')?.trim()) return true;
+
+  if (window.location) {
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export const isStationNameConfigured = (name?: string | null): boolean => {

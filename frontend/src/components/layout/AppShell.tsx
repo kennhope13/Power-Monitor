@@ -17,6 +17,7 @@ import { showToast } from '@/utils/toast';
 import { playAlertSound } from '@/utils/sound-utils';
 import { isCentralUser as isCentralUserAccount, MULTISITE_RETURN_TAB_KEY } from '@/utils/centralAccess';
 import { getDisplayStationName, getStoredStationName, hasStoredServerIp } from '@/utils/station-setup';
+import { loadPersistentStationConfig } from '@/utils/station-config';
 import { getRealtimeHub, startRealtimeHub, stopRealtimeHub } from '@/services/realtime.service';
 import RichAlertModal from '@/components/ui/RichAlertModal';
 import {
@@ -75,6 +76,17 @@ export default function AppShell() {
   const location = useLocation();
   const user = useAuthStore(s => s.user);
   const [stationConfigVersion, setStationConfigVersion] = useState(0);
+  const [configLoaded, setConfigLoaded] = useState(false);
+
+  // ── Load Persistent Config ──
+  useEffect(() => {
+    loadPersistentStationConfig()
+      .then(() => {
+        setConfigLoaded(true);
+        window.dispatchEvent(new Event('station-config-updated'));
+      })
+      .catch(() => setConfigLoaded(true));
+  }, []);
 
   // ── Security Check ──
   useEffect(() => {
@@ -172,11 +184,12 @@ export default function AppShell() {
 
   useEffect(() => {
     if (!user || isCentralUser) return;
+    if (!configLoaded) return;
     if (location.pathname.startsWith('/settings')) return;
     if (!hasStoredServerIp()) {
       navigate('/settings?setup=1', { replace: true });
     }
-  }, [user, isCentralUser, location.pathname, navigate]);
+  }, [user, isCentralUser, configLoaded, location.pathname, navigate]);
 
   // Lọc adminNavItems theo quyền:
   // - Restricted admin (khi ở trạm tổng): ẩn settings, license
