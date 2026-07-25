@@ -74,6 +74,7 @@ export default function RealtimeMonitorPage() {
   const [roiBoundaries, setRoiBoundaries] = useState<Record<string, Boundary[]>>({});
   const [roiPoints, setRoiPoints] = useState<Record<string, RoiPoint[]>>({});
   const [roiReadings, setRoiReadings] = useState<Record<string, Record<string, number>>>({});
+  const [forecastReadings, setForecastReadings] = useState<Record<string, Record<string, number>>>({});
   const [pdBoundaries, setPdBoundaries] = useState<Record<string, Boundary[]>>({});
   // VVR mapping cache per device: deviceId → {x, y, width, height}
   const [vvrCache, setVvrCache] = useState<Record<string, {x:number;y:number;width:number;height:number}>>({});
@@ -317,6 +318,167 @@ export default function RealtimeMonitorPage() {
     return () => clearInterval(timer);
   }, [cameras.length]); // Re-run if camera count changes
 
+  // Dữ liệu nhiệt của AI Engine là nguồn đang dùng tại tab Phân tích. Đồng bộ nguồn này
+  // sang Trực tiếp để camera vẫn có nhiệt độ/dự báo khi backend /points hoặc SignalR
+  // chưa nhận được mẫu radiometric.
+  useEffect(() => {
+    const thermalIds = Array.from(new Set(
+      cameras
+        .filter(c => c.type === 'camera_thermal' || c.type === 'camera_dual' || c.id.endsWith('_thermal'))
+        .map(c => c.id.replace(/_(optical|thermal)$/, '').toLowerCase())
+    ));
+    if (thermalIds.length === 0) return;
+
+    const normalizeKey = (value: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[\s_-]/g, '');
+    const canonicalKey = (value: string) => normalizeKey(value)
+      .replace(/^(diem|point|vung|zone)/, '')
+      .replace(/^([dpv])(?=\d)/, '');
+
+    let cancelled = false;
+    const pollAiTemperatures = async () => {
+      const results = await Promise.all(thermalIds.map(async deviceId => {
+        try {
+          const response = await fetch(`${AI_ENGINE_URL}/api/prediction/history?points=60&device_id=${encodeURIComponent(deviceId)}`);
+          if (!response.ok) return null;
+          const payload = await response.json();
+          const history: any[] = Array.isArray(payload?.history) ? payload.history : [];
+          const targets = new Set<string>();
+          history.forEach(row => Object.keys(row || {}).forEach(key => {
+            if (key.endsWith('_actual')) targets.add(key.slice(0, -7));
+            if (key.endsWith('_pred')) targets.add(key.slice(0, -5));
+          }));
+
+          const actual: Record<string, number> = {};
+          const forecast: Record<string, number> = {};
+          targets.forEach(target => {
+            const aliases = [target.toLowerCase(), normalizeKey(target), canonicalKey(target)];
+            for (let i = history.length - 1; i >= 0; i--) {
+              const rawValue = history[i]?.[`${target}_actual`];
+              if (rawValue == null || rawValue === '') continue;
+              const value = Number(rawValue);
+              if (Number.isFinite(value)) { aliases.forEach(k => { if (k) actual[k] = value; }); break; }
+            }
+            for (let i = history.length - 1; i >= 0; i--) {
+              const rawValue = history[i]?.[`${target}_pred`];
+              if (rawValue == null || rawValue === '') continue;
+              const value = Number(rawValue);
+              if (Number.isFinite(value)) { aliases.forEach(k => { if (k) forecast[k] = value; }); break; }
+            }
+          });
+          return { deviceId, actual, forecast };
+        } catch {
+          return null;
+        }
+      }));
+
+      if (cancelled) return;
+      setRoiReadings(prev => {
+        const next = { ...prev };
+        results.forEach(result => {
+          if (!result) return;
+          // SignalR giữ quyền ưu tiên; AI chỉ bổ sung các khóa còn thiếu.
+          next[result.deviceId] = { ...result.actual, ...(next[result.deviceId] || {}) };
+        });
+        return next;
+      });
+      setForecastReadings(prev => {
+        const next = { ...prev };
+        results.forEach(result => { if (result) next[result.deviceId] = result.forecast; });
+        return next;
+      });
+    };
+
+    pollAiTemperatures();
+    const timer = setInterval(pollAiTemperatures, 10000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [cameras]);
+
+  // Đo trực tiếp từ camera radiometric, cùng endpoint với ThermalConfigTab.
+  // Đây là nguồn nhiệt độ chính cho overlay; không phụ thuộc việc SignalR có phát mẫu hay không.
+  useEffect(() => {
+    const deviceIds = Array.from(new Set(cameras
+      .filter(c => c.type === 'camera_thermal' || c.type === 'camera_dual' || c.id.endsWith('_thermal'))
+      .map(c => c.id.replace(/_(optical|thermal)$/, '').toLowerCase())));
+    if (deviceIds.length === 0) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const pollLiveTemps = async () => {
+      await Promise.all(deviceIds.map(async deviceId => {
+        const points = roiPoints[deviceId] || [];
+        const boundaries = roiBoundaries[deviceId] || [];
+        if (points.length === 0 && boundaries.length === 0) return;
+
+        const rois = boundaries.flatMap(boundary => {
+          try {
+            const polygon: [number, number][] = JSON.parse(boundary.polygon);
+            if (polygon.length === 0) return [];
+            return [{
+              id: boundary.id,
+              x1: Math.min(...polygon.map(p => p[0])),
+              y1: Math.min(...polygon.map(p => p[1])),
+              x2: Math.max(...polygon.map(p => p[0])),
+              y2: Math.max(...polygon.map(p => p[1])),
+            }];
+          } catch { return []; }
+        });
+
+        try {
+          const response = await fetch(`/api/v1/devices/${deviceId}/thermal/live-temps`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authService.getToken() ? { Authorization: `Bearer ${authService.getToken()}` } : {}),
+            },
+            body: JSON.stringify({
+              points: points.map(point => ({
+                id: point.id,
+                x: point.tx ?? ((point.x ?? 50) / 100),
+                y: point.ty ?? ((point.y ?? 50) / 100),
+              })),
+              rois,
+            }),
+          });
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (cancelled) return;
+
+          setRoiReadings(prev => {
+            const values = { ...(prev[deviceId] || {}) };
+            (payload.temps || []).forEach((reading: any) => {
+              if (reading.temp == null || reading.temp === '') return;
+              const value = Number(reading.temp);
+              if (!Number.isFinite(value)) return;
+              const point = points.find(p => p.id === reading.id);
+              [reading.id, point?.id, point?.pointId, point?.name, point?.label]
+                .filter(Boolean)
+                .forEach(key => { values[String(key).toLowerCase()] = value; });
+            });
+            (payload.rois || []).forEach((reading: any) => {
+              if (reading.max == null || reading.max === '') return;
+              const value = Number(reading.max);
+              if (!Number.isFinite(value)) return;
+              const boundary = boundaries.find(b => b.id === reading.id);
+              [reading.id, boundary?.id, boundary?.name]
+                .filter(Boolean)
+                .forEach(key => { values[String(key).toLowerCase()] = value; });
+            });
+            return { ...prev, [deviceId]: values };
+          });
+        } catch { /* camera/AI tạm mất kết nối: giữ mẫu gần nhất */ }
+      }));
+      if (!cancelled) timer = setTimeout(pollLiveTemps, 1000);
+    };
+
+    pollLiveTemps();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [cameras, roiPoints, roiBoundaries]);
+
   // 3. AI State Polling (Fast sync for visual feedback)
   useEffect(() => {
     const pdCams = cameras.filter(c => c.type === 'camera_pd');
@@ -504,9 +666,11 @@ export default function RealtimeMonitorPage() {
       const pointsStr = mappedPoly.map(p => `${p[0] * 100},${p[1] * 100}`).join(' ');
 
       const lookupId = b.id.toLowerCase();
+      const normalizedName = (b.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\s_-]/g, '');
+      const canonicalName = normalizedName.replace(/^(diem|point|vung|zone)/, '').replace(/^([dpv])(?=\d)/, '');
       const temp = readings[lookupId] ?? 
                    (b.name ? readings[b.name.toLowerCase()] : undefined) ?? 
-                   readings[`r${index + 1}`];
+                   readings[`r${index + 1}`] ?? readings[normalizedName] ?? readings[canonicalName];
 
       let color = '#3b82f6';
       let warningTemp = 50, alarmTemp = 70, borderWidth = 0.5;
@@ -562,6 +726,7 @@ export default function RealtimeMonitorPage() {
     const points = roiPoints[baseDeviceId] || [];
     const boundaries = roiBoundaries[baseDeviceId] || [];
     const readings = roiReadings[baseDeviceId] || {};
+    const forecasts = forecastReadings[baseDeviceId] || {};
     const aiState = aiStatsMap[baseDeviceId] || {};
 
     const cfg = targetCam.config || {};
@@ -593,9 +758,12 @@ export default function RealtimeMonitorPage() {
       }
 
       const lookupId = b.id.toLowerCase();
+      const normalizedName = (b.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\s_-]/g, '');
+      const canonicalName = normalizedName.replace(/^(diem|point|vung|zone)/, '').replace(/^([dpv])(?=\d)/, '');
       const temp = readings[lookupId] ?? 
                    (b.name ? readings[b.name.toLowerCase()] : undefined) ?? 
-                   readings[`r${index + 1}`];
+                   readings[`r${index + 1}`] ?? readings[normalizedName] ?? readings[canonicalName];
+      const predictedTemp = forecasts[normalizedName] ?? forecasts[canonicalName];
       
       let color = '#3b82f6';
       let warningTemp = 50, alarmTemp = 70;
@@ -653,6 +821,11 @@ export default function RealtimeMonitorPage() {
             <span style={{ fontWeight: 800, color: color, fontSize: '9px', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 4 }}>
               {temp !== undefined ? `${temp.toFixed(1)}°C` : '--°C'}
             </span>
+            {showPredValue && predictedTemp != null && (
+              <span title="Nhiệt độ dự báo" style={{ fontWeight: 700, color: '#93c5fd', fontSize: '9px', borderLeft: '1px solid rgba(255,255,255,0.15)', paddingLeft: 4 }}>
+                → {predictedTemp.toFixed(1)}°C
+              </span>
+            )}
           </div>
         </div>
       );
@@ -674,11 +847,18 @@ export default function RealtimeMonitorPage() {
       const pid = pt.pointId || '';
       const nm  = pt.name || pt.label || '';
       const fallbackP1 = `p${pt.sortOrder || (index + 1)}`;
+      const normalizedAliases = [pid, nm, fallbackP1].filter(Boolean).map(value => value
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\s_-]/g, ''));
+      const canonicalAliases = normalizedAliases.map(value => value
+        .replace(/^(diem|point|vung|zone)/, '').replace(/^([dpv])(?=\d)/, ''));
       const temp =
         (pid ? readings[pid] ?? readings[pid.toLowerCase()] : undefined) ??
         (nm  ? readings[nm]  ?? readings[nm.toLowerCase()]  : undefined) ??
         readings[pt.id] ?? readings[pt.id.toLowerCase()] ??
-        readings[fallbackP1];
+        readings[fallbackP1] ??
+        [...normalizedAliases, ...canonicalAliases].map(key => readings[key]).find(value => value != null);
+      const predictedTemp = [...normalizedAliases, ...canonicalAliases]
+        .map(key => forecasts[key]).find(value => value != null);
 
       const preAlarm = pt.preAlarmThreshold ?? 50;
       const alarmTh  = pt.alarmThreshold   ?? 70;
@@ -713,6 +893,9 @@ export default function RealtimeMonitorPage() {
           <div style={{ position: 'absolute', ...labelStyle, background: 'rgba(8,8,8,.88)', border: `1px solid ${color}55`, borderRadius: 3, padding: '1px 6px', fontSize: 9, fontFamily: 'monospace', whiteSpace: 'nowrap', color: '#fff' }}>
              <span style={{ color: '#ccc' }}>{(pid || nm).replace(/^(Điểm|Point|P|D)\s*/gi, '').replace(/\s+/g, '')}</span>
             {temp != null && <span style={{ fontWeight: 800, color, marginLeft: 4 }}>{temp.toFixed(1)}°C</span>}
+            {showPredValue && predictedTemp != null && (
+              <span title="Nhiệt độ dự báo" style={{ fontWeight: 700, color: '#93c5fd', marginLeft: 4 }}>→ {predictedTemp.toFixed(1)}°C</span>
+            )}
           </div>
         </div>
       );

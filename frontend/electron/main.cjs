@@ -884,6 +884,17 @@ async function createWindow() {
   const targetUrl = getTargetUrl();
   log('targetUrl:', targetUrl, '→ polling...');
 
+  // UI desktop được phục vụ từ dist cục bộ. Xóa cache HTTP và service worker PWA
+  // cũ trước khi mở trang để Electron luôn nạp đúng bundle vừa build/cập nhật.
+  // Không xóa localStorage vì trong đó có trạm đang chọn, preset và tùy chỉnh người dùng.
+  try {
+    await mainWindow.webContents.session.clearCache();
+    await mainWindow.webContents.session.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+    log('[Station Monitor] Đã xóa cache UI và service worker cũ.');
+  } catch (err) {
+    log('[Station Monitor] Không thể xóa cache UI:', err.message);
+  }
+
   // Đợi server lên rồi mở dashboard
   waitForServer(() => {
     log('server ready → loadURL', targetUrl);

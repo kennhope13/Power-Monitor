@@ -255,7 +255,7 @@ export default function AppShell() {
       if (!Array.isArray(openAlerts)) return;
       const unseen = openAlerts.filter(
         a => a.source === 'rule_engine' &&
-          (a.level === 'alarm' || a.level === 'warning') &&
+          (a.level === 'alarm' || a.level === 'danger' || a.message?.toLowerCase().includes('cháy') || a.message?.toLowerCase().includes('lửa') || a.message?.toLowerCase().includes('fire')) &&
           !shownAlertIdsRef.current.has(a.id)
       );
       // Enqueue từng alert chưa xem, delay nhỏ để tránh spam ngay lúc load
@@ -286,9 +286,11 @@ export default function AppShell() {
       const soundLevel: 'warning' | 'alarm' = isAlarm ? 'alarm' : 'warning';
 
       if (!isOverview) {
-        // Nếu ở trang chi tiết: hiện popup cho cả warning và alarm
+        // Chỉ hiện popup cho báo động (alarm). Cảnh báo (warning) không hiện popup.
         playAlertSound(soundLevel);
-        enqueueAlertWithTrack(alert);
+        if (isAlarm) {
+          enqueueAlertWithTrack(alert);
+        }
       } else {
         // Nếu ở trang Tổng quan: hiện toast tương ứng, vẫn có âm thanh nhẹ cho warning
         showToast(alert.message || (isAlarm ? 'Báo động đỏ mới' : 'Cảnh báo mới'), isAlarm ? 'error' : 'info');
@@ -386,6 +388,34 @@ export default function AppShell() {
       stopRealtimeHub();
     };
   }, [fetchAlerts, invalidateAlerts]);
+
+  // Định kỳ 30 giây nhắc lại các báo động chưa tiếp nhận/chưa đóng bằng cách hiện lại popup
+  useEffect(() => {
+    if (!user || isCentralMode) return;
+    
+    const interval = setInterval(() => {
+      fetchAlerts(ALERT_STATUS.OPEN, true).then((openAlerts) => {
+        console.log("[AppShell Interval] Open alerts count:", openAlerts?.length);
+        if (!Array.isArray(openAlerts)) return;
+        
+        const unackedAlarms = openAlerts.filter(
+          a => a.source === 'rule_engine' &&
+            (a.level === 'alarm' || a.level === 'danger' || a.message?.toLowerCase().includes('cháy') || a.message?.toLowerCase().includes('fire') || a.message?.toLowerCase().includes('lửa')) &&
+            a.status === 'open'
+        );
+        console.log("[AppShell Interval] Unacked alarms count:", unackedAlarms.length, unackedAlarms);
+
+        unackedAlarms.forEach((a) => {
+          setAlertQueue(q => {
+            if (q.some(item => item.id === a.id)) return q;
+            return [...q, a];
+          });
+        });
+      }).catch(() => {});
+    }, 30000); // 30 giây check và nhắc lại
+
+    return () => clearInterval(interval);
+  }, [user, isCentralMode, fetchAlerts]);
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);

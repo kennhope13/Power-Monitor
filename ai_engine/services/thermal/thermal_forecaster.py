@@ -180,17 +180,8 @@ def process_thermal_payload(payload: dict, camera_id: Optional[str] = None) -> d
         return {"success": False}
     append_history_row(row, targets, camera_id=camera_id)
     
-    # Re-enable local AI prediction (linear regression)
-    try:
-        prediction = compute_prediction(targets, w_size, hor, camera_id=camera_id)
-        if prediction:
-            save_prediction(prediction, targets, camera_id=camera_id)
-            append_prediction_history(prediction, targets, camera_id=camera_id)
-            logger.info("[Forecaster] Prediction saved for %s (camera: %s)", prediction.get("forecast_timestamp"), camera_id)
-        else:
-            logger.warning("[Forecaster] No prediction generated (not enough data?) for camera %s", camera_id)
-    except Exception as e:
-        logger.error("[Forecaster] Prediction logic failed for camera %s: %s", camera_id, e)
+    # Máy trạm chỉ lưu dữ liệu thực tế. Dự báo chỉ được ghi khi Jetson gửi
+    # vào POST /api/prediction, tránh tự dự báo lúc Jetson mất kết nối.
     
     return {"success": True, "timestamp": row["timestamp"]}
 

@@ -180,6 +180,12 @@ public class StorageMonitorWorker : BackgroundService
                 retentionDays = parsed;
         }
 
+        if (retentionDays <= 0)
+        {
+            _logger.LogInformation("[StorageMonitor] Chế độ lưu trữ Mãi mãi đang bật (retention={Days}). Bỏ qua tự động dọn dẹp.", retentionDays);
+            return;
+        }
+
         var rootPath = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
         var mediaPath = Path.Combine(rootPath, "media");
         if (!Directory.Exists(mediaPath)) return;

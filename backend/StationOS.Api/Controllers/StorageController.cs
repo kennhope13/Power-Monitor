@@ -79,6 +79,17 @@ public class StorageController : ControllerBase
                 retentionDays = parsed;
         }
 
+        if (retentionDays <= 0)
+        {
+            return Ok(new {
+                deletedFiles = 0,
+                deletedReadings = 0,
+                freedMb = 0.0,
+                retentionDays,
+                message = "Hệ thống được cấu hình lưu trữ Mãi mãi. Không thực hiện dọn dẹp."
+            });
+        }
+
         var rootPath = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
         var mediaPath = Path.Combine(rootPath, "media");
 
@@ -132,11 +143,27 @@ public class StorageController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        _logger.LogInformation("[StorageCleanup] Đã xóa {Count} file, giải phóng {Mb:F1} MB (retention={Days} ngày)",
-            deletedFiles, freedBytes / 1_048_576.0, retentionDays);
+        // Xóa records SensorReadings cũ hơn cutoff
+        int deletedReadings = 0;
+        try
+        {
+            deletedReadings = await _db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM \"SensorReadings\" WHERE \"Time\" < {0}",
+                new object[] { cutoff }
+            );
+            _logger.LogInformation("[StorageCleanup] Đã dọn dẹp xong. Xóa thành công {Count} bản ghi SensorReadings cũ.", deletedReadings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StorageCleanup] Lỗi trong quá trình dọn dẹp dữ liệu SensorReadings");
+        }
+
+        _logger.LogInformation("[StorageCleanup] Đã xóa {Count} file, {Readings} bản ghi đo lường, giải phóng {Mb:F1} MB (retention={Days} ngày)",
+            deletedFiles, deletedReadings, freedBytes / 1_048_576.0, retentionDays);
 
         return Ok(new {
             deletedFiles,
+            deletedReadings,
             freedMb = Math.Round(freedBytes / 1_048_576.0, 1),
             retentionDays,
         });

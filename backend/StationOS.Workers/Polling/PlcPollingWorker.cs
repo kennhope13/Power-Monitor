@@ -97,9 +97,26 @@ public class PlcPollingWorker : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            // Giữ lại 30 ngày gần nhất (Thay vì 3 ngày để xem được lịch sử dài hơn)
-            var cutoff = DateTime.UtcNow.AddDays(-30);
-            _logger.LogInformation("[PLC] Đang dọn dẹp dữ liệu cũ trước {Time} (UTC)", cutoff);
+            var station = await db.Stations.OrderBy(s => s.CreatedAt).FirstOrDefaultAsync(ct);
+            int retentionDays = 30; // Mặc định 30 ngày
+
+            if (station != null)
+            {
+                var setting = await db.SystemSettings
+                    .FirstOrDefaultAsync(s => s.StationId == station.Id && s.Key == "video_retention_days", ct);
+                if (setting != null && int.TryParse(setting.Value.Trim('"'), out var parsed))
+                    retentionDays = parsed;
+            }
+
+            // Nếu cấu hình là Mãi mãi (-1 hoặc <= 0) thì bỏ qua không xóa dữ liệu
+            if (retentionDays <= 0)
+            {
+                _logger.LogInformation("[PLC] Chế độ lưu trữ Mãi mãi đang bật (retention={Days}). Bỏ qua tự động dọn dẹp.", retentionDays);
+                return;
+            }
+
+            var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+            _logger.LogInformation("[PLC] Đang dọn dẹp dữ liệu cũ trước {Time} (retention={Days} ngày)", cutoff, retentionDays);
 
             // Sử dụng SQL trực tiếp để xóa nhanh nhất mà không tải bản ghi vào RAM
             var deletedCount = await db.Database.ExecuteSqlRawAsync(
@@ -825,20 +842,7 @@ public class PlcPollingWorker : BackgroundService
             // Khi kết nối mạng phục hồi thành công (Chuyển đổi trạng thái từ offline sang online)
             if (oldStatus == "offline" && status == "online")
             {
-                // 1. Tự động xác nhận (Auto-Ack) toàn bộ cảnh báo đang mở của thiết bị này
-                var openAlerts = await db.Alerts
-                    .Where(a => a.DeviceId == device.Id && a.Status == "open")
-                    .ToListAsync();
-                
-                foreach (var alert in openAlerts)
-                {
-                    alert.Status = "acked";
-                    alert.AckedAt = DateTime.UtcNow;
-                    alert.AckNote = "Hệ thống tự động xác nhận (Auto-Ack) khi kết nối mạng với PLC được khôi phục thành công.";
-                    
-                    // Push cập nhật cảnh báo tới frontend ngay lập tức
-                    await notifier.SendAlertUpdatedAsync(alert);
-                }
+                // Không tự động xác nhận (Auto-Ack) cảnh báo của thiết bị khi kết nối lại để đảm bảo người vận hành phải xác nhận thủ công
 
                 // 2. Tự động hoàn thành (Auto-Complete) toàn bộ nhiệm vụ bảo trì đang chạy của thiết bị này
                 var activeTasks = await db.MaintenanceTasks
@@ -853,10 +857,10 @@ public class PlcPollingWorker : BackgroundService
                         + "[Auto-Resolve] Tự động hoàn thành nhiệm vụ bảo trì khi thiết bị trực tuyến (Online) trở lại.";
                 }
 
-                if (openAlerts.Any() || activeTasks.Any())
+                if (activeTasks.Any())
                 {
                     await db.SaveChangesAsync();
-                    Console.WriteLine($"[PLC Tự Động Phục Hồi] Đã tự động dọn dẹp {openAlerts.Count} cảnh báo mạng và hoàn thành {activeTasks.Count} nhiệm vụ bảo trì của tủ {device.Name} (ID: {device.Id}).");
+                    Console.WriteLine($"[PLC Tự Động Phục Hồi] Đã tự động hoàn thành {activeTasks.Count} nhiệm vụ bảo trì của tủ {device.Name} (ID: {device.Id}).");
                 }
             }
         }

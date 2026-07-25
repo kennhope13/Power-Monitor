@@ -66,6 +66,7 @@ class ThermalAnalyzer:
 
     last_point_temps:           dict[str, float]  = field(default_factory=dict, init=False, repr=False)
     last_zone_results:          dict[str, dict]   = field(default_factory=dict, init=False, repr=False)
+    last_measurement_at:        float             = field(default=0.0, init=False, repr=False)
     _last_history_save:         float             = field(default=0.0, init=False, repr=False)
     _last_jetson_push:          float             = field(default=0.0, init=False, repr=False)
     _last_matrix_fetch:         float             = field(default=0.0, init=False, repr=False)
@@ -221,6 +222,7 @@ class ThermalAnalyzer:
             if fetched_ok:
                 self._cached_point_temps = point_temps
                 self._cached_zone_results = zone_results
+                self.last_measurement_at = time.time()
                 await self._ingest_measurements(point_temps, zone_results)
             else:
                 point_temps = self._cached_point_temps
@@ -418,9 +420,10 @@ class ThermalAnalyzer:
             valid_ratio = physical.size / finite.size
             median = float(np.median(physical))
             p95 = float(np.percentile(physical, 95))
-            center_penalty = abs(median - 35.0) / 200.0
+            center_penalty = abs(median - 35.0) / 100.0
             high_penalty = max(0.0, p95 - 120.0) / 200.0
-            score = valid_ratio - center_penalty - high_penalty
+            normal_scene_bonus = 0.5 if 0.0 <= median <= 100.0 else 0.0
+            score = valid_ratio + normal_scene_bonus - center_penalty - high_penalty
 
             if score > best_score:
                 best_score = score

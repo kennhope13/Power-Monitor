@@ -261,6 +261,8 @@ public class RuleEvaluationWorker : BackgroundService
     {
         var deviceId = reading.DeviceId;
         var stateKey = $"{rule.Id}_{deviceId}".ToLower();
+        var targetDevice = await db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+        var deviceName = targetDevice?.Name ?? "Tủ điện";
 
         // ── Lấy alert đang open cho rule này và thiết bị này ──────────────────
         var openAlert = await db.Alerts
@@ -290,7 +292,37 @@ public class RuleEvaluationWorker : BackgroundService
         }
 
         if (!triggered) { _confirmCounts[stateKey] = 0; return; }
-        if (openAlert != null) return;
+        if (openAlert != null)
+        {
+            var currentTargetLevel = levelOverride ?? RuleEvaluator.ParseAlertLevel(rule.Actions);
+            // Nếu cảnh báo cũ đang là warning nhưng giá trị hiện tại đạt mức báo động (alarm/danger)
+            if (openAlert.Level == "warning" && (currentTargetLevel == "alarm" || currentTargetLevel == "danger"))
+            {
+                openAlert.Level = currentTargetLevel;
+                openAlert.Message = $"[{deviceName} - {rule.Name}] {pointId} = {currentValue:F1} {op} {threshold} (Nâng cấp lên Báo động)";
+                openAlert.Value = currentValue;
+                openAlert.TriggeredAt = DateTime.UtcNow;
+
+                db.AlertHistories.Add(new AlertHistory
+                {
+                    AlertId = openAlert.Id,
+                    Status  = "upgraded",
+                    Note    = $"Nâng cấp cấp độ lên {currentTargetLevel}: {openAlert.Message}",
+                });
+
+                await db.SaveChangesAsync(ct);
+
+                // Phát đi thông báo mới để kích hoạt popup báo động ở client
+                await _notifier.SendAlertAsync(new {
+                    id = openAlert.Id, level = openAlert.Level, status = openAlert.Status,
+                    message = openAlert.Message, value = openAlert.Value,
+                    source = openAlert.Source,
+                    triggeredAt = openAlert.TriggeredAt, ruleId = openAlert.RuleId, deviceId = openAlert.DeviceId,
+                    imageUrl = openAlert.ImageUrl, thumbnailUrl = openAlert.ThumbnailUrl, videoUrl = openAlert.VideoUrl,
+                });
+            }
+            return;
+        }
 
         if (_cooldownUntil.TryGetValue(stateKey, out var until) && DateTime.UtcNow < until)
         {
@@ -310,6 +342,27 @@ public class RuleEvaluationWorker : BackgroundService
         _confirmCounts[stateKey] = 0;
 
         var level = levelOverride ?? RuleEvaluator.ParseAlertLevel(rule.Actions);
+
+        // Tự động đóng các cảnh báo (warning) khác đang mở của cùng thiết bị này nếu đây là báo động (alarm)
+        if (level == "alarm" || level == "danger")
+        {
+            var openWarnings = await db.Alerts
+                .Where(a => a.DeviceId == deviceId && a.Status == "open" && a.Level == "warning")
+                .ToListAsync(ct);
+            foreach (var w in openWarnings)
+            {
+                w.Status = "closed";
+                w.ClosedAt = DateTime.UtcNow;
+                db.AlertHistories.Add(new AlertHistory
+                {
+                    AlertId = w.Id,
+                    Status  = "auto_closed",
+                    Note    = $"Tự động đóng do có báo động mới cấp độ cao hơn: {rule.Name}",
+                });
+                await _notifier.SendAlertUpdatedAsync(new { id = w.Id, status = w.Status, deviceId = w.DeviceId, level = w.Level });
+            }
+        }
+
         var alert = new Alert
         {
             StationId   = rule.StationId,
@@ -318,7 +371,7 @@ public class RuleEvaluationWorker : BackgroundService
             Source      = "rule_engine",
             Level       = level,
             Status      = "open",
-            Message     = $"[{rule.Name}] {pointId} = {currentValue:F1} {op} {threshold}",
+            Message     = $"[{deviceName} - {rule.Name}] {pointId} = {currentValue:F1} {op} {threshold}",
             Value       = currentValue,
             TriggeredAt = DateTime.UtcNow,
         };
@@ -445,6 +498,7 @@ public class RuleEvaluationWorker : BackgroundService
         await _notifier.SendAlertAsync(new {
             id = alert.Id, level = alert.Level, status = alert.Status,
             message = alert.Message, value = alert.Value,
+            source = alert.Source,
             triggeredAt = alert.TriggeredAt, ruleId = alert.RuleId, deviceId = alert.DeviceId,
             imageUrl = alert.ImageUrl, thumbnailUrl = alert.ThumbnailUrl, videoUrl = alert.VideoUrl,
         });

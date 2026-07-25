@@ -278,6 +278,79 @@ async def _get_thermal_client(camera_ip: str) -> httpx.AsyncClient:
         _thermal_clients[camera_ip] = httpx.AsyncClient(timeout=4.0)
     return _thermal_clients[camera_ip]
 
+
+def _extract_rule_temperatures(payload: object) -> dict[int, dict[str, float]]:
+    """Extract Hikvision rule temperatures across firmware JSON variants."""
+    result: dict[int, dict[str, float]] = {}
+
+    def visit(node: object) -> None:
+        if isinstance(node, dict):
+            rid = node.get("id") or node.get("ruleID") or node.get("ruleId")
+            max_t = node.get("maxTemperature", node.get("highestTempValue", node.get("TempValue")))
+            min_t = node.get("minTemperature", node.get("lowestTempValue", max_t))
+            avg_t = node.get("averageTemperature", node.get("averageTempValue", max_t))
+            try:
+                if rid is not None and max_t is not None:
+                    rid_int = int(rid)
+                    max_val = float(max_t)
+                    result[rid_int] = {
+                        "max": max_val,
+                        "min": float(min_t) if min_t is not None else max_val,
+                        "avg": float(avg_t) if avg_t is not None else max_val,
+                    }
+            except (TypeError, ValueError):
+                pass
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for index, value in enumerate(node, start=1):
+                # Firmware 5.5.62 returns the ordered rule list without an id.
+                # The list order follows the rule IDs configured in realTimeList.
+                if isinstance(value, dict):
+                    has_temperature = any(key in value for key in (
+                        "maxTemperature", "highestTempValue", "TempValue"
+                    ))
+                    has_id = any(key in value for key in ("id", "ruleID", "ruleId"))
+                    if has_temperature and not has_id:
+                        value = {"id": index, **value}
+                visit(value)
+
+    visit(payload)
+    return result
+
+
+async def _read_rule_temperatures(
+    camera_ip: str, username: str, password: str
+) -> tuple[dict[int, dict[str, float]], list[str]]:
+    """Read live temperatures using the modern API, then legacy firmware API."""
+    client = await _get_thermal_client(camera_ip)
+    statuses: list[str] = []
+    for ch in (2, 1):
+        paths = (
+            f"/ISAPI/Thermal/channels/{ch}/thermometry/1/rulesTemperatureInfo?format=json",
+            f"/ISAPI/Thermal/channels/{ch}/thermometry/realTimethermometry/rules?format=json",
+        )
+        for path in paths:
+            try:
+                response = await client.get(
+                    f"http://{camera_ip}{path}",
+                    auth=httpx.DigestAuth(username, password),
+                    headers={"Accept": "application/json", "Connection": "keep-alive"},
+                )
+                statuses.append(f"ch{ch}:{path.rsplit('/', 1)[-1]}={response.status_code}")
+                if response.status_code != 200:
+                    continue
+                payload = response.json()
+                # Hikvision sometimes reports an ISAPI error inside HTTP 200.
+                if isinstance(payload, dict) and payload.get("statusCode") not in (None, 1):
+                    continue
+                temperatures = _extract_rule_temperatures(payload)
+                if temperatures:
+                    return temperatures, statuses
+            except (httpx.HTTPError, ValueError) as exc:
+                statuses.append(f"ch{ch}:{type(exc).__name__}")
+    return {}, statuses
+
 async def _read_matrix_cached(camera_ip: str, username: str, password: str):
     now = _time.time()
     cached = _thermal_matrix_cache.get(camera_ip)
@@ -328,12 +401,48 @@ async def _read_matrix_cached(camera_ip: str, username: str, password: str):
                     hend = part.find(b"\r\n\r\n")
                     if hend != -1:
                         raw = part[hend+4:][:data_len]
-                        if len(raw) >= w * h * 2:
-                            matrix = (np.frombuffer(raw[:w*h*2], dtype='>i2').reshape(h, w) / 100.0).copy()
-                            bad = ~np.isfinite(matrix) | (matrix < -50) | (matrix > 500)
+                        pixels = w * h
+                        candidates = []
+                        if len(raw) >= pixels * 4:
+                            chunk4 = raw[:pixels * 4]
+                            candidates.extend([
+                                np.frombuffer(chunk4, dtype='<f4').astype(np.float32),
+                                np.frombuffer(chunk4, dtype='>f4').astype(np.float32),
+                                np.frombuffer(chunk4, dtype='<i4').astype(np.float32) / 100.0,
+                                np.frombuffer(chunk4, dtype='>i4').astype(np.float32) / 100.0,
+                            ])
+                        if len(raw) >= pixels * 2:
+                            chunk2 = raw[:pixels * 2]
+                            candidates.extend([
+                                np.frombuffer(chunk2, dtype='<i2').astype(np.float32) / 100.0,
+                                np.frombuffer(chunk2, dtype='>i2').astype(np.float32) / 100.0,
+                            ])
+
+                        # Hikvision models differ in endian/word size. Select the
+                        # decode whose scene statistics look like real thermometry,
+                        # instead of always treating the payload as big-endian i16.
+                        best_matrix = None
+                        best_score = float('-inf')
+                        for candidate in candidates:
+                            if candidate.size != pixels:
+                                continue
+                            finite = candidate[np.isfinite(candidate)]
+                            physical = finite[(finite >= -40.0) & (finite <= 200.0)]
+                            if physical.size < pixels * 0.90:
+                                continue
+                            median = float(np.median(physical))
+                            valid_ratio = physical.size / pixels
+                            normal_scene_bonus = 0.5 if 0.0 <= median <= 100.0 else 0.0
+                            score = valid_ratio + normal_scene_bonus - abs(median - 30.0) / 100.0
+                            if score > best_score:
+                                best_score = score
+                                best_matrix = candidate.reshape(h, w).copy()
+
+                        if best_matrix is not None:
+                            bad = ~np.isfinite(best_matrix) | (best_matrix < -40) | (best_matrix > 200)
                             if bad.any():
-                                matrix[bad] = np.nan
-                            result = {"matrix": matrix, "w": w, "h": h, "mapping": mapping, "ts": now}
+                                best_matrix[bad] = np.nan
+                            result = {"matrix": best_matrix, "w": w, "h": h, "mapping": mapping, "ts": now}
                             _thermal_matrix_cache[camera_ip] = result
                             return result
         except Exception:
@@ -366,6 +475,50 @@ async def thermal_query_temps(body: ThermalQueryBody):
     Gọi bởi Backend proxy — không expose trực tiếp ra Frontend.
     """
     import numpy as np
+
+    # Prefer the camera's calibrated rule result when a point/ROI ID directly
+    # names that rule (D1/P1/Z1/1). This is more accurate than sampling the raw
+    # matrix and supports older firmware that omits ruleID in its JSON.
+    rules_temp, _ = await _read_rule_temperatures(
+        body.camera_ip, body.username, body.password
+    )
+    if rules_temp:
+        import re
+
+        def configured_rule_id(value: str) -> int | None:
+            match = re.fullmatch(r"[DPZ]?(\d+)", value.strip(), re.IGNORECASE)
+            return int(match.group(1)) if match else None
+
+        direct_temps = []
+        all_points_matched = True
+        for pt in body.points:
+            rid = configured_rule_id(pt.id)
+            reading = rules_temp.get(rid) if rid is not None else None
+            direct_temps.append({"id": pt.id, "temp": reading["max"] if reading else None})
+            all_points_matched = all_points_matched and reading is not None
+
+        direct_rois = []
+        all_rois_matched = True
+        for roi in body.rois:
+            rid = configured_rule_id(roi.id)
+            reading = rules_temp.get(rid) if rid is not None else None
+            direct_rois.append({
+                "id": roi.id,
+                "max": reading["max"] if reading else None,
+                "min": reading["min"] if reading else None,
+                "avg": reading["avg"] if reading else None,
+            })
+            all_rois_matched = all_rois_matched and reading is not None
+
+        if all_points_matched and all_rois_matched:
+            return {
+                "temps": direct_temps,
+                "rois": direct_rois,
+                "mapping": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+                "source": "rules",
+                "available": True,
+            }
+
     data = await _read_matrix_cached(body.camera_ip, body.username, body.password)
     if data is None:
         # Fallback to rulesTemperatureInfo if raw matrix is not available (e.g. Hikvision camera 152)
@@ -394,18 +547,17 @@ async def thermal_query_temps(body: ThermalQueryBody):
                                     name_val = child.text
                                 elif child_tag == "type":
                                     rtype = child.text
-                                elif child_tag == "Point":
-                                    for cc in child.findall(".//CalibratingCoordinates"):
-                                        px_elem = cc.find("positionX")
-                                        py_elem = cc.find("positionY")
-                                        if px_elem is not None and py_elem is not None:
-                                            coords.append((float(px_elem.text)/1000.0, float(py_elem.text)/1000.0))
-                                elif child_tag == "Region":
-                                    for rc in child.findall(".//RegionCoordinates"):
-                                        px_elem = rc.find("positionX")
-                                        py_elem = rc.find("positionY")
-                                        if px_elem is not None and py_elem is not None:
-                                            coords.append((float(px_elem.text)/1000.0, float(py_elem.text)/1000.0))
+                                elif child_tag in ("Point", "Region"):
+                                    # ElementTree find/findall without a namespace never
+                                    # matches Hikvision's default XML namespace.
+                                    x_val = None
+                                    for coord in child.iter():
+                                        coord_tag = coord.tag.split("}")[-1]
+                                        if coord_tag == "positionX":
+                                            x_val = float(coord.text) / 1000.0
+                                        elif coord_tag == "positionY" and x_val is not None:
+                                            coords.append((x_val, float(coord.text) / 1000.0))
+                                            x_val = None
                             if rid is not None:
                                 mapping_rules[rid] = {
                                     "id": rid,
@@ -415,25 +567,15 @@ async def thermal_query_temps(body: ThermalQueryBody):
                                 }
                     break
 
-            rules_temp = {}
-            for ch in [2, 1]:
-                url_temp = f"http://{body.camera_ip}/ISAPI/Thermal/channels/{ch}/thermometry/1/rulesTemperatureInfo?format=json"
-                resp_temp = await client.get(url_temp, auth=httpx.DigestAuth(body.username, body.password))
-                if resp_temp.status_code == 200:
-                    temp_data = resp_temp.json()
-                    rules_info = temp_data.get("ThermometryRulesTemperatureInfoList", {}).get("ThermometryRulesTemperatureInfo", [])
-                    for rule in rules_info:
-                        rid = rule.get("id")
-                        max_t = rule.get("maxTemperature")
-                        min_t = rule.get("minTemperature")
-                        avg_t = rule.get("averageTemperature")
-                        if rid is not None and max_t is not None:
-                            rules_temp[rid] = {
-                                "max": float(max_t),
-                                "min": float(min_t) if min_t is not None else float(max_t),
-                                "avg": float(avg_t) if avg_t is not None else float(max_t),
-                            }
-                    break
+            rules_temp, rule_statuses = await _read_rule_temperatures(
+                body.camera_ip, body.username, body.password
+            )
+            if not rules_temp:
+                logger.warning(
+                    "[Routes] Camera %s returned no live rule temperatures (%s)",
+                    body.camera_ip,
+                    ", ".join(rule_statuses),
+                )
 
             temps = []
             for pt in body.points:
@@ -474,7 +616,14 @@ async def thermal_query_temps(body: ThermalQueryBody):
                 else:
                     rois.append({"id": roi.id, "max": None, "min": None, "avg": None})
 
-            return {"temps": temps, "rois": rois, "mapping": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}}
+            return {
+                "temps": temps,
+                "rois": rois,
+                "mapping": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+                "source": "rules",
+                "available": bool(rules_temp),
+                "diagnostics": rule_statuses if not rules_temp else [],
+            }
 
         except Exception as e:
             logger.error("[Routes] Fallback query-temps error: %s", e)
@@ -602,6 +751,12 @@ async def receive_prediction(data: dict = None, request: Request = None):
             
     logger.info("[Prediction] Received raw prediction payload: %s", data)
     prediction_payload = (data or {}).get("prediction", data or {})
+
+    envelope = data or {}
+    stream_id = envelope.get("stream_id") or prediction_payload.get("stream_id")
+    camera_ip = envelope.get("camera_ip") or prediction_payload.get("camera_ip")
+    device_id = envelope.get("device_id") or prediction_payload.get("device_id")
+    camera_id = get_camera_identifier(stream_id=stream_id, camera_ip=camera_ip, device_id=device_id)
     
     # Flatten "points" array if present in the payload
     if "points" in prediction_payload and isinstance(prediction_payload["points"], list):
@@ -628,7 +783,7 @@ async def receive_prediction(data: dict = None, request: Request = None):
             forecast_ts = ts_now
             
     # 3. Load active targets
-    config = load_or_create_model_config()
+    config = load_or_create_model_config(stream_id=stream_id, camera_ip=camera_ip, device_id=device_id)
     targets = config.get("targets", ["ID_1", "ID_2", "ID_3", "ID_4", "ID_5", "ID_6"])
     
     # Collect name-to-ID mapping from active analyzers
@@ -709,11 +864,14 @@ async def receive_prediction(data: dict = None, request: Request = None):
         pred_dict[f"{t}_pred"] = pred_val
 
     # 5. Save the prediction to both new system files
-    merged_pred = save_prediction(pred_dict, targets)
-    append_prediction_history(merged_pred, targets)
+    merged_pred = save_prediction(pred_dict, targets, camera_id=camera_id)
+    append_prediction_history(merged_pred, targets, camera_id=camera_id)
     
     # Update AI status timestamp
     _model_status["last_updated"] = ts_now
+    _model_status["last_jetson_update"] = ts_now
+    _model_status["jetson_connected"] = True
+    _jetson_updates[camera_id] = ts_now
     
     # 6. Legacy code backward-compatibility write
     points_map = {}
@@ -1221,8 +1379,11 @@ MODEL_CONFIG_FILE = "model/config.json"
 # Trạng thái huấn luyện ngầm
 _model_status = {
     "status": "Idle",  # "Idle" hoặc "Training..."
-    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    "last_updated": "Chưa nhận dữ liệu từ Jetson",
+    "jetson_connected": False,
+    "last_jetson_update": None,
 }
+_jetson_updates: dict[str, str] = {}
 
 def load_or_create_model_config(stream_id: str = None, camera_ip: str = None, device_id: str = None):
     os.makedirs("model", exist_ok=True)
@@ -1605,8 +1766,23 @@ async def update_model_config(body: dict, background_tasks: BackgroundTasks):
     return {"success": True, "message": "Đã lưu cấu hình, đang bắt đầu huấn luyện lại...", "config": config}
 
 @router.get("/api/training-status")
-async def get_training_status():
-    return _model_status
+async def get_training_status(stream_id: str = None, camera_ip: str = None, device_id: str = None):
+    if device_id:
+        await ensure_thermal_analyzer_started(device_id)
+    result = dict(_model_status)
+    camera_id = get_camera_identifier(stream_id=stream_id, camera_ip=camera_ip, device_id=device_id)
+    last_update = _jetson_updates.get(camera_id)
+    result["last_jetson_update"] = last_update
+    result["last_updated"] = last_update or "Chưa nhận dữ liệu từ Jetson"
+    if last_update:
+        try:
+            last_dt = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+            result["jetson_connected"] = datetime.now() - last_dt <= timedelta(minutes=6, seconds=30)
+        except Exception:
+            result["jetson_connected"] = False
+    else:
+        result["jetson_connected"] = False
+    return result
 
 @router.post("/api/retrain")
 async def trigger_retrain(background_tasks: BackgroundTasks):
@@ -1697,6 +1873,10 @@ async def get_prediction_history(
                     analyzers_to_check = _thermal_analyzers
 
                 for analyzer in analyzers_to_check.values():
+                    # Cache cũ không phải dữ liệu LIVE. Camera mất kết nối thì để
+                    # trống thay vì tiếp tục hiển thị nhiệt độ cuối cùng.
+                    if time.time() - getattr(analyzer, "last_measurement_at", 0.0) > 10.0:
+                        continue
                     for pt in getattr(analyzer, "points", []):
                         name = pt.label or pt.id
                         temp = analyzer.last_point_temps.get(pt.id)

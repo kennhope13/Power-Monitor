@@ -1,25 +1,8 @@
 {
   "targets": [
-    "\u0110i\u1ec3m 1",
-    "\u0110i\u1ec3m 2",
-    "\u0110i\u1ec3m 3",
-    "V\u00f9ng 1"
+    "Điểm 1",
+    "Điểm 2"
   ],
   "window_size": 30,
-  "horizon": 5,
-  "devices": {
-    "192.168.10.152": [
-      "\u0110i\u1ec3m 1",
-      "\u0110i\u1ec3m 2",
-      "\u0110i\u1ec3m 3",
-      "\u0110i\u1ec3m 4",
-      "V\u00f9ng 1"
-    ],
-    "192.168.10.120": [
-      "\u0110i\u1ec3m 1",
-      "\u0110i\u1ec3m 2",
-      "\u0110i\u1ec3m 3",
-      "V\u00f9ng 1"
-    ]
-  }
+  "horizon": 5
 }

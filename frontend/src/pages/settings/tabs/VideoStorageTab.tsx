@@ -8,6 +8,7 @@ const RETENTION_OPTIONS = [
   { value: '30', label: '30 ngày', desc: 'Tiết kiệm ổ đĩa, phù hợp trạm ít sự cố' },
   { value: '60', label: '60 ngày', desc: 'Cân bằng giữa lưu trữ và dung lượng' },
   { value: '90', label: '90 ngày', desc: 'Lưu trữ lâu hơn, cần nhiều dung lượng hơn' },
+  { value: '-1', label: 'Mãi mãi', desc: 'Lưu trữ vĩnh viễn, không tự động xóa dữ liệu' },
 ];
 
 interface StorageInfo {
@@ -25,7 +26,7 @@ export default function VideoStorageTab() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
-  const [cleanResult, setCleanResult] = useState<{ deletedFiles: number; freedMb: number } | null>(null);
+  const [cleanResult, setCleanResult] = useState<{ deletedFiles: number; deletedReadings?: number; freedMb: number } | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -80,8 +81,12 @@ export default function VideoStorageTab() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      setCleanResult({ deletedFiles: data.deletedFiles ?? 0, freedMb: data.freedMb ?? 0 });
-      showToast(`Đã xóa ${data.deletedFiles} file, giải phóng ${data.freedMb?.toFixed(1)} MB`, 'success');
+      setCleanResult({ 
+        deletedFiles: data.deletedFiles ?? 0, 
+        deletedReadings: data.deletedReadings ?? 0, 
+        freedMb: data.freedMb ?? 0 
+      });
+      showToast(`Đã xóa ${data.deletedFiles} file và ${data.deletedReadings ?? 0} bản ghi đo lường, giải phóng ${data.freedMb?.toFixed(1)} MB`, 'success');
       await loadSettings(); // Refresh storage info
     } catch (e: any) {
       showToast(`Lỗi dọn dẹp: ${e.message || e}`, 'error');
@@ -224,22 +229,26 @@ export default function VideoStorageTab() {
             </div>
 
             <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>
-              Xóa ngay các file bằng chứng đã quá <strong style={{ color: 'var(--admin-text)' }}>{retentionDays} ngày</strong> để giải phóng dung lượng.
+              {retentionDays === '-1' ? (
+                <span>Hệ thống đang được cấu hình lưu trữ <strong style={{ color: 'var(--admin-text)' }}>Mãi mãi</strong>. Không thể dọn dẹp theo thời gian.</span>
+              ) : (
+                <span>Xóa ngay các file bằng chứng và dữ liệu đo lường đã quá <strong style={{ color: 'var(--admin-text)' }}>{retentionDays} ngày</strong> để giải phóng dung lượng.</span>
+              )}
             </div>
 
             {cleanResult && (
               <div style={{ background: 'color-mix(in srgb, var(--admin-success) 12%, transparent)', border: '1px solid var(--admin-success)', padding: '8px 12px', fontSize: '0.72rem', color: 'var(--admin-success)', fontWeight: 700 }}>
-                ✓ Đã xóa {cleanResult.deletedFiles} file — giải phóng {cleanResult.freedMb.toFixed(1)} MB
+                ✓ Đã dọn dẹp xong. Xóa thành công {cleanResult.deletedFiles} file và {cleanResult.deletedReadings ?? 0} bản ghi đo lường cũ.
               </div>
             )}
 
             <button
               className="btn-industrial btn-danger"
-              style={{ fontSize: '0.72rem', fontWeight: 800, padding: '8px 16px', opacity: cleaning ? 0.6 : 1 }}
+              style={{ fontSize: '0.72rem', fontWeight: 800, padding: '8px 16px', opacity: cleaning || retentionDays === '-1' ? 0.5 : 1 }}
               onClick={handleCleanup}
-              disabled={cleaning}
+              disabled={cleaning || retentionDays === '-1'}
             >
-              {cleaning ? 'ĐANG XÓA...' : `XÓA FILE CŨ HƠN ${retentionDays} NGÀY NGAY BÂY`}
+              {cleaning ? 'ĐANG XÓA...' : retentionDays === '-1' ? 'KHÔNG KHẢ DỤNG' : `XÓA DỮ LIỆU CŨ HƠN ${retentionDays} NGÀY NGAY BÂY`}
             </button>
           </div>
 

@@ -28,7 +28,7 @@ const naturalSort = (a: string, b: string) => {
 export default function ThermalForecastTab({ fromDate, toDate, registerExport }: ThermalForecastTabProps) {
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<any>(null);
-  const [modelStatus, setModelStatus] = useState({ status: 'Idle', last_updated: 'Đang cập nhật...' });
+  const [modelStatus, setModelStatus] = useState({ status: 'Idle', last_updated: 'Chưa nhận dữ liệu từ Jetson', jetson_connected: false });
   const [targets, setTargets] = useState<string[]>([]);
   const [historyData, setHistoryData] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,6 +116,7 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
   }, [historyData, visibleTargets]);
 
   const forecastTime = useMemo(() => {
+    if (!modelStatus.jetson_connected) return null;
     if (historyData.length === 0 || visibleTargets.length === 0) return null;
     // Tìm mốc thời gian của dự báo mới nhất có dữ liệu (quét từ cuối lên)
     for (let i = historyData.length - 1; i >= 0; i--) {
@@ -128,7 +129,7 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
       }
     }
     return null;
-  }, [historyData, visibleTargets]);
+  }, [historyData, visibleTargets, modelStatus.jetson_connected]);
 
   const buildDateList = (from: string, to: string) => {
     if (!from || !to) return [new Date().toISOString().split('T')[0] || ''];
@@ -149,7 +150,7 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
       if (showChartSpinner) setChartLoading(true);
       const devId = selectedCamera?.id || '';
       const [statusResp, configResp] = await Promise.all([
-        fetch(`${AI_ENGINE_URL}/api/training-status`),
+        fetch(`${AI_ENGINE_URL}/api/training-status?device_id=${devId}`),
         fetch(`${AI_ENGINE_URL}/api/config?device_id=${devId}`)
       ]);
       const statusData = await statusResp.json();
@@ -243,6 +244,14 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
   }, []);
 
   useEffect(() => {
+    setTargets([]);
+    setHistoryData([]);
+    setRoiPoints([]);
+    setBoundaries([]);
+    setActiveFilters({});
+  }, [selectedCamera?.id]);
+
+  useEffect(() => {
     updateStatusAndHistory(true);
     const timer = setInterval(() => { updateStatusAndHistory(false); }, 10000);
     return () => clearInterval(timer);
@@ -303,7 +312,7 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
         spanGaps: true, 
       });
 
-      if (!isOutdoorThermalCamera) {
+      if (!isOutdoorThermalCamera && modelStatus.jetson_connected) {
         datasets.push({
           label: `${target} (Dự báo)`, 
           data: historyData.map(h => h[`${target}_pred`]), 
@@ -347,7 +356,7 @@ export default function ThermalForecastTab({ fromDate, toDate, registerExport }:
       plugins: [currentLinePlugin]
     });
     return () => chartInst.current?.destroy();
-  }, [historyData, visibleTargets, activeFilters]);
+  }, [historyData, visibleTargets, activeFilters, isOutdoorThermalCamera, modelStatus.jetson_connected]);
 
   const latestReadings = useMemo(() => {
     if (historyData.length === 0 || visibleTargets.length === 0) return {};
@@ -375,7 +384,7 @@ visibleTargets.forEach(t => {
     if (item && item[`${t}_pred`] != null && item[`${t}_pred`] !== '') {
       // Chỉ chấp nhận nếu dự báo nằm ở tương lai hoặc không cũ quá 10 phút so với thời điểm hiện tại
       if (i >= currentIdx - 10) {
-        predVal = Number(item[`${t}_pred`]);
+        if (modelStatus.jetson_connected) predVal = Number(item[`${t}_pred`]);
       }
       break;
     }
@@ -397,7 +406,7 @@ visibleTargets.forEach(t => {
     });
 
     return aliasedReadings;
-  }, [historyData, visibleTargets, roiPoints, boundaries]);
+  }, [historyData, visibleTargets, roiPoints, boundaries, modelStatus.jetson_connected]);
 
   useEffect(() => {
     if (!registerExport) return;
@@ -492,7 +501,7 @@ visibleTargets.forEach(t => {
                   <iframe src={`/camera-stream.html?src=${encodeURIComponent(thSrc)}&mode=webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`} style={{ width: '100%', height: '100%', border: 'none' }} />
                   <div style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }}>
                     {boundaries.map(b => {
-                      const r = latestReadings[b.name]; if (!r) return null;
+                      const r = latestReadings[b.name] || { actual: 0, hasActual: false, pred: 0, hasPred: false };
                       let pts = []; try { pts = JSON.parse(b.polygon); } catch { return null; }
                       if (pts.length < 2) return null;
                       const x1 = Math.min(...pts.map((p: any) => p[0])), y1 = Math.min(...pts.map((p: any) => p[1]));
@@ -506,7 +515,7 @@ visibleTargets.forEach(t => {
                           <div style={{ position: 'absolute', left: `${cx * 100}%`, top: `${cy * 100}%`, transform: 'translate(-50%, -50%)', background: 'rgba(0,0,0,0.8)', padding: '2px 6px', borderRadius: 2, color: '#fff', fontSize: 9, whiteSpace: 'nowrap', display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 12 }}>
                             <span style={{ fontWeight: 800, fontSize: 8, opacity: 0.8 }}>{b.name.replace(/Vùng\s*/gi, 'V').replace(/Zone\s*/gi, 'V')}</span>
                             <span style={{ fontWeight: 900, color }}>
-                              {r.actual.toFixed(1)}°
+                              {r.hasActual ? `${r.actual.toFixed(1)}°` : '--'}
                               {!isOutdoorThermalCamera && (
                                 <> / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></>
                               )}
@@ -516,7 +525,7 @@ visibleTargets.forEach(t => {
                       );
                     })}
                     {roiPoints.map(p => {
-                      const r = latestReadings[p.name] || latestReadings[p.pointId]; if (!r) return null;
+                      const r = latestReadings[p.name] || latestReadings[p.pointId] || { actual: 0, hasActual: false, pred: 0, hasPred: false };
                       const temp = r.hasActual ? r.actual : 0; const color = temp >= 70 ? '#EF4444' : temp >= 50 ? '#F59E0B' : '#10B981';
                       return (
                         <div key={p.id} style={{ position: 'absolute', left: `${p.tx * 100}%`, top: `${p.ty * 100}%`, transform: 'translate(-50%, -50%)' }}>
@@ -524,7 +533,7 @@ visibleTargets.forEach(t => {
                           <div style={{ position: 'absolute', left: 10, top: -10, background: 'rgba(0,0,0,0.75)', padding: '2px 5px', borderRadius: 0, display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap' }}>
                              <span style={{ fontSize: 8, color: 'var(--admin-text-muted)', fontWeight: 700 }}>{formatPointLabel(p.pointId || p.name || '')}</span>
                              <span style={{ fontSize: 10, fontWeight: 800, color }}>
-                               {r.actual.toFixed(1)}°
+                               {r.hasActual ? `${r.actual.toFixed(1)}°` : '--'}
                                {!isOutdoorThermalCamera && (
                                  <> / <span style={{ color: 'var(--admin-accent)' }}>{r.hasPred ? `${r.pred.toFixed(1)}°` : '---'}</span></>
                                )}
@@ -636,7 +645,7 @@ visibleTargets.forEach(t => {
             </div>
           </div>
           <div style={{ background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 0, padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div><div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>TRẠNG THÁI HỆ THỐNG AI</div><div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}><span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--admin-text)' }}>{modelStatus.status === 'Training' ? 'ĐANG TỰ HỌC (TRAINING)' : 'ĐANG GIÁM SÁT & DỰ BÁO'}</span><div style={{ width: 8, height: 8, borderRadius: '50%', background: modelStatus.status === 'Training' ? 'var(--admin-warning)' : 'var(--admin-success)', animation: 'pulse 2s infinite' }} /></div></div>
+            <div><div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '.8px' }}>TRẠNG THÁI HỆ THỐNG AI</div><div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}><span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--admin-text)' }}>{modelStatus.status === 'Training' ? 'ĐANG TỰ HỌC (TRAINING)' : modelStatus.jetson_connected ? 'ĐANG GIÁM SÁT & DỰ BÁO' : 'JETSON TẠM THỜI MẤT KẾT NỐI'}</span><div style={{ width: 8, height: 8, borderRadius: '50%', background: modelStatus.status === 'Training' ? 'var(--admin-warning)' : modelStatus.jetson_connected ? 'var(--admin-success)' : 'var(--admin-danger, #EF4444)', animation: modelStatus.jetson_connected ? 'pulse 2s infinite' : 'none' }} /></div></div>
             <div style={{ textAlign: 'right' }}><div style={{ fontSize: '.58rem', fontWeight: 800, color: 'var(--admin-text-muted)', textTransform: 'uppercase' }}>CẬP NHẬT LẦN CUỐI</div><div style={{ fontSize: '.85rem', fontWeight: 700, color: 'var(--admin-text)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>{modelStatus.last_updated}</div></div>
           </div>
         </div>
