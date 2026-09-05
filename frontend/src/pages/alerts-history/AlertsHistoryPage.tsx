@@ -449,11 +449,44 @@ export default function AlertsHistoryPage() {
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `alerts_${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
-  const exportXlsx = () => {
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    ws['!cols'] = exportHeaders.map((header) => {
-      const values = exportRows.map(row => String((row as Record<string, unknown>)[header] ?? ''));
-      const maxLen = Math.max(header.length, ...values.map(v => v.length));
+  const fetchAllForExport = async () => {
+    try {
+      setLoading(true);
+      const res = await stationApi.getAlerts(
+        filterStatus || undefined,
+        startDate ? new Date(startDate + 'T00:00:00').toISOString() : undefined,
+        endDate ? new Date(endDate + 'T23:59:59').toISOString() : undefined,
+        100000
+      );
+      
+      // getAlerts returns AlertItem[], not { items: AlertItem[] }
+      const items = Array.isArray(res) ? res : ((res as any).items || []);
+      
+      return items.map((a: any, idx: number) => ({
+        STT: idx + 1,
+        'Thời gian': fmtDateTime(a.triggeredAt),
+        'Trạm': a.stationName || a.stationId || '',
+        'Thiết bị': devices.find(d => d.id.toLowerCase() === (a.deviceId || '').toLowerCase())?.name || a.deviceId || '',
+        'Nguồn': a.source || '',
+        'Mức độ': alertLevelLabel(a.level || ''),
+        'Trạng thái': alertStatusLabel(a.status || ''),
+        'Điểm': a.pointId || '',
+        'Giá trị': a.value ?? '',
+        'Nội dung': a.message || '',
+      }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportXlsx = async () => {
+    const fullRows = await fetchAllForExport();
+    if (!fullRows.length) return;
+    const headers = Object.keys(fullRows[0]);
+    const ws = XLSX.utils.json_to_sheet(fullRows);
+    ws['!cols'] = headers.map((header) => {
+      const values = fullRows.map((row: any) => String((row as Record<string, unknown>)[header] ?? ''));
+      const maxLen = Math.max(header.length, ...values.map((v: any) => v.length));
       return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
     });
     const wb = XLSX.utils.book_new();
@@ -461,7 +494,10 @@ export default function AlertsHistoryPage() {
     XLSX.writeFile(wb, `alerts_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const exportPdf = () => {
+  const exportPdf = async () => {
+    const fullRows = await fetchAllForExport();
+    if (!fullRows.length) return;
+    const headers = Object.keys(fullRows[0]);
     const dateStr = new Date().toISOString().slice(0, 10);
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nhật ký cảnh báo</title>
 <style>
@@ -475,9 +511,9 @@ export default function AlertsHistoryPage() {
   @page{size:A4 landscape;margin:12mm}
 </style></head><body>
 <h1>NHẬT KÝ CẢNH BÁO</h1>
-<div class="sub">Xuất ngày ${dateStr} — Tổng: ${exportRows.length} bản ghi</div>
-<table><thead><tr>${exportHeaders.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-<tbody>${exportRows.map(row => `<tr>${exportHeaders.map(h => `<td>${(row as Record<string,unknown>)[h] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
+<div class="sub">Xuất ngày ${dateStr} — Tổng: ${fullRows.length} bản ghi</div>
+<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${fullRows.map((row: any) => `<tr>${headers.map(h => `<td>${(row as Record<string,unknown>)[h] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody>
 </table></body></html>`;
     const win = window.open('', '_blank');
     if (win) { win.document.write(html); win.document.close(); win.focus(); win.print(); }
@@ -587,7 +623,7 @@ export default function AlertsHistoryPage() {
                 <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportXlsx(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
                   <FileSpreadsheet size={14} /> Xuất XLSX
                 </button>
-                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportCsv(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
+                <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportCsvServer(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>
                   <FileText size={14} /> Xuất CSV
                 </button>
                 <button type="button" onClick={() => { setDownloadDropdownOpen(false); exportPdf(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--admin-text)', fontSize: 12, textAlign: 'left', cursor: 'pointer' }}>

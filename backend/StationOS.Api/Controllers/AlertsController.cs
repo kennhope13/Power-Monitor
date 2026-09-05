@@ -313,15 +313,42 @@ public class AlertsController : ControllerBase
             .ToDictionaryAsync(d => d.Id, d => d.Name);
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("Id,Source,Level,Status,Message,Value,Device,TriggeredAt,AckedAt,ClosedAt");
+        sb.AppendLine("STT,Thời gian,Trạm,Thiết bị,Nguồn,Mức độ,Trạng thái,Điểm,Giá trị,Nội dung");
+        
+        int stt = 1;
         foreach (var a in alerts)
         {
             var devName = a.DeviceId.HasValue && deviceNames.TryGetValue(a.DeviceId.Value, out var n) ? n : "";
+            
+            // Map labels to match frontend
+            var levelStr = a.Level?.ToLower() switch { 
+                "alarm" => "Báo động", 
+                "warning" => "Cảnh báo", 
+                "info" => "Thông tin", 
+                _ => a.Level 
+            };
+            
+            var statusStr = a.Status?.ToLower() switch { 
+                "open" => "Chưa xử lý", 
+                "acked" => "Đang xử lý", 
+                "closed" => "Đã xử lý", 
+                _ => a.Status 
+            };
+            
+            var timeStr = a.TriggeredAt.ToString("dd/MM/yyyy HH:mm:ss");
+
             sb.AppendLine(string.Join(",",
-                a.Id, Esc(a.Source), Esc(a.Level), Esc(a.Status),
-                Esc(a.Message), a.Value?.ToString("F2") ?? "",
-                Esc(devName), a.TriggeredAt.ToString("O"),
-                a.AckedAt?.ToString("O") ?? "", a.ClosedAt?.ToString("O") ?? ""));
+                stt++,
+                Esc(timeStr),
+                Esc(a.StationId.ToString()),
+                Esc(devName),
+                Esc(a.Source ?? ""),
+                Esc(levelStr ?? ""),
+                Esc(statusStr ?? ""),
+                Esc(a.PointId ?? ""),
+                Esc(a.Value?.ToString("F2") ?? ""),
+                Esc(a.Message ?? "")
+            ));
         }
 
         var bytes = System.Text.Encoding.UTF8.GetPreamble()
